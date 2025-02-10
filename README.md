@@ -10,7 +10,6 @@ Repository: [https://github.com/icewall905/ollama-playlist-generator](https://gi
 - **Ollama Integration**: Leverages the Ollama language model (e.g. `deepseek-r1:8b`) to generate song suggestions.
 - **Navidrome Integration**: Searches for tracks using the Navidrome API.
 - **Dynamic Configuration**: Update configuration (such as API URLs, model, context window, maximum retry attempts) via the web interface. Changes are saved immediately and re-read on every generate request.
-- **Chain-of-Thought Debugging**: Optionally displays the raw response from Ollama (including chain-of-thought content) before cleaning.
 
 ## Requirements
 
