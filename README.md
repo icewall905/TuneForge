@@ -75,6 +75,7 @@ nohup python3 generator.py web &
 Or run it with a process manager like `systemd` or `supervisord`.
 
 Example systemd:
+'''
 [Unit]
 Description=Playlist Generator Web Service
 After=network.target
@@ -88,6 +89,7 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
+'''
 
 ## Troubleshooting
 - If the server fails to start, ensure `setup.conf` is correctly configured.
