@@ -6,7 +6,7 @@ import requests
 from flask import Flask, request, render_template_string, jsonify, Response
 
 # --- Global Debug Flag ---
-DEBUG_OLLAMA_RESPONSE = True  # Set to True to print prompt and raw responses from Ollama
+DEBUG_OLLAMA_RESPONSE = False  # Set to True to print prompt and raw responses from Ollama
 
 # --- Define Templates at the Top ---
 HOME_TEMPLATE = """
