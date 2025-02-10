@@ -18,6 +18,11 @@ Repository: [https://github.com/icewall905/ollama-playlist-generator](https://gi
 - Flask
 - Requests
 
+**Also**:
+
+- A running Ollama server. (And some model to suggest tracks.)
+- A running Navidrome server.
+
 ## Installation
 
 1. **Clone the Repository**:
