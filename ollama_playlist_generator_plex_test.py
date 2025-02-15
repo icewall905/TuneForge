@@ -14,7 +14,7 @@ HOME_TEMPLATE = """
 <!doctype html>
 <html>
 <head>
-  <title>Playlist Generator v0.9 by HNB (15.02.2025)</title>
+  <title>Playlist Generator v0.8 by HNB (10.02.2025)</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     #artist_list { list-style-type: none; padding: 0; }
@@ -31,7 +31,7 @@ HOME_TEMPLATE = """
 </head>
 <body>
   <div class="container my-5">
-    <h1 class="mb-4">Playlist Generator v0.9 by HNB (15.02.2025)</h1>
+    <h1 class="mb-4">Playlist Generator v0.8 by HNB (10.02.2025)</h1>
     <form id="playlistForm">
       <div class="mb-3">
         <label for="playlist_name" class="form-label">Playlist Name:</label>
@@ -108,6 +108,39 @@ HOME_TEMPLATE = """
             <div class="mb-3">
               <label for="max_attempts" class="form-label">Max Retry Attempts:</label>
               <input type="number" class="form-control" id="max_attempts" name="max_attempts" value="{{ max_attempts }}">
+            </div>
+            <hr>
+            <div class="mb-3">
+              <label for="enable_navidrome" class="form-label">Enable Navidrome:</label>
+              <select class="form-select" id="enable_navidrome" name="enable_navidrome">
+                <option value="yes" {% if enable_navidrome == "yes" %}selected{% endif %}>Yes</option>
+                <option value="no" {% if enable_navidrome == "no" %}selected{% endif %}>No</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label for="enable_plex" class="form-label">Enable Plex:</label>
+              <select class="form-select" id="enable_plex" name="enable_plex">
+                <option value="yes" {% if enable_plex == "yes" %}selected{% endif %}>Yes</option>
+                <option value="no" {% if enable_plex == "no" %}selected{% endif %}>No</option>
+              </select>
+            </div>
+            <hr>
+            <h4>Plex Settings</h4>
+            <div class="mb-3">
+              <label for="plex_server_url" class="form-label">Plex Server URL:</label>
+              <input type="text" class="form-control" id="plex_server_url" name="plex_server_url" value="{{ plex_server_url }}">
+            </div>
+            <div class="mb-3">
+              <label for="plex_token" class="form-label">Plex Token:</label>
+              <input type="text" class="form-control" id="plex_token" name="plex_token" value="{{ plex_token }}">
+            </div>
+            <div class="mb-3">
+              <label for="plex_machine_id" class="form-label">Plex Machine ID:</label>
+              <input type="text" class="form-control" id="plex_machine_id" name="plex_machine_id" value="{{ plex_machine_id }}">
+            </div>
+            <div class="mb-3">
+              <label for="plex_playlist_type" class="form-label">Plex Playlist Type:</label>
+              <input type="text" class="form-control" id="plex_playlist_type" name="plex_playlist_type" value="{{ plex_playlist_type }}">
             </div>
             <div class="mb-3 text-end">
               <button type="submit" name="action" value="save" class="btn btn-secondary">Save Settings</button>
@@ -254,7 +287,7 @@ def update_globals():
     global ollama_url_default, ollama_model_default, navidrome_url_default, navidrome_username_default, navidrome_password_default
     global context_window_default, max_attempts_default, user_likes_default, user_dislikes_default, favorite_artists_default
     global enable_navidrome, enable_plex, plex_server_url, plex_token, plex_machine_id, plex_playlist_type
-    
+
     config.read('setup.conf')
     ollama_url_default = config.get('Ollama', 'url', fallback="http://localhost:11434/api/generate")
     ollama_model_default = config.get('Ollama', 'model', fallback="phi4:latest")
@@ -586,7 +619,13 @@ def index():
                                   navidrome_username=navidrome_username_default,
                                   navidrome_password=navidrome_password_default,
                                   context_window=context_window_default,
-                                  max_attempts=max_attempts_default)
+                                  max_attempts=max_attempts_default,
+                                  enable_navidrome = "yes" if enable_navidrome else "no",
+                                  enable_plex = "yes" if enable_plex else "no",
+                                  plex_server_url = plex_server_url,
+                                  plex_token = plex_token,
+                                  plex_machine_id = plex_machine_id,
+                                  plex_playlist_type = plex_playlist_type)
 
 @app.route("/generate", methods=["GET", "POST"])
 def generate_route():
@@ -603,10 +642,21 @@ def generate_route():
             navidrome_password = request.form.get("navidrome_password")
             context_window = request.form.get("context_window")
             max_attempts = request.form.get("max_attempts")
+            # New fields for Platforms and Plex
+            enable_navidrome_field = request.form.get("enable_navidrome")
+            enable_plex_field = request.form.get("enable_plex")
+            plex_server_url_field = request.form.get("plex_server_url")
+            plex_token_field = request.form.get("plex_token")
+            plex_machine_id_field = request.form.get("plex_machine_id")
+            plex_playlist_type_field = request.form.get("plex_playlist_type")
             
             if not all([likes, dislikes, favorite_artists,
-                        ollama_url, ollama_model, navidrome_url, navidrome_username, navidrome_password, context_window, max_attempts]):
+                        ollama_url, ollama_model, navidrome_url, navidrome_username, navidrome_password, context_window, max_attempts,
+                        enable_navidrome_field, enable_plex_field, plex_server_url_field, plex_token_field, plex_machine_id_field, plex_playlist_type_field]):
                 return jsonify({"success": False, "message": "Missing one or more required configuration fields."}), 400
+            
+            if enable_plex_field.lower() == "yes" and not all([plex_server_url_field, plex_token_field, plex_machine_id_field, plex_playlist_type_field]):
+                return jsonify({"success": False, "message": "Missing Plex configuration fields."}), 400
             
             if not config.has_section('User'):
                 config.add_section('User')
@@ -626,6 +676,16 @@ def generate_route():
                 config.add_section('General')
             config.set('General', 'context_window', context_window)
             config.set('General', 'max_attempts', max_attempts)
+            if not config.has_section('Platforms'):
+                config.add_section('Platforms')
+            config.set('Platforms', 'enable_navidrome', enable_navidrome_field)
+            config.set('Platforms', 'enable_plex', enable_plex_field)
+            if not config.has_section('Plex'):
+                config.add_section('Plex')
+            config.set('Plex', 'server_url', plex_server_url_field)
+            config.set('Plex', 'plex_token', plex_token_field)
+            config.set('Plex', 'machine_id', plex_machine_id_field)
+            config.set('Plex', 'playlist_type', plex_playlist_type_field)
             try:
                 with open('setup.conf', 'w') as configfile:
                     config.write(configfile)
@@ -647,11 +707,22 @@ def generate_route():
             navidrome_password = request.form.get("navidrome_password")
             context_window = request.form.get("context_window")
             max_attempts = request.form.get("max_attempts")
+            # New fields for Platforms and Plex
+            enable_navidrome_field = request.form.get("enable_navidrome")
+            enable_plex_field = request.form.get("enable_plex")
+            plex_server_url_field = request.form.get("plex_server_url")
+            plex_token_field = request.form.get("plex_token")
+            plex_machine_id_field = request.form.get("plex_machine_id")
+            plex_playlist_type_field = request.form.get("plex_playlist_type")
             
             if not all([playlist_name, playlist_description, likes, dislikes, favorite_artists,
-                        ollama_url, ollama_model, navidrome_url, navidrome_username, navidrome_password, context_window, max_attempts]):
+                        ollama_url, ollama_model, navidrome_url, navidrome_username, navidrome_password, context_window, max_attempts,
+                        enable_navidrome_field, enable_plex_field, plex_server_url_field, plex_token_field, plex_machine_id_field, plex_playlist_type_field]):
                 return jsonify({"success": False, "message": "Missing one or more required fields for generation."}), 400
             
+            if enable_plex_field.lower() == "yes" and not all([plex_server_url_field, plex_token_field, plex_machine_id_field, plex_playlist_type_field]):
+                return jsonify({"success": False, "message": "Missing Plex configuration fields."}), 400
+
             if not config.has_section('User'):
                 config.add_section('User')
             config.set('User', 'likes', likes)
@@ -670,6 +741,16 @@ def generate_route():
                 config.add_section('General')
             config.set('General', 'context_window', context_window)
             config.set('General', 'max_attempts', max_attempts)
+            if not config.has_section('Platforms'):
+                config.add_section('Platforms')
+            config.set('Platforms', 'enable_navidrome', enable_navidrome_field)
+            config.set('Platforms', 'enable_plex', enable_plex_field)
+            if not config.has_section('Plex'):
+                config.add_section('Plex')
+            config.set('Plex', 'server_url', plex_server_url_field)
+            config.set('Plex', 'plex_token', plex_token_field)
+            config.set('Plex', 'machine_id', plex_machine_id_field)
+            config.set('Plex', 'playlist_type', plex_playlist_type_field)
             try:
                 with open('setup.conf', 'w') as configfile:
                     config.write(configfile)
@@ -713,7 +794,13 @@ def generate_route():
                                       navidrome_username=navidrome_username_default,
                                       navidrome_password=navidrome_password_default,
                                       context_window=context_window_default,
-                                      max_attempts=max_attempts_default)
+                                      max_attempts=max_attempts_default,
+                                      enable_navidrome = "yes" if enable_navidrome else "no",
+                                      enable_plex = "yes" if enable_plex else "no",
+                                      plex_server_url = plex_server_url,
+                                      plex_token = plex_token,
+                                      plex_machine_id = plex_machine_id,
+                                      plex_playlist_type = plex_playlist_type)
 
 def main():
     playlist_name = input("Enter the playlist name: ")
