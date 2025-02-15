@@ -21,3 +21,7 @@ server_url = http://localhost:32400
 plex_token = ABCDE12345
 machine_id = 0123456789ABCDEF
 playlist_type = audio
+
+[General]
+context_window = 8192
+max_attempts = 10
