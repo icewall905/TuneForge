@@ -14,7 +14,7 @@ HOME_TEMPLATE = """
 <!doctype html>
 <html>
 <head>
-  <title>Playlist Generator v0.8 by HNB (10.02.2025)</title>
+  <title>Playlist Generator v0.9 by HNB (15.02.2025)</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     #artist_list { list-style-type: none; padding: 0; }
@@ -31,7 +31,7 @@ HOME_TEMPLATE = """
 </head>
 <body>
   <div class="container my-5">
-    <h1 class="mb-4">Playlist Generator v0.8 by HNB (10.02.2025)</h1>
+    <h1 class="mb-4">Playlist Generator v0.9 by HNB (15.02.2025)</h1>
     <form id="playlistForm">
       <div class="mb-3">
         <label for="playlist_name" class="form-label">Playlist Name:</label>
@@ -423,13 +423,16 @@ def search_track_in_plex(title, artist):
     query_string = f"{title} {artist}"
     encoded_query = requests.utils.quote(query_string)
     url = f"{plex_server_url}/search?query={encoded_query}&type=10&X-Plex-Token={plex_token}"
+    print("Plex search URL:", url)
     try:
         resp = requests.get(url, timeout=10)
+        print("Plex search response code:", resp.status_code)
         if resp.status_code == 200:
             root = ET.fromstring(resp.text)
             for child in root.findall(".//Track"):
                 rating_key = child.attrib.get("ratingKey")
                 if rating_key:
+                    print(f"Found Plex track ratingKey: {rating_key} for '{title}' by '{artist}'")
                     return rating_key
         else:
             print("Plex search error:", resp.status_code, resp.text)
@@ -452,8 +455,11 @@ def create_playlist_in_plex(playlist_name, library_ids):
         f"&uri=server://{plex_machine_id}/com.plexapp.plugins.library/{first_id}"
         f"?X-Plex-Token={plex_token}"
     )
+    print("Plex create URL:", create_url)
     try:
         resp = requests.post(create_url, timeout=10)
+        print("Plex create playlist response code:", resp.status_code)
+        print("Plex create playlist response text:", resp.text)
         if resp.status_code != 200:
             print("Plex create playlist error:", resp.status_code, resp.text)
             return None
@@ -472,7 +478,10 @@ def create_playlist_in_plex(playlist_name, library_ids):
                 f"?uri=server://{plex_machine_id}/com.plexapp.plugins.library/{lib_id}"
                 f"?X-Plex-Token={plex_token}"
             )
+            print("Adding track with URL:", add_item_url)
             add_resp = requests.post(add_item_url, timeout=10)
+            print("Add track response code:", add_resp.status_code)
+            print("Add track response text:", add_resp.text)
             if add_resp.status_code != 200:
                 print("Error adding track to Plex playlist:", add_resp.status_code, add_resp.text)
         print(f"Plex playlist '{playlist_name}' created with ratingKey = {new_playlist_key}")
