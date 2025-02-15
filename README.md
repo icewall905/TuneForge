@@ -75,19 +75,21 @@ nohup python3 generator.py web &
 Or run it with a process manager like `systemd` or `supervisord`.
 
 Example systemd:
-[Unit]
-Description=Playlist Generator Web Service
-After=network.target
-
-[Service]
-User=root
-WorkingDirectory=/opt/playlistgenerator
-ExecStart=/usr/bin/python3 playlist-generator.py web 5555
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
+   '''
+   [Unit]
+   Description=Playlist Generator Web Service
+   After=network.target
+   
+   [Service]
+   User=root
+   WorkingDirectory=/opt/playlistgenerator
+   ExecStart=/usr/bin/python3 playlist-generator.py web 5555
+   Restart=always
+   RestartSec=5
+   
+   [Install]
+   WantedBy=multi-user.target
+   '''
 
 ## Troubleshooting
 - If the server fails to start, ensure `setup.conf` is correctly configured.
