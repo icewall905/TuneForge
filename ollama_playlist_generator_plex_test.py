@@ -81,6 +81,7 @@ HOME_TEMPLATE = """
           </a>
           <div class="collapse" id="configSettings">
             <h4>Configuration Settings</h4>
+            <!-- Existing settings for Ollama, Navidrome, etc. -->
             <div class="mb-3">
               <label for="ollama_url" class="form-label">Ollama URL:</label>
               <input type="text" class="form-control" id="ollama_url" name="ollama_url" value="{{ ollama_url }}">
@@ -110,6 +111,7 @@ HOME_TEMPLATE = """
               <input type="number" class="form-control" id="max_attempts" name="max_attempts" value="{{ max_attempts }}">
             </div>
             <hr>
+            <!-- New Platforms settings -->
             <div class="mb-3">
               <label for="enable_navidrome" class="form-label">Enable Navidrome:</label>
               <select class="form-select" id="enable_navidrome" name="enable_navidrome">
@@ -125,6 +127,7 @@ HOME_TEMPLATE = """
               </select>
             </div>
             <hr>
+            <!-- Plex-specific settings -->
             <h4>Plex Settings</h4>
             <div class="mb-3">
               <label for="plex_server_url" class="form-label">Plex Server URL:</label>
@@ -141,6 +144,10 @@ HOME_TEMPLATE = """
             <div class="mb-3">
               <label for="plex_playlist_type" class="form-label">Plex Playlist Type:</label>
               <input type="text" class="form-control" id="plex_playlist_type" name="plex_playlist_type" value="{{ plex_playlist_type }}">
+            </div>
+            <div class="mb-3">
+              <label for="plex_music_section_id" class="form-label">Plex Music Library Section ID:</label>
+              <input type="text" class="form-control" id="plex_music_section_id" name="plex_music_section_id" value="{{ plex_music_section_id }}">
             </div>
             <div class="mb-3 text-end">
               <button type="submit" name="action" value="save" class="btn btn-secondary">Save Settings</button>
@@ -284,9 +291,10 @@ def remove_think_tags(text):
     return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
 
 def update_globals():
-    global ollama_url_default, ollama_model_default, navidrome_url_default, navidrome_username_default, navidrome_password_default
-    global context_window_default, max_attempts_default, user_likes_default, user_dislikes_default, favorite_artists_default
-    global enable_navidrome, enable_plex, plex_server_url, plex_token, plex_machine_id, plex_playlist_type
+    global ollama_url_default, ollama_model_default, navidrome_url_default, navidrome_username_default
+    global navidrome_password_default, context_window_default, max_attempts_default, user_likes_default
+    global user_dislikes_default, favorite_artists_default, enable_navidrome, enable_plex, plex_server_url
+    global plex_token, plex_machine_id, plex_playlist_type, plex_music_section_id
 
     config.read('setup.conf')
     ollama_url_default = config.get('Ollama', 'url', fallback="http://localhost:11434/api/generate")
@@ -303,10 +311,11 @@ def update_globals():
     enable_navidrome = config.get('Platforms', 'enable_navidrome', fallback='yes').lower() == 'yes'
     enable_plex = config.get('Platforms', 'enable_plex', fallback='no').lower() == 'yes'
 
-    plex_server_url = config.get('Plex', 'server_url', fallback='http://localhost:32400')
-    plex_token = config.get('Plex', 'plex_token', fallback='')
-    plex_machine_id = config.get('Plex', 'machine_id', fallback='')
-    plex_playlist_type = config.get('Plex', 'playlist_type', fallback='audio')
+    plex_server_url = config.get('Plex', 'server_url', fallback="http://localhost:32400")
+    plex_token = config.get('Plex', 'plex_token', fallback="")
+    plex_machine_id = config.get('Plex', 'machine_id', fallback="")
+    plex_playlist_type = config.get('Plex', 'playlist_type', fallback="audio")
+    plex_music_section_id = config.get('Plex', 'music_section_id', fallback="1")
 
 def get_playlist_from_ollama(prompt):
     if DEBUG_OLLAMA_RESPONSE:
@@ -408,56 +417,62 @@ def create_playlist_in_navidrome(name, song_ids):
                 data = response.json()
                 return data["subsonic-response"]["playlist"].get("id")
             except (KeyError, json.JSONDecodeError) as e:
-                print("Error parsing playlist creation response:", e)
+                print("Error parsing Navidrome playlist creation response:", e)
                 return None
         else:
-            print("Playlist created successfully (no response body).")
+            print("Navidrome playlist created successfully (no response body).")
             return "unknown"
     else:
         print("Navidrome createPlaylist error:", response.status_code, response.text)
         return None
 
+# --- PLEX FUNCTIONS ---
+# Return a dict with ratingKey and librarySectionID
 def search_track_in_plex(title, artist):
     if not enable_plex:
         return None
-    query_string = f"{title} {artist}"
+    query_string = f"{artist} {title}"
     encoded_query = requests.utils.quote(query_string)
-    url = f"{plex_server_url}/search?query={encoded_query}&type=10&X-Plex-Token={plex_token}"
+    url = f"{plex_server_url}/hubs/search/?X-Plex-Token={plex_token}&query={encoded_query}&sectionId={plex_music_section_id}&limit=10"
     print("Plex search URL:", url)
     try:
         resp = requests.get(url, timeout=10)
         print("Plex search response code:", resp.status_code)
+        print("Plex search response text:", resp.text)
         if resp.status_code == 200:
             root = ET.fromstring(resp.text)
-            for child in root.findall(".//Track"):
-                rating_key = child.attrib.get("ratingKey")
-                if rating_key:
-                    print(f"Found Plex track ratingKey: {rating_key} for '{title}' by '{artist}'")
-                    return rating_key
+            for hub in root.findall(".//Hub"):
+                if hub.attrib.get("type") == "track":
+                    for track_el in hub.findall("./Track"):
+                        rating_key = track_el.attrib.get("ratingKey")
+                        library_section_id = track_el.attrib.get("librarySectionID")
+                        if rating_key and library_section_id:
+                            print(f"Found Plex track ratingKey: {rating_key} for '{title}' by '{artist}', librarySectionID={library_section_id}")
+                            return {"ratingKey": rating_key, "librarySectionID": library_section_id}
         else:
             print("Plex search error:", resp.status_code, resp.text)
     except Exception as e:
         print("Plex search exception:", e)
     return None
 
-def create_playlist_in_plex(playlist_name, library_ids):
+def create_playlist_in_plex(name, library_ids):
     if not enable_plex:
         return None
     if not library_ids:
         print("No Plex tracks found to create a playlist.")
         return None
     first_id = library_ids[0]
-    create_url = (
-        f"{plex_server_url}/playlists"
+    # IMPORTANT CHANGE: Append the token as part of the URI (using "?" rather than "&")
+    params = (
         f"?type={plex_playlist_type}"
-        f"&title={requests.utils.quote(playlist_name)}"
+        f"&title={requests.utils.quote(name)}"
         f"&smart=0"
-        f"&uri=server://{plex_machine_id}/com.plexapp.plugins.library/{first_id}"
-        f"?X-Plex-Token={plex_token}"
+        f"&uri=server://{plex_machine_id}/com.plexapp.plugins.library/{first_id}?X-Plex-Token={plex_token}"
     )
-    print("Plex create URL:", create_url)
+    url = f"{plex_server_url}/playlists{params}"
+    print("Plex create URL:", url)
     try:
-        resp = requests.post(create_url, timeout=10)
+        resp = requests.post(url, timeout=10)
         print("Plex create playlist response code:", resp.status_code)
         print("Plex create playlist response text:", resp.text)
         if resp.status_code != 200:
@@ -465,31 +480,30 @@ def create_playlist_in_plex(playlist_name, library_ids):
             return None
         root = ET.fromstring(resp.text)
         playlist_elem = root.find(".//Playlist")
-        if not playlist_elem:
+        if playlist_elem is None:
             print("Could not find <Playlist> in Plex response.")
             return None
         new_playlist_key = playlist_elem.attrib.get("ratingKey", None)
         if not new_playlist_key:
             print("Could not get the new playlist ratingKey from Plex.")
             return None
+
+        # For each additional track, build the add URL with the token appended inside the URI.
         for lib_id in library_ids[1:]:
-            add_item_url = (
-                f"{plex_server_url}/playlists/{new_playlist_key}/items"
-                f"?uri=server://{plex_machine_id}/com.plexapp.plugins.library/{lib_id}"
-                f"?X-Plex-Token={plex_token}"
-            )
-            print("Adding track with URL:", add_item_url)
-            add_resp = requests.post(add_item_url, timeout=10)
+            add_url = f"{plex_server_url}/playlists/{new_playlist_key}/items?uri=server://{plex_machine_id}/com.plexapp.plugins.library/{lib_id}?X-Plex-Token={plex_token}"
+            print("Adding track with URL:", add_url)
+            add_resp = requests.post(add_url, timeout=10)
             print("Add track response code:", add_resp.status_code)
             print("Add track response text:", add_resp.text)
             if add_resp.status_code != 200:
                 print("Error adding track to Plex playlist:", add_resp.status_code, add_resp.text)
-        print(f"Plex playlist '{playlist_name}' created with ratingKey = {new_playlist_key}")
+        print(f"Plex playlist '{name}' created with ratingKey = {new_playlist_key}")
         return new_playlist_key
     except Exception as e:
         print("Exception creating Plex playlist:", e)
         return None
 
+# -------------------- GENERATION FUNCTIONS --------------------
 def generate_playlist(playlist_name, prompt):
     update_globals()
     collected_tracks = []
@@ -498,10 +512,11 @@ def generate_playlist(playlist_name, prompt):
     max_attempts = int(max_attempts_default)
     required_tracks = 45
     navidrome_song_ids = []
-    plex_library_ids = []
-    
+    plex_ratingkeys = []
+    base_section_id = None
+
     while len(collected_tracks) < required_tracks and attempts < max_attempts:
-        tracks = get_playlist_from_ollama(prompt)
+        tracks = get_playlist_from_ollama(base_prompt)
         print(f"Ollama suggested {len(tracks)} tracks.")
         for track in tracks:
             if len(collected_tracks) >= required_tracks:
@@ -515,10 +530,15 @@ def generate_playlist(playlist_name, prompt):
                     navidrome_song_ids.append(nd_id)
                     found_any = True
             if enable_plex:
-                plex_id = search_track_in_plex(track["title"], track["artist"])
-                if plex_id:
-                    plex_library_ids.append(plex_id)
-                    found_any = True
+                plex_res = search_track_in_plex(track["title"], track["artist"])
+                if plex_res:
+                    if base_section_id is None:
+                        base_section_id = plex_res["librarySectionID"]
+                    if plex_res["librarySectionID"] == base_section_id:
+                        plex_ratingkeys.append(plex_res["ratingKey"])
+                        found_any = True
+                    else:
+                        print(f"Skipping track '{track['title']}' from section {plex_res['librarySectionID']} (base={base_section_id}).")
             if found_any:
                 collected_tracks.append(track)
                 print(f"Found: {track['title']} by {track['artist']}")
@@ -527,9 +547,8 @@ def generate_playlist(playlist_name, prompt):
             last_suggestions = collected_tracks[-10:]
             context_lines = [f"{t['title']} by {t['artist']}" for t in last_suggestions]
             context_str = ", ".join(context_lines)
-            prompt = (
-                f"{base_prompt}\n"
-                f"Previously suggested (latest 10): {context_str}.\n"
+            base_prompt = (
+                f"{base_prompt}\nPreviously suggested (latest 10): {context_str}.\n"
                 f"Provide {missing} additional tracks, distinct from both the seed songs and any previously returned tracks, "
                 "that fit the refined criteria. Return only the JSON object. Do not include any introductory text or explanations."
             )
@@ -537,15 +556,17 @@ def generate_playlist(playlist_name, prompt):
             print(f"Attempt {attempts}: Not enough tracks, updating prompt and retrying.")
     print(f"Collected {len(collected_tracks)} tracks.")
     if not collected_tracks:
-        return None, "No tracks found. Exiting."
+        return (None, None), "No tracks found. Exiting."
+
     random.shuffle(navidrome_song_ids)
-    random.shuffle(plex_library_ids)
+    random.shuffle(plex_ratingkeys)
+
     nd_playlist_id = None
     plex_playlist_id = None
-    if enable_navidrome:
+    if enable_navidrome and navidrome_song_ids:
         nd_playlist_id = create_playlist_in_navidrome(playlist_name, navidrome_song_ids)
-    if enable_plex:
-        plex_playlist_id = create_playlist_in_plex(playlist_name, plex_library_ids)
+    if enable_plex and plex_ratingkeys:
+        plex_playlist_id = create_playlist_in_plex(playlist_name, plex_ratingkeys)
     message = f"Playlist '{playlist_name}' created."
     if nd_playlist_id:
         message += f" Navidrome ID: {nd_playlist_id}."
@@ -562,10 +583,11 @@ def generate_playlist_stream(playlist_name, prompt):
     max_attempts = int(max_attempts_default)
     required_tracks = 45
     navidrome_song_ids = []
-    plex_library_ids = []
-    
+    plex_ratingkeys = []
+    base_section_id = None
+
     while len(collected_tracks) < required_tracks and attempts < max_attempts:
-        tracks = get_playlist_from_ollama(prompt)
+        tracks = get_playlist_from_ollama(base_prompt)
         yield f"<p>Ollama suggested {len(tracks)} tracks.</p>\n"
         for track in tracks:
             if len(collected_tracks) >= required_tracks:
@@ -579,10 +601,15 @@ def generate_playlist_stream(playlist_name, prompt):
                     navidrome_song_ids.append(nd_id)
                     found_any = True
             if enable_plex:
-                plex_id = search_track_in_plex(track["title"], track["artist"])
-                if plex_id:
-                    plex_library_ids.append(plex_id)
-                    found_any = True
+                plex_res = search_track_in_plex(track["title"], track["artist"])
+                if plex_res:
+                    if base_section_id is None:
+                        base_section_id = plex_res["librarySectionID"]
+                    if plex_res["librarySectionID"] == base_section_id:
+                        plex_ratingkeys.append(plex_res["ratingKey"])
+                        found_any = True
+                    else:
+                        yield f"<p>Skipping track '{track['title']}' from section {plex_res['librarySectionID']} (base={base_section_id}).</p>\n"
             if found_any:
                 collected_tracks.append(track)
                 yield f"<p>Found: {track['title']} by {track['artist']}</p>\n"
@@ -591,9 +618,8 @@ def generate_playlist_stream(playlist_name, prompt):
             last_suggestions = collected_tracks[-10:]
             context_lines = [f"{t['title']} by {t['artist']}" for t in last_suggestions]
             context_str = ", ".join(context_lines)
-            prompt = (
-                f"{base_prompt}\n"
-                f"Previously suggested (latest 10): {context_str}.\n"
+            base_prompt = (
+                f"{base_prompt}\nPreviously suggested (latest 10): {context_str}.\n"
                 f"Provide {missing} additional tracks, distinct from both the seed songs and any previously returned tracks, "
                 "that fit the refined criteria. Return only the JSON object. Do not include any introductory text or explanations."
             )
@@ -604,12 +630,12 @@ def generate_playlist_stream(playlist_name, prompt):
         yield "<p>No tracks found. Exiting.</p>\n"
         return
     random.shuffle(navidrome_song_ids)
-    random.shuffle(plex_library_ids)
-    if enable_navidrome:
+    random.shuffle(plex_ratingkeys)
+    if enable_navidrome and navidrome_song_ids:
         nd_playlist_id = create_playlist_in_navidrome(playlist_name, navidrome_song_ids)
         yield f"<p>Navidrome playlist created with ID: {nd_playlist_id}</p>\n"
-    if enable_plex:
-        plex_playlist_id = create_playlist_in_plex(playlist_name, plex_library_ids)
+    if enable_plex and plex_ratingkeys:
+        plex_playlist_id = create_playlist_in_plex(playlist_name, plex_ratingkeys)
         yield f"<p>Plex playlist created with ratingKey: {plex_playlist_id}</p>\n"
     yield "<p>Generation complete.</p>\n"
 
@@ -629,12 +655,13 @@ def index():
                                   navidrome_password=navidrome_password_default,
                                   context_window=context_window_default,
                                   max_attempts=max_attempts_default,
-                                  enable_navidrome = "yes" if enable_navidrome else "no",
-                                  enable_plex = "yes" if enable_plex else "no",
-                                  plex_server_url = plex_server_url,
-                                  plex_token = plex_token,
-                                  plex_machine_id = plex_machine_id,
-                                  plex_playlist_type = plex_playlist_type)
+                                  enable_navidrome="yes" if enable_navidrome else "no",
+                                  enable_plex="yes" if enable_plex else "no",
+                                  plex_server_url=plex_server_url,
+                                  plex_token=plex_token,
+                                  plex_machine_id=plex_machine_id,
+                                  plex_playlist_type=plex_playlist_type,
+                                  plex_music_section_id=plex_music_section_id)
 
 @app.route("/generate", methods=["GET", "POST"])
 def generate_route():
@@ -651,20 +678,20 @@ def generate_route():
             navidrome_password = request.form.get("navidrome_password")
             context_window = request.form.get("context_window")
             max_attempts = request.form.get("max_attempts")
-            # New fields for Platforms and Plex
             enable_navidrome_field = request.form.get("enable_navidrome")
             enable_plex_field = request.form.get("enable_plex")
             plex_server_url_field = request.form.get("plex_server_url")
             plex_token_field = request.form.get("plex_token")
             plex_machine_id_field = request.form.get("plex_machine_id")
             plex_playlist_type_field = request.form.get("plex_playlist_type")
+            plex_music_section_id_field = request.form.get("plex_music_section_id")
             
             if not all([likes, dislikes, favorite_artists,
                         ollama_url, ollama_model, navidrome_url, navidrome_username, navidrome_password, context_window, max_attempts,
-                        enable_navidrome_field, enable_plex_field, plex_server_url_field, plex_token_field, plex_machine_id_field, plex_playlist_type_field]):
+                        enable_navidrome_field, enable_plex_field, plex_server_url_field, plex_token_field, plex_machine_id_field, plex_playlist_type_field, plex_music_section_id_field]):
                 return jsonify({"success": False, "message": "Missing one or more required configuration fields."}), 400
             
-            if enable_plex_field.lower() == "yes" and not all([plex_server_url_field, plex_token_field, plex_machine_id_field, plex_playlist_type_field]):
+            if enable_plex_field.lower() == "yes" and not all([plex_server_url_field, plex_token_field, plex_machine_id_field, plex_playlist_type_field, plex_music_section_id_field]):
                 return jsonify({"success": False, "message": "Missing Plex configuration fields."}), 400
             
             if not config.has_section('User'):
@@ -695,6 +722,7 @@ def generate_route():
             config.set('Plex', 'plex_token', plex_token_field)
             config.set('Plex', 'machine_id', plex_machine_id_field)
             config.set('Plex', 'playlist_type', plex_playlist_type_field)
+            config.set('Plex', 'music_section_id', plex_music_section_id_field)
             try:
                 with open('setup.conf', 'w') as configfile:
                     config.write(configfile)
@@ -716,20 +744,20 @@ def generate_route():
             navidrome_password = request.form.get("navidrome_password")
             context_window = request.form.get("context_window")
             max_attempts = request.form.get("max_attempts")
-            # New fields for Platforms and Plex
             enable_navidrome_field = request.form.get("enable_navidrome")
             enable_plex_field = request.form.get("enable_plex")
             plex_server_url_field = request.form.get("plex_server_url")
             plex_token_field = request.form.get("plex_token")
             plex_machine_id_field = request.form.get("plex_machine_id")
             plex_playlist_type_field = request.form.get("plex_playlist_type")
+            plex_music_section_id_field = request.form.get("plex_music_section_id")
             
             if not all([playlist_name, playlist_description, likes, dislikes, favorite_artists,
                         ollama_url, ollama_model, navidrome_url, navidrome_username, navidrome_password, context_window, max_attempts,
-                        enable_navidrome_field, enable_plex_field, plex_server_url_field, plex_token_field, plex_machine_id_field, plex_playlist_type_field]):
+                        enable_navidrome_field, enable_plex_field, plex_server_url_field, plex_token_field, plex_machine_id_field, plex_playlist_type_field, plex_music_section_id_field]):
                 return jsonify({"success": False, "message": "Missing one or more required fields for generation."}), 400
             
-            if enable_plex_field.lower() == "yes" and not all([plex_server_url_field, plex_token_field, plex_machine_id_field, plex_playlist_type_field]):
+            if enable_plex_field.lower() == "yes" and not all([plex_server_url_field, plex_token_field, plex_machine_id_field, plex_playlist_type_field, plex_music_section_id_field]):
                 return jsonify({"success": False, "message": "Missing Plex configuration fields."}), 400
 
             if not config.has_section('User'):
@@ -760,6 +788,7 @@ def generate_route():
             config.set('Plex', 'plex_token', plex_token_field)
             config.set('Plex', 'machine_id', plex_machine_id_field)
             config.set('Plex', 'playlist_type', plex_playlist_type_field)
+            config.set('Plex', 'music_section_id', plex_music_section_id_field)
             try:
                 with open('setup.conf', 'w') as configfile:
                     config.write(configfile)
@@ -774,13 +803,13 @@ def generate_route():
                 f"Provide 45 additional tracks, distinct from both the seed songs and any previously returned tracks, that fit this refined criteria. Return only the JSON object. Do not include any introductory text or explanations."
             )
             if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-                def generate():
+                def generator():
                     for line in generate_playlist_stream(playlist_name, full_prompt):
                         yield line
                     yield "<p>Generation complete.</p>\n"
-                return Response(generate(), mimetype='text/html')
+                return Response(generator(), mimetype='text/html')
             else:
-                def generate():
+                def generator():
                     yield "<html><head><title>Generating Playlist</title>"
                     yield """<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />"""
                     yield "</head><body>"
@@ -788,7 +817,7 @@ def generate_route():
                         yield line
                     yield "<p><a href='/'>Back to Home</a></p>"
                     yield "</body></html>"
-                return Response(generate(), mimetype='text/html')
+                return Response(generator(), mimetype='text/html')
         else:
             return jsonify({"success": False, "message": "Unknown action"}), 400
     else:
@@ -803,13 +832,7 @@ def generate_route():
                                       navidrome_username=navidrome_username_default,
                                       navidrome_password=navidrome_password_default,
                                       context_window=context_window_default,
-                                      max_attempts=max_attempts_default,
-                                      enable_navidrome = "yes" if enable_navidrome else "no",
-                                      enable_plex = "yes" if enable_plex else "no",
-                                      plex_server_url = plex_server_url,
-                                      plex_token = plex_token,
-                                      plex_machine_id = plex_machine_id,
-                                      plex_playlist_type = plex_playlist_type)
+                                      max_attempts=max_attempts_default)
 
 def main():
     playlist_name = input("Enter the playlist name: ")
@@ -853,7 +876,7 @@ def main():
         f"Make sure you completely avoid {dislikes}.\n\n"
         f"Provide 45 additional tracks, distinct from both the seed songs and any previously returned tracks, that fit this refined criteria. Return only the JSON object. Do not include any introductory text or explanations."
     )
-    playlist_ids, message = generate_playlist(playlist_name, full_prompt)
+    playlist_id, message = generate_playlist(playlist_name, full_prompt)
     print(message)
 
 if __name__ == "__main__":
