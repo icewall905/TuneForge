@@ -427,7 +427,6 @@ def create_playlist_in_navidrome(name, song_ids):
         return None
 
 # --- PLEX FUNCTIONS ---
-# Return a dict with ratingKey and librarySectionID
 def search_track_in_plex(title, artist):
     if not enable_plex:
         return None
@@ -462,14 +461,17 @@ def create_playlist_in_plex(name, library_ids):
         print("No Plex tracks found to create a playlist.")
         return None
     first_id = library_ids[0]
-    # IMPORTANT CHANGE: Append the token as part of the URI (using "?" rather than "&")
-    params = (
+    # Build the base URI for the first track
+    base_uri = f"server://{plex_machine_id}/com.plexapp.plugins.library/library/metadata/{first_id}"
+    encoded_base_uri = requests.utils.quote(base_uri, safe='/:')
+    create_params = (
         f"?type={plex_playlist_type}"
         f"&title={requests.utils.quote(name)}"
         f"&smart=0"
-        f"&uri=server://{plex_machine_id}/com.plexapp.plugins.library/{first_id}?X-Plex-Token={plex_token}"
+        f"&uri={encoded_base_uri}"
+        f"&X-Plex-Token={plex_token}"
     )
-    url = f"{plex_server_url}/playlists{params}"
+    url = f"{plex_server_url}/playlists{create_params}"
     print("Plex create URL:", url)
     try:
         resp = requests.post(url, timeout=10)
@@ -488,16 +490,22 @@ def create_playlist_in_plex(name, library_ids):
             print("Could not get the new playlist ratingKey from Plex.")
             return None
 
-        # For each additional track, build the add URL with the token appended inside the URI.
-        for lib_id in library_ids[1:]:
-            add_url = f"{plex_server_url}/playlists/{new_playlist_key}/items?uri=server://{plex_machine_id}/com.plexapp.plugins.library/{lib_id}?X-Plex-Token={plex_token}"
-            print("Adding track with URL:", add_url)
-            add_resp = requests.post(add_url, timeout=10)
-            print("Add track response code:", add_resp.status_code)
-            print("Add track response text:", add_resp.text)
-            if add_resp.status_code != 200:
-                print("Error adding track to Plex playlist:", add_resp.status_code, add_resp.text)
         print(f"Plex playlist '{name}' created with ratingKey = {new_playlist_key}")
+
+        # If additional tracks exist, add them in one call.
+        if len(library_ids) > 1:
+            additional_ids = library_ids[1:]
+            joined_ids = ','.join(additional_ids)
+            track_uri = f"server://{plex_machine_id}/com.plexapp.plugins.library/library/metadata/{joined_ids}"
+            encoded_track_uri = requests.utils.quote(track_uri, safe='/:')
+            add_url = f"{plex_server_url}/playlists/{new_playlist_key}/items?uri={encoded_track_uri}&X-Plex-Token={plex_token}"
+            print("Adding additional tracks with URL:")
+            print(add_url)
+            add_resp = requests.put(add_url, timeout=10)
+            print("Add tracks response code:", add_resp.status_code)
+            print("Add tracks response text:", add_resp.text)
+        else:
+            print("Only one track provided; no additional tracks to add.")
         return new_playlist_key
     except Exception as e:
         print("Exception creating Plex playlist:", e)
