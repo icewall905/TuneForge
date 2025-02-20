@@ -385,18 +385,32 @@ def search_track_in_navidrome(title, artist):
     if response.status_code == 200:
         try:
             result = response.json()
-            songs = result["subsonic-response"]["searchResult2"]["song"]
-            if isinstance(songs, list) and songs:
-                return songs[0]["id"]
-            elif isinstance(songs, dict):
-                return songs.get("id")
-            else:
+            songs = result["subsonic-response"]["searchResult2"].get("song", [])
+            # Make sure `songs` is a list
+            if isinstance(songs, dict):
+                songs = [songs]  # If only one result was returned as a dict
+
+            if not songs:
                 return None
+
+            # Filter out any songs with "live" in title or album (case-insensitive).
+            filtered = [
+                s for s in songs 
+                if "live" not in s["title"].lower() 
+                and "live" not in s["album"].lower()
+            ]
+
+            if filtered:
+                return filtered[0]["id"]
+            else:
+                # Fallback to the very first item if all are "live" or no filter match
+                return songs[0]["id"]
         except KeyError:
             return None
     else:
         print("Navidrome search error:", response.status_code, response.text)
         return None
+
 
 def create_playlist_in_navidrome(name, song_ids):
     params = {
@@ -442,7 +456,22 @@ def search_track_in_plex(title, artist):
             root = ET.fromstring(resp.text)
             for hub in root.findall(".//Hub"):
                 if hub.attrib.get("type") == "track":
-                    for track_el in hub.findall("./Track"):
+                    # Gather all track elements
+                    track_candidates = hub.findall("./Track")
+                    
+                    # Filter them to exclude "live" in track or album
+                    # Note: Plex track's album name is often in "parentTitle".
+                    filtered_tracks = []
+                    for track_el in track_candidates:
+                        track_title = track_el.attrib.get("title", "").lower()
+                        album_title = track_el.attrib.get("parentTitle", "").lower()
+                        if "live" not in track_title and "live" not in album_title:
+                            filtered_tracks.append(track_el)
+
+                    # If we have any filtered results, iterate them first
+                    preferred_list = filtered_tracks if filtered_tracks else track_candidates
+
+                    for track_el in preferred_list:
                         rating_key = track_el.attrib.get("ratingKey")
                         library_section_id = track_el.attrib.get("librarySectionID")
                         if rating_key and library_section_id:
@@ -453,6 +482,7 @@ def search_track_in_plex(title, artist):
     except Exception as e:
         print("Plex search exception:", e)
     return None
+
 
 def create_playlist_in_plex(name, library_ids):
     if not enable_plex:
