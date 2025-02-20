@@ -14,7 +14,7 @@ HOME_TEMPLATE = """
 <!doctype html>
 <html>
 <head>
-  <title>Playlist Generator v0.9 by HNB (18.02.2025)</title>
+  <title>Playlist Generator v0.9 by HNB (20.02.2025)</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     #artist_list { list-style-type: none; padding: 0; }
@@ -31,7 +31,7 @@ HOME_TEMPLATE = """
 </head>
 <body>
   <div class="container my-5">
-    <h1 class="mb-4">Playlist Generator v0.9 by HNB (18.02.2025)</h1>
+    <h1 class="mb-4">Playlist Generator v0.9 by HNB (20.02.2025)</h1>
     <form id="playlistForm">
       <div class="mb-3">
         <label for="playlist_name" class="form-label">Playlist Name:</label>
