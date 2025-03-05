@@ -1,6 +1,6 @@
 # Ollama Playlist Generator
 
-This repository contains a Flask-based application that generates playlists using the Ollama language model. The app interacts with Ollama's API and Navidrome to generate and create playlists based on user-defined criteria.
+This repository contains a Flask-based application that generates playlists using the Ollama language model. The app interacts with Ollama's API and Navidrome and/or Plex to generate and create playlists based on user-defined criteria.
 
 Repository: [https://github.com/icewall905/ollama-playlist-generator](https://github.com/icewall905/ollama-playlist-generator)
 
@@ -75,7 +75,8 @@ nohup python3 generator.py web &
 Or run it with a process manager like `systemd` or `supervisord`.
 
 Example systemd:
-   '''
+
+```sh
    [Unit]
    Description=Playlist Generator Web Service
    After=network.target
@@ -89,7 +90,7 @@ Example systemd:
    
    [Install]
    WantedBy=multi-user.target
-   '''
+```
 
 ## Troubleshooting
 - If the server fails to start, ensure `setup.conf` is correctly configured.
