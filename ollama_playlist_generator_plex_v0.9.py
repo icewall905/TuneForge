@@ -5,9 +5,6 @@ import re
 import requests
 from flask import Flask, request, render_template_string, jsonify, Response
 import xml.etree.ElementTree as ET
-import os
-import datetime
-import time
 
 # --- Global Debug Flag ---
 DEBUG_OLLAMA_RESPONSE = False  # Set to True to print prompt and raw responses from Ollama
@@ -35,9 +32,6 @@ HOME_TEMPLATE = """
 <body>
   <div class="container my-5">
     <h1 class="mb-4">Playlist Generator v0.9 by HNB (20.02.2025)</h1>
-    <div class="mb-3 text-end">
-      <a href="/history" class="btn btn-outline-primary">View Playlist History</a>
-    </div>
     <form id="playlistForm">
       <div class="mb-3">
         <label for="playlist_name" class="form-label">Playlist Name:</label>
@@ -289,100 +283,12 @@ RESULT_TEMPLATE = """
 </html>
 """
 
-# Add this new route to view playlist history
-
-HISTORY_TEMPLATE = """
-<!doctype html>
-<html>
-<head>
-  <title>Playlist Generator - History</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body>
-  <div class="container my-5">
-    <h1 class="mb-4">Your Playlist History</h1>
-    <a href="/" class="btn btn-primary mb-3">Back to Generator</a>
-    
-    <div class="row">
-      {% for playlist in playlists %}
-      <div class="col-md-6 mb-3">
-        <div class="card">
-          <div class="card-header d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">{{ playlist.name }}</h5>
-            <div class="rating">
-              {% for i in range(5) %}
-                <button class="btn btn-sm {% if playlist.rating == i+1 %}btn-warning{% else %}btn-outline-warning{% endif %}" 
-                  onclick="ratePlaylist({{ playlist.id }}, {{ i+1 }})">{{ i+1 }}</button>
-              {% endfor %}
-            </div>
-          </div>
-          <div class="card-body">
-            <p class="small">Created: {{ playlist.created }}</p>
-            {% if playlist.navidrome_id %}
-              <p>Navidrome ID: {{ playlist.navidrome_id }}</p>
-            {% endif %}
-            {% if playlist.plex_id %}
-              <p>Plex ID: {{ playlist.plex_id }}</p>
-            {% endif %}
-            <div class="accordion" id="tracks{{ playlist.id }}">
-              <div class="accordion-item">
-                <h2 class="accordion-header" id="heading{{ playlist.id }}">
-                  <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse{{ playlist.id }}">
-                    View Tracks ({{ playlist.tracks|length }})
-                  </button>
-                </h2>
-                <div id="collapse{{ playlist.id }}" class="accordion-collapse collapse" data-bs-parent="#tracks{{ playlist.id }}">
-                  <div class="accordion-body">
-                    <ul class="list-group">
-                      {% for track in playlist.tracks %}
-                        <li class="list-group-item">{{ track.title }} by {{ track.artist }} ({{ track.album }})</li>
-                      {% endfor %}
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/js/bootstrap.bundle.min.js"></script>
-  <script>
-    function ratePlaylist(playlistId, rating) {
-      fetch('/rate_playlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playlist_id: playlistId, rating: rating })
-      }).then(response => {
-        if (response.ok) {
-          window.location.reload();
-        }
-      });
-    }
-  </script>
-</body>
-</html>
-"""
-
 # --- Load configuration initially ---
 config = configparser.ConfigParser()
 config.read('setup.conf')
 
 def remove_think_tags(text):
     return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-
-def get_config_value(section, key, default=""):
-    """Retrieve configuration value from environment variables first, then config file"""
-    env_key = f"PLAYLIST_GEN_{section.upper()}_{key.upper()}"
-    env_value = os.environ.get(env_key)
-    if env_value is not None:
-        return env_value
-    
-    if config.has_section(section) and config.has_option(section, key):
-        return config.get(section, key, fallback=default)
-    return default
 
 def update_globals():
     global ollama_url_default, ollama_model_default, navidrome_url_default, navidrome_username_default
@@ -391,25 +297,25 @@ def update_globals():
     global plex_token, plex_machine_id, plex_playlist_type, plex_music_section_id
 
     config.read('setup.conf')
-    ollama_url_default = get_config_value('Ollama', 'url', "http://localhost:11434/api/generate")
-    ollama_model_default = get_config_value('Ollama', 'model', "phi4:latest")
-    navidrome_url_default = get_config_value('Navidrome', 'url', "http://localhost:4533/rest")
-    navidrome_username_default = get_config_value('Navidrome', 'username', "ice")
-    navidrome_password_default = get_config_value('Navidrome', 'password', "!")
-    context_window_default = get_config_value('General', 'context_window', "8192")
-    max_attempts_default = get_config_value('General', 'max_attempts', "10")
-    user_likes_default = get_config_value('User', 'likes', "")
-    user_dislikes_default = get_config_value('User', 'dislikes', "")
-    favorite_artists_default = get_config_value('User', 'favorite_artists', "")
+    ollama_url_default = config.get('Ollama', 'url', fallback="http://localhost:11434/api/generate")
+    ollama_model_default = config.get('Ollama', 'model', fallback="phi4:latest")
+    navidrome_url_default = config.get('Navidrome', 'url', fallback="http://localhost:4533/rest")
+    navidrome_username_default = config.get('Navidrome', 'username', fallback="ice")
+    navidrome_password_default = config.get('Navidrome', 'password', fallback="!")
+    context_window_default = config.get('General', 'context_window', fallback="8192")
+    max_attempts_default = config.get('General', 'max_attempts', fallback="10")
+    user_likes_default = config.get('User', 'likes', fallback="")
+    user_dislikes_default = config.get('User', 'dislikes', fallback="")
+    favorite_artists_default = config.get('User', 'favorite_artists', fallback="")
 
-    enable_navidrome = get_config_value('Platforms', 'enable_navidrome', 'yes').lower() == 'yes'
-    enable_plex = get_config_value('Platforms', 'enable_plex', 'no').lower() == 'yes'
+    enable_navidrome = config.get('Platforms', 'enable_navidrome', fallback='yes').lower() == 'yes'
+    enable_plex = config.get('Platforms', 'enable_plex', fallback='no').lower() == 'yes'
 
-    plex_server_url = get_config_value('Plex', 'server_url', "http://localhost:32400")
-    plex_token = get_config_value('Plex', 'plex_token', "")
-    plex_machine_id = get_config_value('Plex', 'machine_id', "")
-    plex_playlist_type = get_config_value('Plex', 'playlist_type', "audio")
-    plex_music_section_id = get_config_value('Plex', 'music_section_id', "1")
+    plex_server_url = config.get('Plex', 'server_url', fallback="http://localhost:32400")
+    plex_token = config.get('Plex', 'plex_token', fallback="")
+    plex_machine_id = config.get('Plex', 'machine_id', fallback="")
+    plex_playlist_type = config.get('Plex', 'playlist_type', fallback="audio")
+    plex_music_section_id = config.get('Plex', 'music_section_id', fallback="1")
 
 def get_playlist_from_ollama(prompt):
     if DEBUG_OLLAMA_RESPONSE:
@@ -538,13 +444,6 @@ def create_playlist_in_navidrome(name, song_ids):
 def search_track_in_plex(title, artist):
     if not enable_plex:
         return None
-        
-    # Use cache for Plex searches
-    cache_key = f"{title}|{artist}"
-    cached_result = plex_cache.get(cache_key)
-    if cached_result is not None:
-        return cached_result
-        
     query_string = f"{artist} {title}"
     encoded_query = requests.utils.quote(query_string)
     url = f"{plex_server_url}/hubs/search/?X-Plex-Token={plex_token}&query={encoded_query}&sectionId={plex_music_section_id}&limit=10"
@@ -561,6 +460,7 @@ def search_track_in_plex(title, artist):
                     track_candidates = hub.findall("./Track")
                     
                     # Filter them to exclude "live" in track or album
+                    # Note: Plex track's album name is often in "parentTitle".
                     filtered_tracks = []
                     for track_el in track_candidates:
                         track_title = track_el.attrib.get("title", "").lower()
@@ -568,38 +468,19 @@ def search_track_in_plex(title, artist):
                         if "live" not in track_title and "live" not in album_title:
                             filtered_tracks.append(track_el)
 
+                    # If we have any filtered results, iterate them first
                     preferred_list = filtered_tracks if filtered_tracks else track_candidates
 
                     for track_el in preferred_list:
                         rating_key = track_el.attrib.get("ratingKey")
                         library_section_id = track_el.attrib.get("librarySectionID")
                         if rating_key and library_section_id:
-                            result = {"ratingKey": rating_key, "librarySectionID": library_section_id}
-                            plex_cache.set(cache_key, result)
                             print(f"Found Plex track ratingKey: {rating_key} for '{title}' by '{artist}', librarySectionID={library_section_id}")
-                            return result
+                            return {"ratingKey": rating_key, "librarySectionID": library_section_id}
         else:
-            print(f"Plex API error: {resp.status_code} - {resp.text}")
-            plex_cache.set(cache_key, None)
-            return None
-    except requests.exceptions.Timeout:
-        print(f"Timeout when searching for '{title}' by '{artist}' in Plex")
-        plex_cache.set(cache_key, None)
-        return None
-    except requests.exceptions.ConnectionError:
-        print(f"Connection error to Plex server when searching for '{title}' by '{artist}'")
-        plex_cache.set(cache_key, None)
-        return None
-    except ET.ParseError as e:
-        print(f"XML parse error in Plex response: {e}")
-        plex_cache.set(cache_key, None)
-        return None
+            print("Plex search error:", resp.status_code, resp.text)
     except Exception as e:
-        print(f"Unexpected error searching for track in Plex: {e}")
-        plex_cache.set(cache_key, None)
-        return None
-    
-    plex_cache.set(cache_key, None)
+        print("Plex search exception:", e)
     return None
 
 
@@ -661,25 +542,8 @@ def create_playlist_in_plex(name, library_ids):
         return None
 
 # -------------------- GENERATION FUNCTIONS --------------------
-def generate_playlist_core(playlist_name, prompt, output_callback=None):
-    """Core playlist generation functionality used by both standard and streaming modes
-    
-    Args:
-        playlist_name: Name of the playlist to create
-        prompt: Prompt to send to Ollama
-        output_callback: Optional function to call with status messages (for streaming)
-    
-    Returns:
-        tuple: ((navidrome_id, plex_id), status_message)
-    """
+def generate_playlist(playlist_name, prompt):
     update_globals()
-    
-    def emit_message(msg):
-        if output_callback:
-            output_callback(msg)
-        print(msg)
-    
-    emit_message(f"Starting playlist generation for '{playlist_name}'...")
     collected_tracks = []
     attempts = 0
     base_prompt = prompt
@@ -691,7 +555,7 @@ def generate_playlist_core(playlist_name, prompt, output_callback=None):
 
     while len(collected_tracks) < required_tracks and attempts < max_attempts:
         tracks = get_playlist_from_ollama(base_prompt)
-        emit_message(f"Ollama suggested {len(tracks)} tracks.")
+        print(f"Ollama suggested {len(tracks)} tracks.")
         for track in tracks:
             if len(collected_tracks) >= required_tracks:
                 break
@@ -712,11 +576,10 @@ def generate_playlist_core(playlist_name, prompt, output_callback=None):
                         plex_ratingkeys.append(plex_res["ratingKey"])
                         found_any = True
                     else:
-                        emit_message(f"Skipping track '{track['title']}' from section {plex_res['librarySectionID']} (base={base_section_id}).")
+                        print(f"Skipping track '{track['title']}' from section {plex_res['librarySectionID']} (base={base_section_id}).")
             if found_any:
                 collected_tracks.append(track)
-                emit_message(f"Found: {track['title']} by {track['artist']}")
-        
+                print(f"Found: {track['title']} by {track['artist']}")
         if len(collected_tracks) < required_tracks:
             missing = required_tracks - len(collected_tracks)
             last_suggestions = collected_tracks[-10:]
@@ -728,53 +591,91 @@ def generate_playlist_core(playlist_name, prompt, output_callback=None):
                 "that fit the refined criteria. Return only the JSON object. Do not include any introductory text or explanations."
             )
             attempts += 1
-            emit_message(f"Attempt {attempts}: Not enough tracks found. Updating prompt and retrying...")
-    
-    emit_message(f"Collected {len(collected_tracks)} tracks total.")
+            print(f"Attempt {attempts}: Not enough tracks, updating prompt and retrying.")
+    print(f"Collected {len(collected_tracks)} tracks.")
     if not collected_tracks:
-        emit_message("No tracks found. Exiting.")
         return (None, None), "No tracks found. Exiting."
-    
+
     random.shuffle(navidrome_song_ids)
     random.shuffle(plex_ratingkeys)
-    
+
     nd_playlist_id = None
     plex_playlist_id = None
-    
     if enable_navidrome and navidrome_song_ids:
         nd_playlist_id = create_playlist_in_navidrome(playlist_name, navidrome_song_ids)
-        emit_message(f"Navidrome playlist created with ID: {nd_playlist_id}")
-    
     if enable_plex and plex_ratingkeys:
         plex_playlist_id = create_playlist_in_plex(playlist_name, plex_ratingkeys)
-        emit_message(f"Plex playlist created with ratingKey: {plex_playlist_id}")
-    
-    # Save playlist history
-    save_playlist_history(playlist_name, collected_tracks, nd_playlist_id, plex_playlist_id)
-    
     message = f"Playlist '{playlist_name}' created."
     if nd_playlist_id:
         message += f" Navidrome ID: {nd_playlist_id}."
     if plex_playlist_id:
         message += f" Plex ratingKey: {plex_playlist_id}."
-    
-    emit_message("Generation complete.")
     return (nd_playlist_id, plex_playlist_id), message
 
-# Replace the generate_playlist function
-def generate_playlist(playlist_name, prompt):
-    return generate_playlist_core(playlist_name, prompt)
-
-# Replace the generate_playlist_stream function
 def generate_playlist_stream(playlist_name, prompt):
-    def streamer(message):
-        yield f"<p>{message}</p>\n"
-    
-    def wrapper(msg):
-        return f"<p>{msg}</p>\n"
-    
-    for chunk in generate_playlist_core(playlist_name, prompt, wrapper):
-        yield chunk
+    update_globals()
+    yield f"<p>Starting playlist generation for '{playlist_name}'...</p>\n"
+    collected_tracks = []
+    attempts = 0
+    base_prompt = prompt
+    max_attempts = int(max_attempts_default)
+    required_tracks = 45
+    navidrome_song_ids = []
+    plex_ratingkeys = []
+    base_section_id = None
+
+    while len(collected_tracks) < required_tracks and attempts < max_attempts:
+        tracks = get_playlist_from_ollama(base_prompt)
+        yield f"<p>Ollama suggested {len(tracks)} tracks.</p>\n"
+        for track in tracks:
+            if len(collected_tracks) >= required_tracks:
+                break
+            if any(t.get("title") == track["title"] and t.get("artist") == track["artist"] for t in collected_tracks):
+                continue
+            found_any = False
+            if enable_navidrome:
+                nd_id = search_track_in_navidrome(track["title"], track["artist"])
+                if nd_id:
+                    navidrome_song_ids.append(nd_id)
+                    found_any = True
+            if enable_plex:
+                plex_res = search_track_in_plex(track["title"], track["artist"])
+                if plex_res:
+                    if base_section_id is None:
+                        base_section_id = plex_res["librarySectionID"]
+                    if plex_res["librarySectionID"] == base_section_id:
+                        plex_ratingkeys.append(plex_res["ratingKey"])
+                        found_any = True
+                    else:
+                        yield f"<p>Skipping track '{track['title']}' from section {plex_res['librarySectionID']} (base={base_section_id}).</p>\n"
+            if found_any:
+                collected_tracks.append(track)
+                yield f"<p>Found: {track['title']} by {track['artist']}</p>\n"
+        if len(collected_tracks) < required_tracks:
+            missing = required_tracks - len(collected_tracks)
+            last_suggestions = collected_tracks[-10:]
+            context_lines = [f"{t['title']} by {t['artist']}" for t in last_suggestions]
+            context_str = ", ".join(context_lines)
+            base_prompt = (
+                f"{base_prompt}\nPreviously suggested (latest 10): {context_str}.\n"
+                f"Provide {missing} additional tracks, distinct from both the seed songs and any previously returned tracks, "
+                "that fit the refined criteria. Return only the JSON object. Do not include any introductory text or explanations."
+            )
+            attempts += 1
+            yield f"<p>Attempt {attempts}: Not enough tracks found. Updating prompt and retrying...</p>\n"
+    yield f"<p>Collected {len(collected_tracks)} tracks total.</p>\n"
+    if not collected_tracks:
+        yield "<p>No tracks found. Exiting.</p>\n"
+        return
+    random.shuffle(navidrome_song_ids)
+    random.shuffle(plex_ratingkeys)
+    if enable_navidrome and navidrome_song_ids:
+        nd_playlist_id = create_playlist_in_navidrome(playlist_name, navidrome_song_ids)
+        yield f"<p>Navidrome playlist created with ID: {nd_playlist_id}</p>\n"
+    if enable_plex and plex_ratingkeys:
+        plex_playlist_id = create_playlist_in_plex(playlist_name, plex_ratingkeys)
+        yield f"<p>Plex playlist created with ratingKey: {plex_playlist_id}</p>\n"
+    yield "<p>Generation complete.</p>\n"
 
 app = Flask(__name__)
 
@@ -971,33 +872,6 @@ def generate_route():
                                       context_window=context_window_default,
                                       max_attempts=max_attempts_default)
 
-@app.route("/history")
-def history():
-    playlists = get_playlist_history()
-    # Format dates for display
-    for p in playlists:
-        try:
-            created_date = datetime.datetime.fromisoformat(p['created'])
-            p['created'] = created_date.strftime("%B %d, %Y at %H:%M")
-        except ValueError:
-            pass
-    return render_template_string(HISTORY_TEMPLATE, playlists=playlists)
-
-@app.route("/rate_playlist", methods=["POST"])
-def rate_playlist_route():
-    data = request.json
-    playlist_id = data.get('playlist_id')
-    rating = data.get('rating')
-    
-    if not playlist_id or not rating:
-        return jsonify({"success": False, "message": "Missing playlist_id or rating"}), 400
-    
-    success = rate_playlist(playlist_id, rating)
-    if success:
-        return jsonify({"success": True})
-    else:
-        return jsonify({"success": False, "message": "Failed to save rating"}), 500
-
 def main():
     playlist_name = input("Enter the playlist name: ")
     playlist_description = input("Enter the playlist description: ")
@@ -1049,114 +923,3 @@ if __name__ == "__main__":
         app.run(host="0.0.0.0", port=5555, debug=True, use_reloader=False)
     else:
         main()
-
-# Add the SearchCache class if not already present
-class SearchCache:
-    def __init__(self, max_size=1000, ttl=3600):  # TTL in seconds (1 hour)
-        self.cache = {}
-        self.max_size = max_size
-        self.ttl = ttl
-    
-    def get(self, key):
-        if key in self.cache:
-            timestamp, value = self.cache[key]
-            if time.time() - timestamp < self.ttl:
-                return value
-            else:
-                # Expired
-                del self.cache[key]
-        return None
-    
-    def set(self, key, value):
-        # Ensure cache doesn't grow too large
-        if len(self.cache) >= self.max_size:
-            # Remove oldest items
-            oldest_keys = sorted(self.cache, key=lambda k: self.cache[k][0])[:len(self.cache) // 10]  # Remove 10% oldest
-            for old_key in oldest_keys:
-                del self.cache[old_key]
-        
-        self.cache[key] = (time.time(), value)
-
-# Create cache instances
-navidrome_cache = SearchCache()
-plex_cache = SearchCache()
-
-# Add these functions for playlist history management
-def save_playlist_history(playlist_name, tracks, navidrome_id=None, plex_id=None):
-    """Save playlist details to history file"""
-    history_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'playlist_history')
-    os.makedirs(history_dir, exist_ok=True)
-    
-    history_file = os.path.join(history_dir, 'playlist_history.json')
-    
-    # Load existing history or create new
-    if os.path.exists(history_file):
-        try:
-            with open(history_file, 'r') as f:
-                history = json.load(f)
-        except json.JSONDecodeError:
-            history = []
-    else:
-        history = []
-    
-    # Create new entry
-    new_entry = {
-        'id': len(history) + 1,
-        'name': playlist_name,
-        'created': datetime.datetime.now().isoformat(),
-        'navidrome_id': navidrome_id,
-        'plex_id': plex_id,
-        'tracks': tracks,
-        'rating': None  # To be filled later by user
-    }
-    
-    history.append(new_entry)
-    
-    # Save updated history
-    with open(history_file, 'w') as f:
-        json.dump(history, f, indent=2)
-    
-    return new_entry['id']
-
-def get_playlist_history():
-    """Retrieve saved playlist history"""
-    history_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'playlist_history')
-    history_file = os.path.join(history_dir, 'playlist_history.json')
-    
-    if not os.path.exists(history_file):
-        return []
-    
-    try:
-        with open(history_file, 'r') as f:
-            history = json.load(f)
-        return history
-    except (json.JSONDecodeError, IOError):
-        return []
-
-def rate_playlist(playlist_id, rating):
-    """Save user rating for a playlist"""
-    history_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'playlist_history')
-    history_file = os.path.join(history_dir, 'playlist_history.json')
-    
-    if not os.path.exists(history_file):
-        return False
-    
-    try:
-        with open(history_file, 'r') as f:
-            history = json.load(f)
-        
-        # Find and update the playlist
-        for playlist in history:
-            if playlist['id'] == playlist_id:
-                playlist['rating'] = rating
-                break
-        else:
-            return False  # Playlist not found
-        
-        # Save updated history
-        with open(history_file, 'w') as f:
-            json.dump(history, f, indent=2)
-        
-        return True
-    except (json.JSONDecodeError, IOError):
-        return False
