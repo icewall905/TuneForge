@@ -15,10 +15,10 @@ DEBUG_OLLAMA_RESPONSE = False  # Set to True to print prompt and raw responses f
 # --- Define Templates at the Top ---
 HOME_TEMPLATE = """
 <!doctype html>
-<html>
+<html data-bs-theme="light">
 <head>
   <title>Playlist Generator v0.9 by HNB (20.02.2025)</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     #artist_list { list-style-type: none; padding: 0; }
     #artist_list li { padding: 4px 0; }
@@ -27,12 +27,29 @@ HOME_TEMPLATE = """
       overflow-y: scroll;
       border: 1px solid #ccc;
       padding: 10px;
-      background-color: #f9f9f9;
+      background-color: var(--bs-tertiary-bg);
       font-family: monospace;
+    }
+    .theme-toggle {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 1000;
     }
   </style>
 </head>
 <body>
+  <div class="theme-toggle">
+    <button class="btn btn-sm" id="theme-toggle-btn">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-moon-stars" viewBox="0 0 16 16" id="dark-icon">
+        <path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278zM4.858 1.311A7.269 7.269 0 0 0 1.025 7.71c0 4.02 3.279 7.276 7.319 7.276a7.316 7.316 0 0 0 5.205-2.162c-.337.042-.68.063-1.029.063-4.61 0-8.343-3.714-8.343-8.29 0-1.167.242-2.278.681-3.286z"/>
+        <path d="M10.794 3.148a.217.217 0 0 1 .412 0l.387 1.162c.173.518.579.924 1.097 1.097l1.162.387a.217.217 0 0 1 0 .412l-1.162.387a1.734 1.734 0 0 0-1.097 1.097l-.387 1.162a.217.217 0 0 1-.412 0l-.387-1.162A1.734 1.734 0 0 0 9.31 6.593l-1.162-.387a.217.217 0 0 1 0-.412l1.162-.387a1.734 1.734 0 0 0 1.097-1.097l.387-1.162z"/>
+      </svg>
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-sun" viewBox="0 0 16 16" id="light-icon" style="display:none;">
+        <path d="M8 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm0 1a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0zm0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13zm8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5zM3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8zm10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0zm-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0zm9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707zM4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708z"/>
+      </svg>
+    </button>
+  </div>
   <div class="container my-5">
     <h1 class="mb-4">Playlist Generator v0.9 by HNB (20.02.2025)</h1>
     <div class="mb-3 text-end">
@@ -169,8 +186,52 @@ HOME_TEMPLATE = """
       <span> Please wait...</span>
     </div>
   </div>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
+    // Dark mode toggle functionality
+    document.addEventListener('DOMContentLoaded', function() {
+      const themeToggleBtn = document.getElementById('theme-toggle-btn');
+      const darkIcon = document.getElementById('dark-icon');
+      const lightIcon = document.getElementById('light-icon');
+      const htmlElement = document.documentElement;
+      
+      // Check for saved theme preference or use system preference
+      const savedTheme = localStorage.getItem('theme');
+      if (savedTheme) {
+        htmlElement.setAttribute('data-bs-theme', savedTheme);
+        updateIcon(savedTheme);
+      } else {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = prefersDark ? 'dark' : 'light';
+        htmlElement.setAttribute('data-bs-theme', theme);
+        updateIcon(theme);
+      }
+      
+      // Toggle theme when button is clicked
+      themeToggleBtn.addEventListener('click', function() {
+        const currentTheme = htmlElement.getAttribute('data-bs-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        
+        htmlElement.setAttribute('data-bs-theme', newTheme);
+        localStorage.setItem('theme', newTheme);
+        updateIcon(newTheme);
+      });
+      
+      function updateIcon(theme) {
+        if (theme === 'dark') {
+          darkIcon.style.display = 'none';
+          lightIcon.style.display = 'block';
+          themeToggleBtn.classList.remove('btn-dark');
+          themeToggleBtn.classList.add('btn-light');
+        } else {
+          darkIcon.style.display = 'block';
+          lightIcon.style.display = 'none';
+          themeToggleBtn.classList.remove('btn-light');
+          themeToggleBtn.classList.add('btn-dark');
+        }
+      }
+    });
+    
     function updateHiddenInput() {
       var listItems = document.querySelectorAll('#artist_list li span.artistName');
       var artists = [];
@@ -293,12 +354,31 @@ RESULT_TEMPLATE = """
 
 HISTORY_TEMPLATE = """
 <!doctype html>
-<html>
+<html data-bs-theme="light">
 <head>
   <title>Playlist Generator - History</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .theme-toggle {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 1000;
+    }
+  </style>
 </head>
 <body>
+  <div class="theme-toggle">
+    <button class="btn btn-sm" id="theme-toggle-btn">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-moon-stars" viewBox="0 0 16 16" id="dark-icon">
+        <path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278zM4.858 1.311A7.269 7.269 0 0 0 1.025 7.71c0 4.02 3.279 7.276 7.319 7.276a7.316 7.316 0 0 0 5.205-2.162c-.337.042-.68.063-1.029.063-4.61 0-8.343-3.714-8.343-8.29 0-1.167.242-2.278.681-3.286z"/>
+        <path d="M10.794 3.148a.217.217 0 0 1 .412 0l.387 1.162c.173.518.579.924 1.097 1.097l1.162.387a.217.217 0 0 1 0 .412l-1.162.387a1.734 1.734 0 0 0-1.097 1.097l-.387 1.162a.217.217 0 0 1-.412 0l-.387-1.162A1.734 1.734 0 0 0 9.31 6.593l-1.162-.387a.217.217 0 0 1 0-.412l1.162-.387a1.734 1.734 0 0 0 1.097-1.097l.387-1.162z"/>
+      </svg>
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-sun" viewBox="0 0 16 16" id="light-icon" style="display:none;">
+        <path d="M8 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm0 1a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0zm0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13zm8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5zM3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8zm10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0zm-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0zm9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707zM4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .708z"/>
+      </svg>
+    </button>
+  </div>
   <div class="container my-5">
     <h1 class="mb-4">Your Playlist History</h1>
     <a href="/" class="btn btn-primary mb-3">Back to Generator</a>
@@ -348,8 +428,52 @@ HISTORY_TEMPLATE = """
       {% endfor %}
     </div>
   </div>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script>
+    // Dark mode toggle functionality
+    document.addEventListener('DOMContentLoaded', function() {
+      const themeToggleBtn = document.getElementById('theme-toggle-btn');
+      const darkIcon = document.getElementById('dark-icon');
+      const lightIcon = document.getElementById('light-icon');
+      const htmlElement = document.documentElement;
+      
+      // Check for saved theme preference or use system preference
+      const savedTheme = localStorage.getItem('theme');
+      if (savedTheme) {
+        htmlElement.setAttribute('data-bs-theme', savedTheme);
+        updateIcon(savedTheme);
+      } else {
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const theme = prefersDark ? 'dark' : 'light';
+        htmlElement.setAttribute('data-bs-theme', theme);
+        updateIcon(theme);
+      }
+      
+      // Toggle theme when button is clicked
+      themeToggleBtn.addEventListener('click', function() {
+        const currentTheme = htmlElement.getAttribute('data-bs-theme');
+        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+        
+        htmlElement.setAttribute('data-bs-theme', newTheme);
+        localStorage.setItem('theme', newTheme);
+        updateIcon(newTheme);
+      });
+      
+      function updateIcon(theme) {
+        if (theme === 'dark') {
+          darkIcon.style.display = 'none';
+          lightIcon.style.display = 'block';
+          themeToggleBtn.classList.remove('btn-dark');
+          themeToggleBtn.classList.add('btn-light');
+        } else {
+          darkIcon.style.display = 'block';
+          lightIcon.style.display = 'none';
+          themeToggleBtn.classList.remove('btn-light');
+          themeToggleBtn.classList.add('btn-dark');
+        }
+      }
+    });
+    
     function ratePlaylist(playlistId, rating) {
       fetch('/rate_playlist', {
         method: 'POST',
@@ -391,8 +515,44 @@ def update_globals():
     global plex_token, plex_machine_id, plex_playlist_type, plex_music_section_id
 
     config.read('setup.conf')
+    # Use Ollama's default URL if not explicitly set
     ollama_url_default = get_config_value('Ollama', 'url', "http://localhost:11434/api/generate")
+    
+    # Use Ollama's model defaults with fallback to phi4:latest
     ollama_model_default = get_config_value('Ollama', 'model', "phi4:latest")
+    
+    # Check if we need to ping Ollama to get available models
+    if ollama_model_default == "auto" or not ollama_model_default:
+        try:
+            # Try to get models from Ollama API
+            ollama_base_url = ollama_url_default.split('/api/')[0]
+            models_url = f"{ollama_base_url}/api/tags"
+            response = requests.get(models_url, timeout=5)
+            if response.status_code == 200:
+                models_data = response.json()
+                available_models = [model.get('name') for model in models_data.get('models', [])]
+                # Prioritize specific models if available
+                preferred_models = ["phi4", "phi3", "llama3", "mixtral", "gemma"]
+                for preferred in preferred_models:
+                    for model in available_models:
+                        if preferred in model.lower():
+                            ollama_model_default = model
+                            break
+                    if ollama_model_default != "auto" and ollama_model_default:
+                        break
+                        
+                # If no preferred model found, use the first available one
+                if ollama_model_default == "auto" or not ollama_model_default:
+                    if available_models:
+                        ollama_model_default = available_models[0]
+                    else:
+                        ollama_model_default = "phi4:latest"  # Default fallback
+            else:
+                ollama_model_default = "phi4:latest"  # Default fallback
+        except Exception as e:
+            print(f"Error getting Ollama models: {e}")
+            ollama_model_default = "phi4:latest"  # Default fallback
+    
     navidrome_url_default = get_config_value('Navidrome', 'url', "http://localhost:4533/rest")
     navidrome_username_default = get_config_value('Navidrome', 'username', "ice")
     navidrome_password_default = get_config_value('Navidrome', 'password', "!")
