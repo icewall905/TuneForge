@@ -1,0 +1,27 @@
+# Ollama Playlist Generator
+# Copy this file to setup.conf and modify as needed
+
+[OLLAMA]
+URL = http://localhost:11434
+Model = llama3
+ContextWindow = 2048
+MaxAttempts = 3
+
+[NAVIDROME]
+URL = 
+Username = 
+Password = 
+
+[PLEX]
+ServerURL = 
+Token = 
+MachineID = 
+PlaylistType = audio
+MusicSectionID = 
+
+[APP]
+Likes = genres: electronic, ambient, idm. artists: aphex twin, boards of canada
+Dislikes = genres: country, pop. artists: taylor swift
+FavoriteArtists = 
+EnableNavidrome = no
+EnablePlex = no

@@ -1,102 +1,135 @@
 # Ollama Playlist Generator
 
-This repository contains a Flask-based application that generates playlists using the Ollama language model. The app interacts with Ollama's API and Navidrome and/or Plex to generate and create playlists based on user-defined criteria.
+A web application that uses Ollama's LLM capabilities to generate personalized music playlists that can be saved to Navidrome or Plex.
 
 Repository: [https://github.com/icewall905/ollama-playlist-generator](https://github.com/icewall905/ollama-playlist-generator)
 
 ## Features
 
-- **Interactive Web Interface**: Use an intuitive web form to generate playlists.
-- **Ollama Integration**: Leverages the Ollama language model (e.g. `deepseek-r1:8b`) to generate song suggestions.
-- **Navidrome Integration**: Searches for tracks using the Navidrome API.
-- **Dynamic Configuration**: Update configuration (such as API URLs, model, context window, maximum retry attempts) via the web interface. Changes are saved immediately and re-read on every generate request.
+- Generate personalized playlists based on your music preferences
+- Integration with Navidrome and Plex for music library access
+- Track search and playlist creation in supported platforms
+- Save and view playlist history
+- Rate your generated playlists
+- Modern dark-mode UI with responsive design
 
 ## Requirements
 
-- Python 3.x
+- Python 3.7+
 - Flask
 - Requests
-
-**Also**:
-
-- A running Ollama server. (And some model to suggest tracks.)
-- A running Navidrome server.
+- Ollama running locally or on a remote server
+- (Optional) Navidrome or Plex Media Server for playlist integration
 
 ## Installation
 
 1. **Clone the Repository**:
-
    ```bash
    git clone https://github.com/icewall905/ollama-playlist-generator.git
    cd ollama-playlist-generator
+   ```
 
-2. **Create a virtual evt**:
-python3 -m venv venv
-source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+2. **Create a virtual environment** (recommended):
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+   ```
 
-3. **Install reqs as needed**:
-pip install -r requirements.txt
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 4. **Configure settings**:
-   - Edit `setup.conf` to set up Ollama and Navidrome endpoints, credentials, and retry attempts. (Or set it up in the webui after next step)
+   - Copy the example configuration file:
+     ```bash
+     cp config.ini.example config.ini
+     ```
+   - Edit `config.ini` with your Ollama, Navidrome, and/or Plex settings
+   - You can also configure settings through the web interface
 
-5. **Run**:
-To run directly in console:
-python3 ollama_playlist_generator.py
+## Usage
 
-To start webui:
-python3 ollama_playlist_generator.py web (You can reach it at http://127.0.0.1:5555)
+1. **Start the web application**:
+   ```bash
+   python run.py
+   ```
 
+2. **Access the web interface**:
+   ```
+   http://localhost:5001
+   ```
 
+3. **Generate a playlist**:
+   - Enter a playlist name and description
+   - Fill in your musical likes, dislikes, and favorite artists
+   - Click "Generate Playlist"
+   - The app will generate suggestions and search for them in your configured music platforms
+   - Results will appear in real-time in the console output
+   - Playlists can be saved to your history and rated
 
-5. Open the web interface at:
-    ```
-    http://127.0.0.1:5555
-    ```
+## Project Structure
 
-## Usage Guide
-
-### Generating a Playlist
-1. Open the web interface.
-2. Enter a **playlist name** and **description**.
-3. Fill in **likes, dislikes, and favorite artists**.
-4. Click `Generate Playlist`.
-5. The generated playlist will appear in the console output.
-
-### Saving Configuration
-1. Adjust settings in the web interface.
-2. Click `Save Settings` to persist changes to `setup.conf`.
+```
+ollama-playlist-generator/
+├── app/                     # Application package
+│   ├── __init__.py          # Flask app initialization
+│   └── routes.py            # Application routes and main logic
+├── static/                  # Static assets
+│   ├── css/                 # CSS stylesheets
+│   │   ├── style.css        # Main stylesheet
+│   │   └── custom.css       # Additional custom styles
+│   ├── js/                  # JavaScript files
+│   │   └── main.js          # Main JavaScript logic
+│   └── images/              # Image assets
+├── templates/               # Jinja2 templates
+│   ├── layout.html          # Base template with sidebar layout
+│   ├── index.html           # Playlist generation page
+│   ├── history.html         # Playlist history page
+│   └── settings.html        # Settings page
+├── run.py                   # Application entry point
+├── config.ini.example       # Example configuration file
+└── requirements.txt         # Python dependencies
+```
 
 ## Running in Production
-To run the server persistently, consider using:
-```sh
-nohup python3 generator.py web &
+
+For production deployment, consider:
+
+```bash
+# Using nohup
+nohup python run.py &
+
+# Or using a process manager like systemd
 ```
-Or run it with a process manager like `systemd` or `supervisord`.
 
-Example systemd:
+Example systemd service file:
+```ini
+[Unit]
+Description=Ollama Playlist Generator
+After=network.target
 
-```sh
-   [Unit]
-   Description=Playlist Generator Web Service
-   After=network.target
-   
-   [Service]
-   User=root
-   WorkingDirectory=/opt/playlistgenerator
-   ExecStart=/usr/bin/python3 playlist-generator.py web 5555
-   Restart=always
-   RestartSec=5
-   
-   [Install]
-   WantedBy=multi-user.target
+[Service]
+User=your_user
+WorkingDirectory=/path/to/ollama-playlist-generator
+ExecStart=/path/to/python /path/to/ollama-playlist-generator/run.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
 ```
 
 ## Troubleshooting
-- If the server fails to start, ensure `setup.conf` is correctly configured.
-- If playlists are not being generated, check that Ollama is running and accessible.
-- Increase `max_attempts` in `setup.conf` if you receive too few tracks.
-- Enable "DEBUG_OLLAMA_RESPONSE" to get extra output in console.
+
+- If the server fails to start, ensure `config.ini` is correctly configured
+- If playlists are not being generated, check that Ollama is running and accessible
+- Adjust the `max_attempts` in settings if you receive too few tracks
+- Enable "DEBUG_OLLAMA_RESPONSE" in the code for more detailed output
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## License
 This project is licensed under the MIT License.

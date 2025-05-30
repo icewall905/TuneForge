@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Ollama Playlist Generator{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- If you plan to use Bootstrap JS components, uncomment the line below -->
+    <!-- <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script> -->
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <img src="{{ url_for('static', filename='images/logo.svg') }}" alt="Logo" class="sidebar-logo" style="width:80px; height:auto; margin-bottom:10px;"> 
+            <!-- Hidden h2 for accessibility if logo is the main title, or replace with actual text -->
+            <h2>Playlist Gen</h2> 
+            <p class="tagline">AI Powered Playlists</p>
+        </div>
+        <nav class="sidebar-nav">
+            <div class="sidebar-section">
+                <h3>Menu</h3>
+                <ul>
+                    <li><a href="{{ url_for('main.home') }}" class="{% if request.endpoint == 'main.home' %}active{% endif %}">Generate</a></li>
+                    <li><a href="{{ url_for('main.history_page') }}" class="{% if request.endpoint == 'main.history_page' %}active{% endif %}">History</a></li>
+                    <li><a href="{{ url_for('main.settings_page') }}" class="{% if request.endpoint == 'main.settings_page' %}active{% endif %}">Settings</a></li>
+                </ul>
+            </div>
+        </nav>
+        <div class="sidebar-footer">
+            <p class="version-info">v0.1.1</p>
+        </div>
+    </div>
+
+    <div class="main-content">
+        {% block content %}{% endblock %}
+    </div>
+
+    <script>
+        // Basic dark mode toggle based on your original script, adapted for new structure
+        document.addEventListener('DOMContentLoaded', function() {
+            const themeToggleBtn = document.getElementById('theme-toggle-btn'); // Assuming you'll add this button somewhere
+            const htmlElement = document.documentElement;
+            
+            function updateThemeIcon(theme) {
+                // Logic to update an icon if you have one, e.g., in the sidebar or main content header
+                // For now, this is a placeholder.
+                // Example: if (theme === 'dark') { darkIcon.style.display = 'none'; lightIcon.style.display = 'block'; }
+            }
+
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme) {
+                htmlElement.setAttribute('data-bs-theme', savedTheme);
+                updateThemeIcon(savedTheme);
+            } else {
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                const initialTheme = prefersDark ? 'dark' : 'light';
+                htmlElement.setAttribute('data-bs-theme', initialTheme);
+                updateThemeIcon(initialTheme);
+            }
+            
+            if (themeToggleBtn) {
+                themeToggleBtn.addEventListener('click', function() {
+                    const currentTheme = htmlElement.getAttribute('data-bs-theme');
+                    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                    htmlElement.setAttribute('data-bs-theme', newTheme);
+                    localStorage.setItem('theme', newTheme);
+                    updateThemeIcon(newTheme);
+                });
+            }
+        });
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

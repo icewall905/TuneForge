@@ -1,0 +1,210 @@
+{% extends 'layout.html' %}
+
+{% block title %}Settings - Ollama Playlist Generator{% endblock %}
+
+{% block content %}
+<div class="content-container">
+    <h1>Settings</h1>
+    
+    <div class="settings-form">
+        <form id="settingsForm" action="{{ url_for('main.settings_page') }}" method="post">
+            <div class="settings-section">
+                <h2>Core Settings</h2>
+                
+                <div class="settings-group">
+                    <h3>Ollama Configuration</h3>
+                    <div class="form-group">
+                        <label for="ollama_url">Ollama URL:</label>
+                        <input type="text" id="ollama_url" name="ollama_url" value="{{ ollama_url }}" placeholder="http://localhost:11434">
+                        <p class="help-text">The URL of your Ollama API server.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="ollama_model">Ollama Model:</label>
+                        <input type="text" id="ollama_model" name="ollama_model" value="{{ ollama_model }}" placeholder="llama3">
+                        <p class="help-text">The language model to use (e.g. llama3, mistral). Use "auto" to detect.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="context_window">Context Window:</label>
+                        <input type="number" id="context_window" name="context_window" value="{{ context_window }}" min="512" max="32000">
+                        <p class="help-text">Size of the context window. Higher values may improve quality but use more memory.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="max_attempts">Max Retry Attempts:</label>
+                        <input type="number" id="max_attempts" name="max_attempts" value="{{ max_attempts }}" min="1" max="10">
+                        <p class="help-text">Number of times to retry generation if insufficient tracks are found.</p>
+                    </div>
+                </div>
+                
+                <div class="settings-group">
+                    <h3>Music Preferences</h3>
+                    <div class="form-group">
+                        <label for="likes">My Likes:</label>
+                        <textarea id="likes" name="likes" rows="3">{{ likes }}</textarea>
+                        <p class="help-text">Genres, artists, or moods that you like.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="dislikes">My Dislikes:</label>
+                        <textarea id="dislikes" name="dislikes" rows="3">{{ dislikes }}</textarea>
+                        <p class="help-text">Genres, artists, or moods that you dislike.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="favorite_artists">Favorite Artists:</label>
+                        <textarea id="favorite_artists" name="favorite_artists" rows="3">{{ favorite_artists }}</textarea>
+                        <p class="help-text">Your favorite artists (comma-separated).</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h2>Platform Settings</h2>
+                
+                <div class="settings-group">
+                    <h3>Platform Selection</h3>
+                    <div class="form-group">
+                        <label for="enable_navidrome">Enable Navidrome:</label>
+                        <select id="enable_navidrome" name="enable_navidrome" class="settings-select">
+                            <option value="yes" {% if enable_navidrome == "yes" %}selected{% endif %}>Yes</option>
+                            <option value="no" {% if enable_navidrome == "no" %}selected{% endif %}>No</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="enable_plex">Enable Plex:</label>
+                        <select id="enable_plex" name="enable_plex" class="settings-select">
+                            <option value="yes" {% if enable_plex == "yes" %}selected{% endif %}>Yes</option>
+                            <option value="no" {% if enable_plex == "no" %}selected{% endif %}>No</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="settings-group" id="navidromeSettings">
+                    <h3>Navidrome Configuration</h3>
+                    <div class="form-group">
+                        <label for="navidrome_url">Navidrome URL:</label>
+                        <input type="text" id="navidrome_url" name="navidrome_url" value="{{ navidrome_url }}" placeholder="http://localhost:4533">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="navidrome_username">Navidrome Username:</label>
+                        <input type="text" id="navidrome_username" name="navidrome_username" value="{{ navidrome_username }}">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="navidrome_password">Navidrome Password:</label>
+                        <input type="password" id="navidrome_password" name="navidrome_password" value="{{ navidrome_password }}">
+                    </div>
+                </div>
+                
+                <div class="settings-group" id="plexSettings">
+                    <h3>Plex Configuration</h3>
+                    <div class="form-group">
+                        <label for="plex_server_url">Plex Server URL:</label>
+                        <input type="text" id="plex_server_url" name="plex_server_url" value="{{ plex_server_url }}" placeholder="http://localhost:32400">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="plex_token">Plex Token:</label>
+                        <input type="text" id="plex_token" name="plex_token" value="{{ plex_token }}">
+                        <p class="help-text">Your Plex authentication token.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="plex_machine_id">Plex Machine ID:</label>
+                        <input type="text" id="plex_machine_id" name="plex_machine_id" value="{{ plex_machine_id }}">
+                        <p class="help-text">The machine identifier for your Plex server.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="plex_playlist_type">Plex Playlist Type:</label>
+                        <input type="text" id="plex_playlist_type" name="plex_playlist_type" value="{{ plex_playlist_type }}" placeholder="audio">
+                        <p class="help-text">The type of playlist to create (usually 'audio').</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="plex_music_section_id">Plex Music Library Section ID:</label>
+                        <input type="text" id="plex_music_section_id" name="plex_music_section_id" value="{{ plex_music_section_id }}">
+                        <p class="help-text">The ID of your Plex music library section.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <button type="submit" class="primary-button">Save Settings</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Function to toggle platform settings visibility
+        function togglePlatformSettings() {
+            const enableNavidrome = document.getElementById('enable_navidrome').value;
+            const enablePlex = document.getElementById('enable_plex').value;
+            
+            document.getElementById('navidromeSettings').style.display = enableNavidrome === 'yes' ? 'block' : 'none';
+            document.getElementById('plexSettings').style.display = enablePlex === 'yes' ? 'block' : 'none';
+        }
+        
+        // Add event listeners
+        document.getElementById('enable_navidrome').addEventListener('change', togglePlatformSettings);
+        document.getElementById('enable_plex').addEventListener('change', togglePlatformSettings);
+        
+        // Initialize visibility on page load
+        togglePlatformSettings();
+        
+        // Handle form submission with a success message
+        document.getElementById('settingsForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            
+            fetch('/settings', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (response.ok) {
+                    // Create a success message
+                    const message = document.createElement('div');
+                    message.className = 'message success';
+                    message.textContent = 'Settings saved successfully!';
+                    
+                    // Insert it at the top of the form
+                    const form = document.getElementById('settingsForm');
+                    form.parentNode.insertBefore(message, form);
+                    
+                    // Remove after a few seconds
+                    setTimeout(() => {
+                        message.remove();
+                    }, 3000);
+                }
+            })
+            .catch(error => {
+                console.error('Error saving settings:', error);
+                
+                // Create an error message
+                const message = document.createElement('div');
+                message.className = 'message error';
+                message.textContent = 'Error saving settings: ' + error;
+                
+                // Insert it at the top of the form
+                const form = document.getElementById('settingsForm');
+                form.parentNode.insertBefore(message, form);
+                
+                // Remove after a few seconds
+                setTimeout(() => {
+                    message.remove();
+                }, 5000);
+            });
+        });
+    });
+</script>
+{% endblock %}
