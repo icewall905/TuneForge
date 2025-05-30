@@ -1,1 +1,12 @@
 setup.conf
+config.ini
+playlist_history.json
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
+venv/
+env/
+ENV/
+*.log
+logs/

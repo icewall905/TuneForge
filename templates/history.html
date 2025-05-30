@@ -1,0 +1,235 @@
+{% extends 'layout.html' %}
+
+{% block title %}Playlist History - Ollama Playlist Generator{% endblock %}
+
+{% block content %}
+<div class="content-container">
+    <h1>Playlist History</h1>
+    
+    {% if history %}
+        <div class="track-grid">
+            {% for playlist in history %}
+                <div class="track-card">
+                    <div class="track-art default-art">
+                        <div class="art-placeholder">🎵</div>
+                    </div>
+                    <div class="track-info">
+                        <div class="track-title">{{ playlist.name }}</div>
+                        <div class="track-artist">{{ playlist.platform }}</div>
+                        <div class="track-album">{{ playlist.created_at|replace('T', ' ')|truncate(16, true, '') }}</div>
+                    </div>
+                    <div class="track-actions">
+                        <div class="rating">
+                            {% for i in range(1, 6) %}
+                                <button class="text-button rating-star {% if playlist.rating == i %}active{% endif %}" 
+                                    data-playlist-id="{{ playlist.id }}" data-rating="{{ i }}">
+                                    {% if playlist.rating >= i %}★{% else %}☆{% endif %}
+                                </button>
+                            {% endfor %}
+                        </div>
+                        <button class="text-button" data-playlist-id="{{ playlist.id }}">Details</button>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="message">
+            <p>No playlists have been generated yet. <a href="{{ url_for('main.home') }}">Generate a playlist</a> to get started.</p>
+        </div>
+    {% endif %}
+
+    <!-- Modal for playlist details -->
+    <div id="playlistDetailsModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h2 id="modalPlaylistName"></h2>
+            <p id="modalPlaylistDescription" class="track-artist"></p>
+            <p id="modalPlaylistInfo" class="track-album"></p>
+            
+            <div class="playlist-actions">
+                <button class="btn btn-primary" onclick="sharePlaylist()">Share Playlist</button>
+                <div id="share-link-container" style="display: none; margin-top: 10px;">
+                    <input type="text" id="share-link" class="form-control" readonly>
+                    <button class="btn btn-sm btn-secondary" onclick="copyShareLink()">Copy</button>
+                </div>
+            </div>
+            
+            <div class="playlist-tracks">
+                <h3>Tracks</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Artist</th>
+                            <th>Title</th>
+                            <th>Platform</th>
+                        </tr>
+                    </thead>
+                    <tbody id="modalTracksList">
+                        <!-- Tracks will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script type="text/javascript">
+    // Variables for sharing
+    let currentPlaylistId = null;
+    
+    // Add event listeners when the DOM is loaded
+    document.addEventListener('DOMContentLoaded', function() {
+        // Add event listeners for rating stars
+        document.querySelectorAll('.rating-star').forEach(star => {
+            star.addEventListener('click', function() {
+                const playlistId = this.getAttribute('data-playlist-id');
+                const rating = this.getAttribute('data-rating');
+                ratePlaylist(playlistId, rating);
+            });
+        });
+        
+        // Add event listeners for details buttons
+        document.querySelectorAll('.text-button:not(.rating-star)').forEach(button => {
+            button.addEventListener('click', function() {
+                const playlistId = this.getAttribute('data-playlist-id');
+                viewPlaylistDetails(playlistId);
+            });
+        });
+    });
+    
+    // Function to rate a playlist
+    function ratePlaylist(playlistId, rating) {
+        const formData = new FormData();
+        formData.append('rating', rating);
+        
+        fetch(`/history/rate/${playlistId}`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (response.ok) {
+                // Update UI
+                const stars = document.querySelectorAll(`.rating-star[onclick*="${playlistId}"]`);
+                stars.forEach((star, index) => {
+                    if (index < rating) {
+                        star.textContent = '★';
+                        star.classList.add('active');
+                    } else {
+                        star.textContent = '☆';
+                        star.classList.remove('active');
+                    }
+                });
+            }
+        })
+        .catch(error => console.error('Error rating playlist:', error));
+    }
+    
+    // Function to view playlist details
+    function viewPlaylistDetails(playlistId) {
+        // Store the current playlist ID for sharing
+        currentPlaylistId = playlistId;
+        
+        // Fetch the playlist from our history array
+        const historyData = JSON.parse('{{ history|tojson|safe }}');
+        const playlist = historyData.find(p => p.id === playlistId);
+        
+        // Return early if playlist not found
+        if (!playlist) {
+            console.error('Playlist not found:', playlistId);
+            return;
+        }
+        
+        // Update modal content
+        document.getElementById('modalPlaylistName').textContent = playlist.name;
+        document.getElementById('modalPlaylistDescription').textContent = playlist.description || '(No description)';
+        
+        // Hide the share link container when opening a new playlist
+        document.getElementById('share-link-container').style.display = 'none';
+        
+        let infoText = `Created: ${playlist.created_at.replace('T', ' ').substring(0, 16)}`;
+        if (playlist.platform_playlist_id) {
+            infoText += ` • ${playlist.platform} ID: ${playlist.platform_playlist_id}`;
+        }
+        document.getElementById('modalPlaylistInfo').textContent = infoText;
+        
+        // Add tracks to the table
+        const tracksList = document.getElementById('modalTracksList');
+        tracksList.innerHTML = '';
+        
+        if (playlist.tracks && playlist.tracks.length > 0) {
+            playlist.tracks.forEach(track => {
+                const row = document.createElement('tr');
+                
+                const artistCell = document.createElement('td');
+                artistCell.textContent = track.artist;
+                
+                const titleCell = document.createElement('td');
+                titleCell.textContent = track.title;
+                
+                const platformCell = document.createElement('td');
+                platformCell.textContent = track.found_on || playlist.platform;
+                
+                row.appendChild(artistCell);
+                row.appendChild(titleCell);
+                row.appendChild(platformCell);
+                
+                tracksList.appendChild(row);
+            });
+        } else {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 3;
+            cell.textContent = 'No tracks found';
+            cell.style.textAlign = 'center';
+            row.appendChild(cell);
+            tracksList.appendChild(row);
+        }
+        
+        // Show the modal
+        document.getElementById('playlistDetailsModal').style.display = 'block';
+    }
+    
+    // Close the modal
+    function closeModal() {
+        document.getElementById('playlistDetailsModal').style.display = 'none';
+    }
+    
+    // Close modal when clicking outside of it
+    window.onclick = function(event) {
+        const modal = document.getElementById('playlistDetailsModal');
+        if (event.target === modal) {
+            modal.style.display = 'none';
+        }
+    }
+    
+    // Function to share a playlist
+    function sharePlaylist() {
+        if (!currentPlaylistId) return;
+        
+        // Create a shareable link using the current hostname
+        const shareLink = `${window.location.origin}/shared-playlist/${currentPlaylistId}`;
+        
+        // Show the share container
+        const container = document.getElementById('share-link-container');
+        container.style.display = 'block';
+        
+        // Set the link in the input field
+        const linkInput = document.getElementById('share-link');
+        linkInput.value = shareLink;
+        linkInput.focus();
+        linkInput.select();
+    }
+    
+    // Function to copy the share link
+    function copyShareLink() {
+        const linkInput = document.getElementById('share-link');
+        linkInput.select();
+        document.execCommand('copy');
+        
+        // Show a small toast or notification
+        alert('Link copied to clipboard!');
+    }
+</script>
+{% endblock %}

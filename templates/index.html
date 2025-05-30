@@ -1,0 +1,163 @@
+{% extends 'layout.html' %}
+
+{% block title %}Generate Playlist - Ollama Playlist Generator{% endblock %}
+
+{% block content %}
+<div class="content-container">
+    <h1>Generate Playlist</h1>
+    
+    <div class="playlist-container">
+        <form id="playlistForm">
+            <div class="settings-section">
+                <div class="form-group">
+                    <label for="playlist_name">Playlist Name:</label>
+                    <input type="text" id="playlist_name" name="playlist_name" class="form-control" placeholder="Enter playlist name (optional)">
+                </div>
+                
+                <div class="form-group">
+                    <label for="playlist_description">Playlist Description:</label>
+                    <textarea id="playlist_description" name="playlist_description" class="form-control" rows="2" placeholder="Enter a description for your playlist (optional)"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="likes">My Likes:</label>
+                    <textarea id="likes" name="likes" class="form-control" rows="3" placeholder="Genres, artists, moods that you like">{{ likes }}</textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="dislikes">My Dislikes:</label>
+                    <textarea id="dislikes" name="dislikes" class="form-control" rows="3" placeholder="Genres, artists, moods that you dislike">{{ dislikes }}</textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="artist_input">Add Favorite Artist:</label>
+                    <div class="input-group">
+                        <input type="text" id="artist_input" class="form-control" placeholder="Enter artist name">
+                        <button type="button" id="add_artist" class="secondary-button">Add</button>
+                    </div>
+                </div>
+                
+                <input type="hidden" id="favorite_artists" name="favorite_artists" value="{{ favorite_artists }}">
+                
+                <div class="form-group">
+                    <label>Favorite Artists:</label>
+                    <ul id="artist_list" class="list-group"></ul>
+                </div>
+                
+                <div class="form-group">
+                    <button type="submit" name="action" value="generate" class="primary-button">Generate Playlist</button>
+                </div>
+            </div>
+        </form>
+        
+        <div id="loading" style="display:none;" class="loading-large">
+            <p>Generating playlist, please wait...</p>
+        </div>
+        
+        <div class="results-container">
+            <h2>Console Output</h2>
+            <div id="console_output" class="console-output"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        function updateHiddenInput() {
+            const listItems = document.querySelectorAll('#artist_list li');
+            const artists = Array.from(listItems).map(item => item.querySelector('.artist-name').textContent);
+            document.getElementById('favorite_artists').value = artists.join(', ');
+        }
+        
+        function addArtist() {
+            const input = document.getElementById('artist_input');
+            const artistName = input.value.trim();
+            if (artistName === '') return;
+            
+            const li = document.createElement('li');
+            li.className = "list-group-item";
+            
+            const artistSpan = document.createElement('span');
+            artistSpan.className = 'artist-name';
+            artistSpan.textContent = artistName;
+            li.appendChild(artistSpan);
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = "text-button";
+            removeBtn.textContent = 'Remove';
+            removeBtn.onclick = function() { 
+                li.remove(); 
+                updateHiddenInput(); 
+            };
+            li.appendChild(removeBtn);
+            
+            document.getElementById('artist_list').appendChild(li);
+            input.value = '';
+            updateHiddenInput();
+        }
+        
+        document.getElementById('add_artist').addEventListener('click', addArtist);
+        
+        // Initialize favorite artists from hidden input
+        window.onload = function() {
+            const hiddenInput = document.getElementById('favorite_artists');
+            const existing = hiddenInput.value;
+            if (existing.trim() !== '') {
+                const artists = existing.split(',').map(a => a.trim());
+                artists.forEach(function(artist) {
+                    if (artist !== '') {
+                        document.getElementById('artist_input').value = artist;
+                        addArtist();
+                    }
+                });
+            }
+        };
+        
+        // Handle form submission for playlist generation
+        document.getElementById('playlistForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            document.getElementById('loading').style.display = 'block';
+            const outputElement = document.getElementById('console_output');
+            outputElement.innerHTML = '';
+            
+            const formData = new FormData(this);
+            formData.append('action', 'generate');
+            
+            fetch('/generate', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                function readStream() {
+                    return reader.read().then(({ done, value }) => {
+                        if (done) {
+                            document.getElementById('loading').style.display = 'none';
+                            return;
+                        }
+                        
+                        const text = decoder.decode(value, { stream: true });
+                        outputElement.innerHTML += text.replace(/\n/g, '<br>');
+                        outputElement.scrollTop = outputElement.scrollHeight;
+                        
+                        return readStream();
+                    });
+                }
+                
+                return readStream();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('loading').style.display = 'none';
+                outputElement.innerHTML += `<p class="error">Error: ${error}</p>`;
+            });
+        });
+    });
+</script>
+{% endblock %}
