@@ -1,4 +1,5 @@
 # TuneForge
+![logo_big](https://github.com/user-attachments/assets/6914b37d-f306-4732-85ef-c87ffb141681)
 
 A web application that uses Ollama's LLM capabilities to generate personalized music playlists that can be saved to Navidrome or Plex.
 
