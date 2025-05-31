@@ -21,10 +21,11 @@
                     <p class="help-text">Your Plex authentication token.</p>
                 </div>
                 
+                <!-- Music Section ID is not strictly needed for a basic connection test, but can be kept for consistency or future use -->
                 <div class="form-group">
-                    <label for="plex_music_section_id">Plex Music Section ID:</label>
+                    <label for="plex_music_section_id">Plex Music Section ID (Optional):</label>
                     <input type="text" id="plex_music_section_id" name="plex_music_section_id" value="{{ plex_music_section_id }}">
-                    <p class="help-text">The section ID of your Plex music library.</p>
+                    <p class="help-text">The section ID of your Plex music library. Not used for this basic connection test.</p>
                 </div>
                 
                 <div class="form-actions">
@@ -44,7 +45,6 @@
         <div id="result-details-toggle" class="details-toggle" style="display: none;">
             <a href="#" onclick="toggleDetails(); return false;">Show Technical Details</a>
         </div>
-        
         <div id="result-details" class="result-details" style="display: none;">
             <h3>Technical Details</h3>
             <pre id="result-json"></pre>
@@ -68,13 +68,13 @@ document.addEventListener('DOMContentLoaded', function() {
         // Get form values
         const plexServerUrl = document.getElementById('plex_server_url').value;
         const plexToken = document.getElementById('plex_token').value;
-        const plexMusicSectionId = document.getElementById('plex_music_section_id').value;
+        // const plexMusicSectionId = document.getElementById('plex_music_section_id').value; // Not sent for basic test
         
         // Prepare request
         const requestData = {
             plex_server_url: plexServerUrl,
-            plex_token: plexToken,
-            plex_music_section_id: plexMusicSectionId
+            plex_token: plexToken
+            // plex_music_section_id: plexMusicSectionId // Not needed for basic connection test
         };
         
         try {
@@ -85,6 +85,7 @@ document.addEventListener('DOMContentLoaded', function() {
             results.style.display = 'block';
             resultDetailsToggle.style.display = 'none';
             resultDetails.style.display = 'none';
+            resultJson.textContent = ''; // Clear previous details
             
             // Make the request
             const response = await fetch('/api/test-plex-connection', {
@@ -101,54 +102,50 @@ document.addEventListener('DOMContentLoaded', function() {
             if (data.success) {
                 resultStatus.textContent = 'Success';
                 resultStatus.className = 'result-status success';
-                
-                let message = 'Successfully connected to Plex server.';
-                
+                resultMessage.textContent = data.message || 'Successfully connected to Plex server.';
                 if (data.server_info) {
-                    message += ' Server: ' + (data.server_info.friendlyName || data.server_info.serverName || 'Unknown');
+                    let serverInfoText = 'Server: ' + (data.server_info.friendlyName || data.server_info.serverName || 'Unknown');
                     if (data.server_info.version) {
-                        message += ', Version: ' + data.server_info.version;
+                        serverInfoText += ', Version: ' + data.server_info.version;
                     }
+                    if (data.server_info.machineIdentifier) {
+                        serverInfoText += ', Machine ID: ' + data.server_info.machineIdentifier;
+                    }
+                     resultMessage.innerHTML += '<br>' + serverInfoText;
                 }
-                
-                if (data.details && data.details.section_info) {
-                    message += '<br><br>Found music section: ' + data.details.section_info.title;
-                }
-                
-                resultMessage.innerHTML = message;
             } else {
                 resultStatus.textContent = 'Failed';
                 resultStatus.className = 'result-status error';
-                resultMessage.textContent = data.error || 'An unknown error occurred while connecting to the Plex server.';
+                resultMessage.textContent = data.message || data.error || 'Plex connection test failed.';
             }
-            
-            // Show details toggle
-            resultDetailsToggle.style.display = 'block';
-            
-            // Format and show JSON data
-            resultJson.textContent = JSON.stringify(data, null, 2);
+
+            if (data.details) {
+                resultJson.textContent = JSON.stringify(data.details, null, 2);
+                resultDetailsToggle.style.display = 'block';
+            } else {
+                 resultDetailsToggle.style.display = 'none';
+            }
             
         } catch (error) {
             resultStatus.textContent = 'Error';
             resultStatus.className = 'result-status error';
-            resultMessage.textContent = 'An error occurred: ' + error.message;
-            
-            resultDetailsToggle.style.display = 'block';
-            resultJson.textContent = JSON.stringify({ error: error.message }, null, 2);
+            resultMessage.textContent = 'An unexpected error occurred: ' + error.message;
+            resultDetailsToggle.style.display = 'none';
+            resultDetails.style.display = 'none';
+            console.error("Plex test error:", error);
         }
     });
 });
 
 function toggleDetails() {
-    const resultDetails = document.getElementById('result-details');
-    const detailsToggle = document.getElementById('result-details-toggle').querySelector('a');
-    
-    if (resultDetails.style.display === 'none') {
-        resultDetails.style.display = 'block';
-        detailsToggle.textContent = 'Hide Technical Details';
+    const detailsDiv = document.getElementById('result-details');
+    const toggleLink = document.querySelector('#result-details-toggle a');
+    if (detailsDiv.style.display === 'none') {
+        detailsDiv.style.display = 'block';
+        toggleLink.textContent = 'Hide Technical Details';
     } else {
-        resultDetails.style.display = 'none';
-        detailsToggle.textContent = 'Show Technical Details';
+        detailsDiv.style.display = 'none';
+        toggleLink.textContent = 'Show Technical Details';
     }
 }
 </script>

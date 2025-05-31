@@ -58,6 +58,18 @@
                         <p class="help-text">Your favorite artists (comma-separated).</p>
                     </div>
                 </div>
+
+                <div class="settings-group">
+                    <h3>Application Settings</h3>
+                    <div class="form-group">
+                        <label for="app_debug_mode">Enable Debug Logging (to file):</label>
+                        <select id="app_debug_mode" name="app_debug_mode" class="settings-select">
+                            <option value="yes" {% if app_debug_mode == "yes" %}selected{% endif %}>Yes</option>
+                            <option value="no" {% if app_debug_mode == "no" %}selected{% endif %}>No</option>
+                        </select>
+                        <p class="help-text">Enable detailed logging to 'logs/tuneforge_app.log'.</p>
+                    </div>
+                </div>
             </div>
             
             <div class="settings-section">
