@@ -1,6 +1,8 @@
 # TuneForge
 ![logo_big](https://github.com/user-attachments/assets/6914b37d-f306-4732-85ef-c87ffb141681)
 
+<img src="static/images/logo_big.jpeg" alt="TuneForge Logo" width="50%">
+
 A web application that uses Ollama's LLM capabilities to generate personalized music playlists that can be saved to Navidrome or Plex.
 
 Repository: [https://github.com/icewall905/TuneForge](https://github.com/icewall905/TuneForge)
@@ -10,6 +12,7 @@ Repository: [https://github.com/icewall905/TuneForge](https://github.com/icewall
 - Generate personalized playlists based on your music preferences
 - Integration with Navidrome and Plex for music library access
 - Track search and playlist creation in supported platforms
+- Selectable number of tracks for playlists (up to 100)
 - Save and view playlist history
 - Rate your generated playlists
 - Modern dark-mode UI with responsive design
