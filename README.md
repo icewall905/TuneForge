@@ -1,5 +1,4 @@
 # TuneForge
-![logo_big](https://github.com/user-attachments/assets/6914b37d-f306-4732-85ef-c87ffb141681)
 
 <img src="static/images/logo_big.jpeg" alt="TuneForge Logo" width="50%">
 
