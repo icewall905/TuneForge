@@ -15,19 +15,19 @@
                     </div>
                     <div class="track-info">
                         <div class="track-title">{{ playlist.name }}</div>
-                        <div class="track-artist">{{ playlist.platform }}</div>
+                        <div class="track-artist">{{ playlist.tracks|length }} tracks</div>
                         <div class="track-album">{{ playlist.created_at|replace('T', ' ')|truncate(16, true, '') }}</div>
                     </div>
                     <div class="track-actions">
                         <div class="rating">
                             {% for i in range(1, 6) %}
-                                <button class="text-button rating-star {% if playlist.rating == i %}active{% endif %}" 
-                                    data-playlist-id="{{ playlist.id }}" data-rating="{{ i }}">
-                                    {% if playlist.rating >= i %}★{% else %}☆{% endif %}
+                                <button class="text-button rating-star {% if playlist.get('rating') == i %}active{% endif %}" 
+                                    data-playlist-id="{{ playlist.get('id', loop.index) }}" data-rating="{{ i }}">
+                                    {% if playlist.get('rating', 0) >= i %}★{% else %}☆{% endif %}
                                 </button>
                             {% endfor %}
                         </div>
-                        <button class="text-button" data-playlist-id="{{ playlist.id }}">Details</button>
+                        <button class="text-button" data-playlist-id="{{ playlist.get('id', loop.index) }}">Details</button>
                     </div>
                 </div>
             {% endfor %}

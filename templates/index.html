@@ -124,33 +124,52 @@
             const outputElement = document.getElementById('console_output');
             outputElement.innerHTML = '';
             
+            // Collect form data
             const formData = new FormData(this);
-            formData.append('action', 'generate');
+            const formDataObj = {};
+            formData.forEach((value, key) => {
+                formDataObj[key] = value;
+            });
             
-            fetch('/generate', {
+            // Create the payload in the format expected by the API
+            const payload = {
+                prompt: `Create a playlist with these preferences: 
+                    Likes: ${formDataObj.likes}
+                    Dislikes: ${formDataObj.dislikes}
+                    Favorite Artists: ${formDataObj.favorite_artists}
+                    ${formDataObj.playlist_description ? 'Description: ' + formDataObj.playlist_description : ''}`,
+                num_songs: 10,
+                playlist_name: formDataObj.playlist_name || "TuneForge Playlist"
+            };
+            
+            fetch('/api/generate-playlist', {
                 method: 'POST',
-                body: formData
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
             })
-            .then(response => {
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
+            .then(response => response.json())
+            .then(data => {
+                // Display the response data
+                outputElement.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
                 
-                function readStream() {
-                    return reader.read().then(({ done, value }) => {
-                        if (done) {
-                            document.getElementById('loading').style.display = 'none';
-                            return;
-                        }
-                        
-                        const text = decoder.decode(value, { stream: true });
-                        outputElement.innerHTML += text.replace(/\n/g, '<br>');
-                        outputElement.scrollTop = outputElement.scrollHeight;
-                        
-                        return readStream();
-                    });
+                if (data.status === 'success') {
+                    // If playlist was successfully generated, show a success message
+                    outputElement.innerHTML += '<br><p class="success">Playlist generation initiated. Check the history page in a few moments for your new playlist.</p>';
+                    
+                    // Optional: Check the playlist generation status after a short delay
+                    setTimeout(() => {
+                        fetch('/history')
+                            .then(() => {
+                                outputElement.innerHTML += '<p>✅ Generation complete! <a href="/history">View your playlists</a></p>';
+                            });
+                    }, 3000);
+                } else if (data.error) {
+                    outputElement.innerHTML += `<p class="error">Error: ${data.error}</p>`;
                 }
                 
-                return readStream();
+                document.getElementById('loading').style.display = 'none';
             })
             .catch(error => {
                 console.error('Error:', error);
