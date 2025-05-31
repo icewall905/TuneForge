@@ -135,6 +135,11 @@
                         <input type="text" id="plex_music_section_id" name="plex_music_section_id" value="{{ plex_music_section_id }}">
                         <p class="help-text">The ID of your Plex music library section.</p>
                     </div>
+                    
+                    <div class="form-group">
+                        <a href="{{ url_for('main.test_plex_page') }}" class="btn btn-secondary">Test Plex Connection</a>
+                        <p class="help-text">Check if the Plex connection is working correctly.</p>
+                    </div>
                 </div>
             </div>
             

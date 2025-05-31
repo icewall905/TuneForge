@@ -1,0 +1,155 @@
+{% extends 'layout.html' %}
+
+{% block title %}Plex Connection Test - TuneForge{% endblock %}
+
+{% block content %}
+<div class="content-container">
+    <h1>Test Plex Connection</h1>
+    
+    <div class="settings-form">
+        <form id="plexTestForm">
+            <div class="settings-section">
+                <div class="form-group">
+                    <label for="plex_server_url">Plex Server URL:</label>
+                    <input type="text" id="plex_server_url" name="plex_server_url" value="{{ plex_server_url }}" placeholder="http://localhost:32400">
+                    <p class="help-text">The URL of your Plex server including port, e.g. http://localhost:32400</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="plex_token">Plex Token:</label>
+                    <input type="text" id="plex_token" name="plex_token" value="{{ plex_token }}">
+                    <p class="help-text">Your Plex authentication token.</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="plex_music_section_id">Plex Music Section ID:</label>
+                    <input type="text" id="plex_music_section_id" name="plex_music_section_id" value="{{ plex_music_section_id }}">
+                    <p class="help-text">The section ID of your Plex music library.</p>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Test Connection</button>
+                </div>
+            </div>
+        </form>
+    </div>
+    
+    <div id="results" class="connection-results" style="display: none;">
+        <h2>Test Results</h2>
+        <div class="result-box">
+            <div id="result-status" class="result-status"></div>
+            <div id="result-message" class="result-message"></div>
+        </div>
+        
+        <div id="result-details-toggle" class="details-toggle" style="display: none;">
+            <a href="#" onclick="toggleDetails(); return false;">Show Technical Details</a>
+        </div>
+        
+        <div id="result-details" class="result-details" style="display: none;">
+            <h3>Technical Details</h3>
+            <pre id="result-json"></pre>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('plexTestForm');
+    const results = document.getElementById('results');
+    const resultStatus = document.getElementById('result-status');
+    const resultMessage = document.getElementById('result-message');
+    const resultDetailsToggle = document.getElementById('result-details-toggle');
+    const resultDetails = document.getElementById('result-details');
+    const resultJson = document.getElementById('result-json');
+    
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        // Get form values
+        const plexServerUrl = document.getElementById('plex_server_url').value;
+        const plexToken = document.getElementById('plex_token').value;
+        const plexMusicSectionId = document.getElementById('plex_music_section_id').value;
+        
+        // Prepare request
+        const requestData = {
+            plex_server_url: plexServerUrl,
+            plex_token: plexToken,
+            plex_music_section_id: plexMusicSectionId
+        };
+        
+        try {
+            // Show loading state
+            resultStatus.textContent = 'Testing...';
+            resultStatus.className = 'result-status loading';
+            resultMessage.textContent = 'Connecting to Plex server...';
+            results.style.display = 'block';
+            resultDetailsToggle.style.display = 'none';
+            resultDetails.style.display = 'none';
+            
+            // Make the request
+            const response = await fetch('/api/test-plex-connection', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            const data = await response.json();
+            
+            // Update UI based on result
+            if (data.success) {
+                resultStatus.textContent = 'Success';
+                resultStatus.className = 'result-status success';
+                
+                let message = 'Successfully connected to Plex server.';
+                
+                if (data.server_info) {
+                    message += ' Server: ' + (data.server_info.friendlyName || data.server_info.serverName || 'Unknown');
+                    if (data.server_info.version) {
+                        message += ', Version: ' + data.server_info.version;
+                    }
+                }
+                
+                if (data.details && data.details.section_info) {
+                    message += '<br><br>Found music section: ' + data.details.section_info.title;
+                }
+                
+                resultMessage.innerHTML = message;
+            } else {
+                resultStatus.textContent = 'Failed';
+                resultStatus.className = 'result-status error';
+                resultMessage.textContent = data.error || 'An unknown error occurred while connecting to the Plex server.';
+            }
+            
+            // Show details toggle
+            resultDetailsToggle.style.display = 'block';
+            
+            // Format and show JSON data
+            resultJson.textContent = JSON.stringify(data, null, 2);
+            
+        } catch (error) {
+            resultStatus.textContent = 'Error';
+            resultStatus.className = 'result-status error';
+            resultMessage.textContent = 'An error occurred: ' + error.message;
+            
+            resultDetailsToggle.style.display = 'block';
+            resultJson.textContent = JSON.stringify({ error: error.message }, null, 2);
+        }
+    });
+});
+
+function toggleDetails() {
+    const resultDetails = document.getElementById('result-details');
+    const detailsToggle = document.getElementById('result-details-toggle').querySelector('a');
+    
+    if (resultDetails.style.display === 'none') {
+        resultDetails.style.display = 'block';
+        detailsToggle.textContent = 'Hide Technical Details';
+    } else {
+        resultDetails.style.display = 'none';
+        detailsToggle.textContent = 'Show Technical Details';
+    }
+}
+</script>
+{% endblock %}
