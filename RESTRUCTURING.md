@@ -20,8 +20,16 @@ This document outlines the changes made to the Ollama Playlist Generator project
    - Improved form layout and user experience
    - Added real-time streaming output for playlist generation
    - Added playlist sharing functionality
+   - Added Navidrome connection testing tool
 
-4. **Configuration**:
+4. **API Improvements**:
+   - Enhanced Navidrome API handling with better URL processing
+   - Improved error handling and debugging for API requests
+   - Added proper URL encoding for special characters in parameters
+   - Made configuration key matching case-insensitive
+   - Added detailed connection diagnostics for troubleshooting
+
+5. **Configuration**:
    - Created `config.ini.example` as a template for user configuration
    - Added support for both Navidrome and Plex integration
    - Added platform toggle options
