@@ -1,6 +1,6 @@
 {% extends 'layout.html' %}
 
-{% block title %}Playlist History - Ollama Playlist Generator{% endblock %}
+{% block title %}Playlist History - TuneForge{% endblock %}
 
 {% block content %}
 <div class="content-container">
@@ -34,7 +34,7 @@
         </div>
     {% else %}
         <div class="message">
-            <p>No playlists have been generated yet. <a href="{{ url_for('main.home') }}">Generate a playlist</a> to get started.</p>
+            <p>No playlists have been generated yet. <a href="{{ url_for('main.index') }}">Generate a playlist</a> to get started.</p>
         </div>
     {% endif %}
 
