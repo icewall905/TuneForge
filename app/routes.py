@@ -934,11 +934,11 @@ def search_track_in_plex(query, plex_server_url, plex_token, section_id):
         return []
 
 def create_playlist_in_plex(playlist_name, track_ids, plex_server_url, plex_token, plex_machine_id, playlist_type='audio'):
-    """Create a playlist in Plex with the given tracks using a two-step process."""
+    """Create a playlist in Plex with the given tracks, mirroring the previously functional approach."""
     if not plex_server_url:
         debug_log("Plex Server URL is not configured", "ERROR")
         return None
-        
+    
     if not plex_machine_id:
         debug_log("Plex Machine ID is not configured", "ERROR")
         return None
@@ -950,105 +950,116 @@ def create_playlist_in_plex(playlist_name, track_ids, plex_server_url, plex_toke
     base_url = plex_server_url.rstrip('/')
     headers = {
         'X-Plex-Token': plex_token,
-        'Accept': 'application/json'
+        'Accept': 'application/json' # Plex often returns XML by default, JSON is easier
     }
 
-    # Step 1: Create an empty playlist
+    first_track_id = track_ids[0]
+    # The URI for creating the playlist and adding the first track.
+    # This URI points to the specific item to be added to the new playlist.
+    playlist_creation_item_uri = f"server://{plex_machine_id}/com.plexapp.plugins.library/library/metadata/{first_track_id}"
+    
     create_playlist_url = f"{base_url}/playlists"
     create_params = {
         'title': playlist_name,
         'type': playlist_type,
         'smart': '0',
-        'uri': f"server://{plex_machine_id}/com.plexapp.plugins.library" # URI for the library
+        'uri': playlist_creation_item_uri
     }
     
-    debug_log(f"Creating Plex playlist \'{playlist_name}\' (Step 1: Create empty playlist)", "INFO", True)
-    debug_log(f"Request URL: {create_playlist_url}", "DEBUG")
-    debug_log(f"Request params: {create_params}", "DEBUG")
+    debug_log(f"Creating Plex playlist \'{playlist_name}\' with first track ID: {first_track_id}", "INFO", True)
+    debug_log(f"Request URL (Create): {create_playlist_url}", "DEBUG")
+    debug_log(f"Request params (Create): {create_params}", "DEBUG")
 
+    playlist_id = None
     try:
         response = requests.post(create_playlist_url, params=create_params, headers=headers)
-        debug_log(f"Step 1 Response status code: {response.status_code}", "DEBUG")
-        debug_log(f"Step 1 Response text: {response.text[:500]}", "DEBUG")
-        response.raise_for_status() # Raise an exception for HTTP errors
+        debug_log(f"Create Playlist Response status: {response.status_code}", "DEBUG")
+        debug_log(f"Create Playlist Response text: {response.text[:500]}", "DEBUG") # Log more of the response
+        response.raise_for_status()
 
-        data = response.json()
-        debug_log(f"Step 1 Response JSON: {json.dumps(data)[:500]}...", "DEBUG")
-
-        if 'MediaContainer' in data and 'Metadata' in data['MediaContainer'] and len(data['MediaContainer']['Metadata']) > 0:
-            playlist_metadata = data['MediaContainer']['Metadata'][0]
-            playlist_id = playlist_metadata.get('ratingKey')
-            playlist_title = playlist_metadata.get('title')
-            debug_log(f"Successfully created empty Plex playlist \'{playlist_title}\' with ID: {playlist_id}", "INFO", True)
-        else:
-            debug_log(f"Could not retrieve playlist ID from Plex response. Response: {json.dumps(data)[:500]}", "ERROR")
-            return None
-
-    except requests.exceptions.RequestException as e:
-        debug_log(f"Error creating Plex playlist (Step 1): {e}", "ERROR", True)
-        if hasattr(e, 'response') and e.response is not None:
-            debug_log(f"Error response content: {e.response.text[:500]}", "DEBUG")
-        return None
-    except json.JSONDecodeError:
-        debug_log(f"Error decoding JSON response from Plex (Step 1). Response: {response.text[:500]}", "ERROR")
-        return None
-
-    # Step 2: Add tracks to the created playlist
-    if not playlist_id: # Should not happen if previous block succeeded, but as a safeguard
-        debug_log("Playlist ID not found, cannot add tracks.", "ERROR")
-        return None
-
-    add_items_url = f"{base_url}/playlists/{playlist_id}/items"
-    
-    # Construct full track URIs: server://{machine_id}/com.plexapp.plugins.library/library/metadata/{track_id}
-    full_track_uris = [f"server://{plex_machine_id}/com.plexapp.plugins.library/library/metadata/{track_id}" for track_id in track_ids]
-    items_uri_param = ','.join(full_track_uris)
-    
-    add_params = {'uri': items_uri_param}
-
-    debug_log(f"Adding {len(track_ids)} tracks to Plex playlist ID {playlist_id} (Step 2: Add items)", "INFO", True)
-    debug_log(f"Request URL: {add_items_url}", "DEBUG")
-    debug_log(f"Request params: {add_params}", "DEBUG") # Careful with logging tokens if they were in params
-
-    try:
-        add_response = requests.put(add_items_url, params=add_params, headers=headers) # Token is in headers
-        debug_log(f"Step 2 Response status code: {add_response.status_code}", "DEBUG")
-        debug_log(f"Step 2 Response text: {add_response.text[:500]}", "DEBUG")
-        add_response.raise_for_status() # Raise an exception for HTTP errors
-        
-        # Verify items were added (optional, based on Plex API response for PUT /items)
-        # Plex PUT to add items usually returns the updated playlist metadata.
-        # We can check leafCount here if the response provides it.
+        # Plex usually returns XML upon successful playlist creation with an item.
+        # We need to parse XML to get the playlist ID (ratingKey).
         try:
-            updated_playlist_data = add_response.json()
-            debug_log(f"Step 2 Response JSON: {json.dumps(updated_playlist_data)[:500]}...", "DEBUG")
-            if 'MediaContainer' in updated_playlist_data and 'Metadata' in updated_playlist_data['MediaContainer']:
-                updated_metadata = updated_playlist_data['MediaContainer']['Metadata'][0]
-                final_leaf_count = updated_metadata.get('leafCount', 'N/A')
-                debug_log(f"Tracks added. Playlist \'{updated_metadata.get('title')}\' now has {final_leaf_count} items.", "INFO", True)
-                if final_leaf_count == len(track_ids):
-                     debug_log(f"Successfully added all {len(track_ids)} tracks to playlist ID {playlist_id}.", "INFO", True)
-                elif final_leaf_count == 0 : # Check if it's still 0
-                    debug_log(f"Warning: Tracks may not have been added. leafCount is {final_leaf_count} after adding items.", "WARN", True)
-                else:
-                    debug_log(f"Partially added tracks? Expected {len(track_ids)}, got {final_leaf_count}.", "WARN", True)
+            root = ET.fromstring(response.content) # Use response.content for XML
+            playlist_element = root.find('.//Playlist[@title="%s"]' % playlist_name) # More robust find
+            if playlist_element is not None:
+                playlist_id = playlist_element.get('ratingKey')
+                debug_log(f"Successfully created Plex playlist \'{playlist_name}\' with ID: {playlist_id} (from XML response)", "INFO", True)
+            else:
+                # Fallback if JSON is returned or specific element not found
+                try:
+                    data = response.json()
+                    if 'MediaContainer' in data and 'Metadata' in data['MediaContainer'] and len(data['MediaContainer']['Metadata']) > 0:
+                        playlist_id = data['MediaContainer']['Metadata'][0].get('ratingKey')
+                        debug_log(f"Successfully created Plex playlist \'{playlist_name}\' with ID: {playlist_id} (from JSON response)", "INFO", True)
+                    else:
+                        debug_log(f"Could not find playlist ID in Plex response (XML or JSON). XML: {response.text[:500]}", "ERROR")
+                        return None
+                except json.JSONDecodeError:
+                    debug_log(f"Could not find playlist ID in Plex XML response and response is not JSON. XML: {response.text[:500]}", "ERROR")
+                    return None
 
-        except json.JSONDecodeError:
-            debug_log("Could not decode JSON from add items response, but PUT was successful.", "WARN")
-        
-        return playlist_id # Return playlist_id if add operation was successful (status 2xx)
+        except ET.ParseError as xml_err:
+            debug_log(f"Error parsing XML response from Plex: {xml_err}. Response: {response.text[:500]}", "ERROR")
+            # Attempt to parse as JSON as a fallback
+            try:
+                data = response.json()
+                if 'MediaContainer' in data and 'Metadata' in data['MediaContainer'] and len(data['MediaContainer']['Metadata']) > 0:
+                    playlist_id = data['MediaContainer']['Metadata'][0].get('ratingKey')
+                    debug_log(f"Successfully created Plex playlist \'{playlist_name}\' with ID: {playlist_id} (from JSON fallback after XML error)", "INFO", True)
+                else:
+                    debug_log(f"Could not retrieve playlist ID from Plex JSON response after XML parse error. Data: {json.dumps(data)[:500]}", "ERROR")
+                    return None
+            except json.JSONDecodeError:
+                debug_log(f"Plex response is not valid XML or JSON. Response: {response.text[:500]}", "ERROR")
+                return None
 
     except requests.exceptions.RequestException as e:
-        debug_log(f"Error adding tracks to Plex playlist ID {playlist_id} (Step 2): {e}", "ERROR", True)
+        debug_log(f"Error creating Plex playlist: {e}", "ERROR", True)
         if hasattr(e, 'response') and e.response is not None:
             debug_log(f"Error response content: {e.response.text[:500]}", "DEBUG")
-        # Playlist was created but adding items failed.
-        # Depending on desired behavior, could return playlist_id or None.
-        # Returning None as the overall operation to create a populated playlist failed.
         return None
-    except Exception as e:
-        debug_log(f"An unexpected error occurred while adding items to Plex playlist: {e}", "ERROR", True)
-        return None
+
+    # If playlist created and there are more tracks, add them
+    if playlist_id and len(track_ids) > 1:
+        additional_track_ids = track_ids[1:]
+        
+        # Construct comma-separated string of full metadata URIs for remaining tracks
+        item_uris_to_add = []
+        for track_id_to_add in additional_track_ids:
+            item_uris_to_add.append(f"server://{plex_machine_id}/com.plexapp.plugins.library/library/metadata/{track_id_to_add}")
+        items_uri_param = ','.join(item_uris_to_add)
+
+        add_items_url = f"{base_url}/playlists/{playlist_id}/items"
+        add_params = {'uri': items_uri_param}
+
+        debug_log(f"Adding {len(additional_track_ids)} additional tracks to Plex playlist ID {playlist_id}", "INFO", True)
+        debug_log(f"Request URL (Add Items): {add_items_url}", "DEBUG")
+        debug_log(f"Request params (Add Items): {add_params}", "DEBUG")
+
+        try:
+            add_response = requests.put(add_items_url, params=add_params, headers=headers)
+            debug_log(f"Add Items Response status: {add_response.status_code}", "DEBUG")
+            debug_log(f"Add Items Response text: {add_response.text[:500]}", "DEBUG")
+            add_response.raise_for_status()
+            debug_log(f"Successfully added {len(additional_track_ids)} additional tracks to playlist ID {playlist_id}.", "INFO", True)
+            # Optionally, verify leafCount from add_response.json() if needed, similar to previous version
+        except requests.exceptions.RequestException as e:
+            debug_log(f"Error adding additional tracks to Plex playlist ID {playlist_id}: {e}", "ERROR", True)
+            if hasattr(e, 'response') and e.response is not None:
+                debug_log(f"Error response content (Add Items): {e.response.text[:500]}", "DEBUG")
+            # Playlist was created, but adding further items failed. 
+            # Return playlist_id as the playlist itself exists with at least one track.
+            return playlist_id 
+        except Exception as e:
+            debug_log(f"An unexpected error occurred while adding additional items to Plex playlist: {e}", "ERROR", True)
+            return playlist_id # Return playlist_id as the playlist itself exists
+
+    elif not playlist_id:
+        debug_log("Playlist ID was not obtained after creation attempt.", "ERROR")
+        return None # Creation failed
+
+    return playlist_id # Return the playlist ID
 
 @main_bp.route('/test-plex')
 def test_plex_page():
