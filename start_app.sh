@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Simple script to start Ollama Playlist Generator
+# Simple script to start TuneForge
 
 # Change to the script's directory
 cd "$(dirname "$0")"
@@ -31,7 +31,7 @@ if [[ ! -f "config.ini" ]]; then
 fi
 
 # Run the application
-echo "Starting Ollama Playlist Generator..."
+echo "Starting TuneForge..."
 python run.py
 
 # Deactivate virtual environment on exit

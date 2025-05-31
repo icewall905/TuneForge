@@ -15,6 +15,7 @@ DEBUG_OLLAMA_RESPONSE = False
 main_bp = Blueprint('main', __name__)
 
 CONFIG_FILE = 'config.ini'
+HISTORY_FILE = 'playlist_history.json' # Added HISTORY_FILE
 
 def load_config():
     config = configparser.ConfigParser()
@@ -31,13 +32,34 @@ def get_config_value(section, key, default=None):
                 return config[section][config_key]
     return default
 
+def load_playlist_history():
+    """Load playlist history from the JSON file."""
+    if not os.path.exists(HISTORY_FILE):
+        return []
+    try:
+        with open(HISTORY_FILE, 'r') as f:
+            history_data = json.load(f)
+            # Ensure history_data is a list, even if the file contained a single dict or was empty
+            if isinstance(history_data, dict): # Handles case where a single playlist might have been saved directly
+                return [history_data]
+            elif not isinstance(history_data, list): # Handles empty or malformed file
+                 return []
+            return history_data
+    except json.JSONDecodeError:
+        print(f"Error decoding JSON from {HISTORY_FILE}")
+        return []
+    except Exception as e:
+        print(f"An error occurred while loading playlist history: {e}")
+        return []
+
 @main_bp.route('/')
 def index():
     return render_template('index.html')
 
 @main_bp.route('/history')
 def history():
-    return render_template('history.html')
+    playlist_history = load_playlist_history()
+    return render_template('history.html', history=playlist_history)
 
 @main_bp.route('/settings')
 def settings():
