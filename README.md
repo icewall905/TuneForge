@@ -1,8 +1,8 @@
-# Ollama Playlist Generator
+# TuneForge
 
 A web application that uses Ollama's LLM capabilities to generate personalized music playlists that can be saved to Navidrome or Plex.
 
-Repository: [https://github.com/icewall905/ollama-playlist-generator](https://github.com/icewall905/ollama-playlist-generator)
+Repository: [https://github.com/icewall905/TuneForge](https://github.com/icewall905/TuneForge)
 
 ## Features
 
@@ -25,8 +25,8 @@ Repository: [https://github.com/icewall905/ollama-playlist-generator](https://gi
 
 1. **Clone the Repository**:
    ```bash
-   git clone https://github.com/icewall905/ollama-playlist-generator.git
-   cd ollama-playlist-generator
+   git clone https://github.com/icewall905/TuneForge.git
+   cd TuneForge
    ```
 
 2. **Create a virtual environment** (recommended):
@@ -45,17 +45,23 @@ Repository: [https://github.com/icewall905/ollama-playlist-generator](https://gi
      ```bash
      cp config.ini.example config.ini
      ```
-   - Edit `config.ini` with your Ollama, Navidrome, and/or Plex settings
-   - You can also configure settings through the web interface
+   - Edit `config.ini` with your Ollama, Navidrome, and/or Plex settings.
+   - You can also configure settings through the web interface.
 
 ## Usage
 
 1. **Start the web application**:
+   Using the helper script (recommended for development):
+   ```bash
+   sh start_app.sh 
+   ```
+   Or manually:
    ```bash
    python run.py
    ```
 
 2. **Access the web interface**:
+   Open your browser and go to:
    ```
    http://localhost:5001
    ```
@@ -71,25 +77,26 @@ Repository: [https://github.com/icewall905/ollama-playlist-generator](https://gi
 ## Project Structure
 
 ```
-ollama-playlist-generator/
+TuneForge/
 ├── app/                     # Application package
 │   ├── __init__.py          # Flask app initialization
 │   └── routes.py            # Application routes and main logic
 ├── static/                  # Static assets
 │   ├── css/                 # CSS stylesheets
-│   │   ├── style.css        # Main stylesheet
-│   │   └── custom.css       # Additional custom styles
 │   ├── js/                  # JavaScript files
-│   │   └── main.js          # Main JavaScript logic
-│   └── images/              # Image assets
+│   └── images/              # Image assets (including logo_small.jpeg, logo_big.jpeg)
 ├── templates/               # Jinja2 templates
 │   ├── layout.html          # Base template with sidebar layout
 │   ├── index.html           # Playlist generation page
 │   ├── history.html         # Playlist history page
 │   └── settings.html        # Settings page
 ├── run.py                   # Application entry point
+├── start_app.sh             # Helper script to setup environment and run the app
 ├── config.ini.example       # Example configuration file
-└── requirements.txt         # Python dependencies
+├── config.ini               # User configuration file (created from example)
+├── requirements.txt         # Python dependencies
+├── playlist_history.json    # Stores history of generated playlists
+└── README.md                # This file
 ```
 
 ## Running in Production
@@ -106,13 +113,13 @@ nohup python run.py &
 Example systemd service file:
 ```ini
 [Unit]
-Description=Ollama Playlist Generator
+Description=TuneForge
 After=network.target
 
 [Service]
 User=your_user
-WorkingDirectory=/path/to/ollama-playlist-generator
-ExecStart=/path/to/python /path/to/ollama-playlist-generator/run.py
+WorkingDirectory=/path/to/TuneForge
+ExecStart=/path/to/venv/bin/python /path/to/TuneForge/run.py
 Restart=always
 RestartSec=5
 
@@ -130,6 +137,3 @@ WantedBy=multi-user.target
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-## License
-This project is licensed under the MIT License.
