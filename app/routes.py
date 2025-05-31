@@ -8,62 +8,718 @@ import time
 import re
 import random
 import xml.etree.ElementTree as ET
+from urllib.parse import quote
+import logging
+from logging.handlers import RotatingFileHandler
+
+# --- Logger Setup ---
+LOG_DIR = 'logs'  # This will be relative to the project root (TuneForge/)
+# Ensure the log directory exists
+os.makedirs(LOG_DIR, exist_ok=True)
+
+app_file_logger = logging.getLogger('TuneForgeApp')
+app_file_logger.setLevel(logging.DEBUG)  # Process all levels from debug_log
+
+# Check if a similar handler already exists to prevent duplicates during reloads
+handler_exists = any(
+    isinstance(h, RotatingFileHandler) and \
+    getattr(h, 'baseFilename', '') == os.path.abspath(os.path.join(LOG_DIR, 'tuneforge_app.log'))
+    for h in app_file_logger.handlers
+)
+
+if not handler_exists:
+    log_file_path = os.path.join(LOG_DIR, 'tuneforge_app.log')
+    file_handler = RotatingFileHandler(
+        log_file_path,
+        maxBytes=5*1024*1024,  # 5 MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    app_file_logger.addHandler(file_handler)
+    # If you also want these logs in the console (in addition to the file), uncomment below
+    # console_handler = logging.StreamHandler()
+    # console_handler.setFormatter(formatter)
+    # app_file_logger.addHandler(console_handler)
 
 # --- Global Debug Flags ---
 DEBUG_ENABLED = True  # Master debug switch
-DEBUG_OLLAMA_RESPONSE = False  # Specific for Ollama response logging
+DEBUG_OLLAMA_RESPONSE = False  # Specific for Ollama response logging, can also be set in config.ini
 
 main_bp = Blueprint('main', __name__)
 
 CONFIG_FILE = 'config.ini'
-HISTORY_FILE = 'playlist_history.json' # Added HISTORY_FILE
+HISTORY_FILE = 'playlist_history.json'
 
+# --- Config Functions ---
 def load_config():
     config = configparser.ConfigParser()
-    config.read(CONFIG_FILE)
+    # Preserve case for keys
+    config.optionxform = lambda optionstr: optionstr  # Preserve case
+    if not os.path.exists(CONFIG_FILE):
+        # Fallback to example if main config doesn't exist, or create empty
+        example_config_file = CONFIG_FILE + '.example'
+        if os.path.exists(example_config_file):
+            debug_log(f"{CONFIG_FILE} not found, loading {example_config_file}", "WARN")
+            config.read(example_config_file)
+            # Optionally save it as config.ini now
+            # with open(CONFIG_FILE, 'w') as f:
+            #     config.write(f)
+        else:
+            debug_log(f"{CONFIG_FILE} and {example_config_file} not found. Using empty config.", "WARN")
+            # Setup default sections if needed, or let it be empty
+            config.add_section('OLLAMA')
+            config.add_section('APP')
+            config.add_section('NAVIDROME')
+            config.add_section('PLEX')
+    else:
+        config.read(CONFIG_FILE)
     return config
 
 def get_config_value(section, key, default=None):
-    """Get a value from the config, case-insensitive for keys"""
     config = load_config()
-    if section in config:
-        # Find the key case-insensitively
-        for config_key in config[section]:
-            if config_key.lower() == key.lower():
-                return config[section][config_key]
+    if config.has_section(section):
+        # config.optionxform ensures keys are case-sensitive as read
+        # Direct case-sensitive access after optionxform is set:
+        if key in config[section]:
+            return config[section][key]
     return default
 
+def save_config(data_dict):
+    config = configparser.ConfigParser()
+    config.optionxform = lambda optionstr: optionstr # Preserve case for keys when writing
+    for section, options in data_dict.items():
+        if not config.has_section(section):
+            config.add_section(section)
+        for key, value in options.items():
+            config.set(section, key, str(value))
+    try:
+        with open(CONFIG_FILE, 'w') as configfile:
+            config.write(configfile)
+        debug_log(f"Configuration saved to {CONFIG_FILE}", "INFO")
+    except Exception as e:
+        debug_log(f"Error writing configuration to {CONFIG_FILE}: {e}", "ERROR", True)
+        raise # Re-raise to inform the caller
+
+# --- Playlist History Functions ---
 def load_playlist_history():
-    """Load playlist history from the JSON file."""
     if not os.path.exists(HISTORY_FILE):
         return []
     try:
         with open(HISTORY_FILE, 'r') as f:
-            history_data = json.load(f)
-            # Ensure history_data is a list, even if the file contained a single dict or was empty
+            # Handle empty file
+            content = f.read()
+            if not content:
+                return []
+            history_data = json.loads(content)
             if isinstance(history_data, dict): # Handles case where a single playlist might have been saved directly
                 return [history_data]
-            elif not isinstance(history_data, list): # Handles empty or malformed file
+            elif not isinstance(history_data, list): # Handles malformed file (should be list)
+                 debug_log(f"Playlist history file {HISTORY_FILE} does not contain a list. Resetting.", "WARN", True)
                  return []
             return history_data
     except json.JSONDecodeError:
-        print(f"Error decoding JSON from {HISTORY_FILE}")
-        return []
+        debug_log(f"Error decoding JSON from {HISTORY_FILE}. File might be corrupted or empty.", "ERROR", True)
+        return [] # Return empty list on error
     except Exception as e:
-        print(f"An error occurred while loading playlist history: {e}")
+        debug_log(f"An error occurred while loading playlist history: {e}", "ERROR", True)
         return []
+
+def save_playlist_history(history_data):
+    try:
+        with open(HISTORY_FILE, 'w') as f:
+            json.dump(history_data, f, indent=4)
+        debug_log(f"Playlist history saved to {HISTORY_FILE}", "INFO")
+    except Exception as e:
+        debug_log(f"Error saving playlist history to {HISTORY_FILE}: {e}", "ERROR", True)
+
+# --- Debug Logging ---
+_debug_flags_printed = False # Module-level flag to print debug status only once
 
 def debug_log(message, level="INFO", force=False):
-    """Unified debug logging function that respects config settings"""
-    global DEBUG_ENABLED
-    
-    # Check if debug is enabled in config (overrides global setting)
-    debug_from_config = get_config_value('APP', 'Debug', 'no').lower() in ('yes', 'true', '1')
-    
-    if debug_from_config or DEBUG_ENABLED or force:
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"[{timestamp}] [{level}] {message}")
+    global DEBUG_ENABLED, _debug_flags_printed
+    # Check if debug is enabled in config
+    debug_from_config_str = get_config_value('APP', 'Debug', 'yes') 
+    debug_from_config = debug_from_config_str.lower() in ('yes', 'true', '1') if isinstance(debug_from_config_str, str) else False
 
+    # Print status once
+    if not _debug_flags_printed:
+        print(f"[TuneForge Logger Init] DEBUG_ENABLED: {DEBUG_ENABLED}, Config 'APP','Debug': '{debug_from_config_str}', Parsed debug_from_config: {debug_from_config}")
+        # Add an immediate test DEBUG message to verify logging works at that level
+        app_file_logger.debug("This is a test DEBUG message during logger initialization")
+        app_file_logger.info("This is a test INFO message during logger initialization")
+        _debug_flags_printed = True
+    
+    if force or (DEBUG_ENABLED and debug_from_config):
+        level_upper = level.upper()
+        if level_upper == "DEBUG":
+            app_file_logger.debug(message)
+        elif level_upper == "INFO":
+            app_file_logger.info(message)
+        elif level_upper == "WARNING" or level_upper == "WARN":
+            app_file_logger.warning(message)
+        elif level_upper == "ERROR":
+            app_file_logger.error(message)
+        elif level_upper == "CRITICAL":
+            app_file_logger.critical(message)
+        else:
+            # For unknown levels, log as INFO with the original level string in the message
+            app_file_logger.info(f"[{level}] {message}")
+
+# --- Ollama Interaction ---
+def generate_tracks_with_ollama(ollama_url, ollama_model, prompt, num_songs, attempt_num=0, previously_suggested_tracks=None):
+    global DEBUG_OLLAMA_RESPONSE # Global flag for verbose Ollama response logging
+    # Configurable flag for verbose Ollama response logging
+    config_debug_ollama = get_config_value('OLLAMA', 'DebugOllamaResponse', 'no').lower() in ('yes', 'true', '1')
+
+
+    debug_log(f"Ollama: Attempting to generate {num_songs} tracks. Attempt: {attempt_num + 1}", "INFO")
+
+    likes = get_config_value('APP', 'Likes', '')
+    dislikes = get_config_value('APP', 'Dislikes', '')
+    favorite_artists = get_config_value('APP', 'FavoriteArtists', '')
+    # context_window = int(get_config_value('OLLAMA', 'ContextWindow', '2048')) # Not directly used here
+
+    context_str = ""
+    if previously_suggested_tracks and attempt_num > 0:
+        recent_suggestions_for_prompt = []
+        seen_in_context = set()
+        # Look at last N suggestions (e.g., 50) to avoid overly long context
+        for track in reversed(previously_suggested_tracks[-50:]): 
+            track_key = (track.get("title", "").lower(), track.get("artist", "").lower())
+            if track.get("title") and track.get("artist") and track_key not in seen_in_context:
+                recent_suggestions_for_prompt.append(f"- '{track['title']}' by '{track['artist']}'")
+                seen_in_context.add(track_key)
+            if len(recent_suggestions_for_prompt) >= 15: # Limit context to ~15 distinct tracks
+                break
+        if recent_suggestions_for_prompt:
+            context_str = "\\n\\nTo avoid repetition, DO NOT suggest any of the following tracks again:\\n" + "\\n".join(reversed(recent_suggestions_for_prompt))
+
+    retry_guidance = ""
+    if attempt_num > 0:
+        retry_guidance = (
+            "\\n\\nIMPORTANT: Your previous suggestions might have included repeats, undesirable versions, or didn't match well. "
+            "Please provide COMPLETELY DIFFERENT suggestions this time. "
+            "Focus on well-known, studio-recorded songs. Strongly AVOID live versions, instrumentals, karaoke, covers, remixes, demos, and edits unless the prompt specifically asks for them. "
+            "Ensure variety in your new suggestions."
+        )
+
+    full_prompt = (
+        f"You are a helpful music expert. Generate a list of exactly {num_songs} unique songs based on the following prompt: '{prompt}'.\\n"
+        f"User Likes: {likes}\\nUser Dislikes: {dislikes}\\nUser Favorite Artists: {favorite_artists}\\n"
+        f"Format each song strictly as 'Title - Artist - Album'. If an album is not applicable or known, use 'Unknown Album'.\\n"
+        f"Each song must be on a new line. Do not include numbering, introductory/closing remarks, or any other text, just the songs in the specified format."
+        f"{context_str}"
+        f"{retry_guidance}"
+    )
+
+    # debug_log(f"Ollama full prompt:\\n{full_prompt}", "DEBUG") # Can be very verbose
+
+    payload = {
+        "model": ollama_model,
+        "prompt": full_prompt,
+        "stream": False,
+        "options": {
+            "temperature": float(get_config_value('OLLAMA', 'Temperature', '0.7')),
+            "top_p": float(get_config_value('OLLAMA', 'TopP', '0.9')),
+            "num_ctx": int(get_config_value('OLLAMA', 'ContextWindow', '2048')), # Max context window
+            # "seed": random.randint(0, 2**32 -1) # For more deterministic results if needed for testing
+        }
+    }
+    
+    try:
+        response = requests.post(f"{ollama_url.rstrip('/')}/api/generate", json=payload, timeout=120) # Increased timeout
+        response.raise_for_status()
+        response_data = response.json()
+
+        if DEBUG_OLLAMA_RESPONSE or config_debug_ollama:
+            debug_log(f"Ollama raw response JSON: {json.dumps(response_data)}", "DEBUG", True)
+
+        content = response_data.get("response", "").strip()
+        if not content:
+            debug_log("Ollama response content is empty.", "WARN", True)
+            return []
+
+        tracks = []
+        lines = content.split('\\n')
+        for line in lines:
+            line = line.strip()
+            if not line: continue
+            parts = line.split(' - ')
+            if len(parts) >= 2:
+                title = parts[0].strip().strip('\"\'')
+                artist = parts[1].strip().strip('\"\'')
+                album = parts[2].strip().strip('\"\'') if len(parts) >= 3 else "Unknown Album"
+                if title and artist:
+                    tracks.append({"title": title, "artist": artist, "album": album})
+            else:
+                debug_log(f"Ollama: Could not parse line: '{line}'", "WARN")
+        
+        debug_log(f"Ollama generated {len(tracks)} tracks from response.", "INFO")
+        return tracks
+
+    except requests.exceptions.Timeout:
+        debug_log(f"Error calling Ollama: Timeout after 120 seconds.", "ERROR", True)
+        return []
+    except requests.exceptions.RequestException as e:
+        debug_log(f"Error calling Ollama: {e}", "ERROR", True)
+        return []
+    except json.JSONDecodeError as e:
+        debug_log(f"Error decoding Ollama JSON response: {e}. Response text: {response.text[:200] if 'response' in locals() else 'N/A'}", "ERROR", True)
+        return []
+    except Exception as e:
+        debug_log(f"Unexpected error in generate_tracks_with_ollama: {e}", "ERROR", True)
+        return []
+
+# --- Navidrome Functions ---
+def test_navidrome_connection(navidrome_url, username, password):
+    result = {'success': False, 'error': None, 'details': {}, 'server_info': None}
+    if not all([navidrome_url, username, password]):
+        result['error'] = "Navidrome URL, Username, or Password missing."
+        return result
+    
+    base_url = navidrome_url.rstrip('/')
+    if '/rest' not in base_url: base_url = f"{base_url}/rest"
+    result['details']['final_url'] = base_url
+    
+    ping_url = f"{base_url}/ping.view"
+    params = {'u': username, 'p': password, 'v': '1.16.1', 'c': 'TuneForge', 'f': 'json'}
+    
+    try:
+        ping_response = requests.get(ping_url, params=params, timeout=10)
+        result['details']['ping_status_code'] = ping_response.status_code
+        ping_response.raise_for_status() # Check for HTTP errors first
+        
+        ping_data = ping_response.json()
+        result['details']['ping_response'] = ping_data
+        
+        if ping_data.get('subsonic-response', {}).get('status') == 'ok':
+            result['success'] = True
+            # Try to get server version info
+            system_url = f"{base_url}/getSystemInfo.view"
+            system_response = requests.get(system_url, params=params, timeout=10)
+            if system_response.status_code == 200:
+                system_data = system_response.json()
+                if system_data.get('subsonic-response', {}).get('status') == 'ok':
+                    result['server_info'] = system_data.get('subsonic-response', {}).get('systemInfo', {})
+        else:
+            error = ping_data.get('subsonic-response', {}).get('error', {})
+            result['error'] = f"API Error: {error.get('message')} (code {error.get('code')})"
+            
+    except requests.exceptions.HTTPError as e:
+        result['error'] = f"HTTP Error: {e.response.status_code} - {e.response.reason}. URL: {ping_url}"
+        try: result['details']['ping_response_text'] = e.response.text[:500]
+        except: pass
+    except requests.exceptions.ConnectionError:
+        result['error'] = f"Connection error - could not connect to Navidrome server at {navidrome_url}"
+    except requests.exceptions.Timeout:
+        result['error'] = "Connection timed out"
+    except json.JSONDecodeError:
+        result['error'] = "Could not parse JSON response from server"
+        result['details']['ping_response_text'] = ping_response.text[:500] if 'ping_response' in locals() else "N/A"
+    except requests.exceptions.RequestException as e:
+        result['error'] = f"Request error: {str(e)}"
+    return result
+
+def search_track_in_navidrome(query, navidrome_url, username, password):
+    if not navidrome_url: return []
+    base_url = navidrome_url.rstrip('/')
+    if '/rest' not in base_url: base_url = f"{base_url}/rest"
+    
+    url = f"{base_url}/search3.view"
+    params = {
+        'u': username, 'p': password, 'v': '1.16.1', 'c': 'TuneForge', 'f': 'json',
+        'query': query, 'songCount': 20, 'artistCount': 0, 'albumCount': 0
+    }
+    # debug_log(f"Navidrome: Searching for query: '{query}'", "DEBUG")
+    try:
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('subsonic-response', {}).get('status') == 'ok':
+            songs = data.get('subsonic-response', {}).get('searchResult3', {}).get('song', [])
+            # debug_log(f"Navidrome: Found {len(songs)} songs for query '{query}'", "DEBUG")
+            tracks = []
+            for song in songs:
+                tracks.append({
+                    'id': song.get('id'), 'title': song.get('title', 'Unknown Title'),
+                    'artist': song.get('artist', 'Unknown Artist'), 'album': song.get('album', 'Unknown Album'),
+                    'source': 'navidrome'
+                })
+            return tracks
+        else:
+            # error_message = data.get('subsonic-response', {}).get('error', {}).get('message')
+            # debug_log(f"Navidrome: Error searching: {error_message}", "WARN")
+            return []
+    except requests.exceptions.RequestException: # Catches HTTPError, Timeout, ConnectionError
+        # debug_log(f"Navidrome: Request error searching: {e}", "WARN")
+        return []
+    except json.JSONDecodeError:
+        # debug_log(f"Navidrome: Error decoding search JSON response: {e}", "WARN")
+        return []
+
+def create_playlist_in_navidrome(navidrome_url, username, password, playlist_name, track_ids):
+    if not navidrome_url:
+        debug_log("Navidrome URL not configured, cannot create playlist.", "ERROR", True)
+        return None
+    base_url = navidrome_url.rstrip('/')
+    if '/rest' not in base_url: base_url = f"{base_url}/rest"
+    
+    url = f"{base_url}/createPlaylist.view" # This creates or updates if name exists
+    params = {
+        'u': username, 'p': password, 'v': '1.16.1', 'c': 'TuneForge', 
+        'f': 'json', 'name': playlist_name
+    }
+    if track_ids: params['songId'] = track_ids
+        
+    debug_log(f"Navidrome: Creating/updating playlist '{playlist_name}' with {len(track_ids) if track_ids else 0} tracks.", "INFO", True)
+    try:
+        response = requests.get(url, params=params, timeout=30)
+        # debug_log(f"Navidrome create playlist full URL: {response.url}", "DEBUG")
+        response.raise_for_status()
+        data = response.json()
+        # debug_log(f"Navidrome create playlist response: {json.dumps(data)[:200]}...", "DEBUG")
+        
+        if data.get('subsonic-response', {}).get('status') == 'ok':
+            playlist_data = data['subsonic-response'].get('playlist', {})
+            playlist_id = playlist_data.get('id')
+            actual_song_count = playlist_data.get('songCount', 'N/A')
+            debug_log(f"Navidrome: Successfully created/updated playlist '{playlist_name}' (ID: {playlist_id}). Reported tracks: {actual_song_count}.", "INFO", True)
+            return playlist_id
+        else:
+            error_message = data.get('subsonic-response', {}).get('error', {}).get('message', 'Unknown error')
+            debug_log(f"Navidrome: Error creating playlist '{playlist_name}': {error_message}", "ERROR", True)
+            return None
+    except requests.exceptions.RequestException as e:
+        debug_log(f"Navidrome: Request error creating playlist '{playlist_name}': {e}", "ERROR", True)
+        return None
+    except json.JSONDecodeError as e:
+        debug_log(f"Navidrome: JSON decode error for playlist '{playlist_name}': {e}. Response: {response.text[:200] if 'response' in locals() else 'N/A'}", "ERROR", True)
+        return None
+
+def search_tracks_in_navidrome(navidrome_url, username, password, ollama_suggested_tracks, final_unique_matched_tracks_map):
+    newly_matched_for_batch = []
+    if not all([navidrome_url, username, password]):
+        debug_log("Navidrome credentials/URL missing, skipping Navidrome search batch.", "WARN")
+        return newly_matched_for_batch
+
+    for suggested_track in ollama_suggested_tracks:
+        title, artist = suggested_track.get("title"), suggested_track.get("artist")
+        if not title or not artist: continue
+
+        track_key = (title.lower(), artist.lower())
+        if track_key in final_unique_matched_tracks_map: continue # Already found
+
+        query = f"{artist} {title}" # Navidrome search query
+        found_navidrome_tracks = search_track_in_navidrome(query, navidrome_url, username, password)
+
+        best_match = None
+        if found_navidrome_tracks:
+            for nt in found_navidrome_tracks: # Find best match
+                if nt['title'].lower() == title.lower() and nt['artist'].lower() == artist.lower():
+                    best_match = nt; break
+            if not best_match: best_match = found_navidrome_tracks[0] # Fallback to first
+        
+        if best_match:
+            match_details = {
+                'id': best_match['id'], 'title': best_match['title'], 'artist': best_match['artist'],
+                'album': best_match['album'], 'source': 'navidrome', 
+                'original_suggestion': {'title': title, 'artist': artist, 'album': suggested_track.get("album")}
+            }
+            final_unique_matched_tracks_map[track_key] = match_details
+            newly_matched_for_batch.append(match_details)
+            debug_log(f"Navidrome: Matched '{best_match['title']}' by '{best_match['artist']}' for suggestion '{title}' by '{artist}'.", "INFO")
+        # else:
+            # debug_log(f"Navidrome: No match for '{title}' by '{artist}'.", "DEBUG")
+            
+    return newly_matched_for_batch
+
+# --- Plex Functions ---
+def search_track_in_plex(plex_url, plex_token, title, artist, album, library_section_id):
+    if not all([plex_url, plex_token, library_section_id]):
+        debug_log("Plex URL, Token, or Library Section ID not configured. Skipping Plex search.", "WARN")
+        return None
+
+    headers = {'X-Plex-Token': plex_token, 'Accept': 'application/json'}
+    search_path = f"/library/sections/{library_section_id}/all"
+    params = {'type': '10', 'title': title, 'grandparentTitle': artist, 'X-Plex-Token': plex_token}
+    if album and album.lower() != "unknown album": params['parentTitle'] = album
+
+    full_url = f"{plex_url.rstrip('/')}{search_path}"
+    debug_log(f"Plex: Searching URL='{full_url}', Params='{ {k:v for k,v in params.items() if k != 'X-Plex-Token'} }'", "DEBUG")
+
+    try:
+        response = requests.get(full_url, headers=headers, params=params, timeout=20)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get('MediaContainer') and data['MediaContainer'].get('Metadata'):
+            debug_log(f"Plex: Found {len(data['MediaContainer']['Metadata'])} potential matches for '{title}' by '{artist}'", "DEBUG")
+            
+            for track_info in data['MediaContainer']['Metadata']: # Iterate through results
+                track_id = track_info.get('ratingKey')
+                found_title = track_info.get('title')
+                found_artist = track_info.get('grandparentTitle') # Artist
+                found_album = track_info.get('parentTitle')    # Album
+                track_section_id = track_info.get('librarySectionID')
+                
+                # Debug log each potential match's details
+                debug_log(f"Plex: Checking match: Title='{found_title}', Artist='{found_artist}', Album='{found_album}', Track Section ID={track_section_id}, Expected Section ID={library_section_id}", "DEBUG")
+                
+                if track_id and found_title and found_artist:
+                    # Check for section ID mismatch
+                    if track_section_id and str(track_section_id) != str(library_section_id):
+                        debug_log(f"Plex: Mismatched section ID for track '{found_title}' by '{found_artist}'. Track section: {track_section_id}, Expected: {library_section_id}", "DEBUG")
+                        continue  # Skip this track due to section mismatch
+                    
+                    # Check for title/artist match
+                    if found_title.lower() == title.lower() and found_artist.lower() == artist.lower():
+                        debug_log(f"Plex: Found exact match: '{found_title}' by '{found_artist}' (ID: {track_id})", "DEBUG")
+                        return {'id': track_id, 'title': found_title, 'artist': found_artist, 'album': found_album, 'source': 'plex'}
+            
+            debug_log(f"Plex: No exact match found for '{title}' by '{artist}' in results.", "DEBUG")
+        else:
+            debug_log(f"Plex: Track '{title}' by '{artist}' not found or no metadata in section {library_section_id}.", "DEBUG")
+        return None
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code != 404: # Don't log 404 as error here
+             debug_log(f"Plex: HTTP error searching: {e}. Response: {e.response.text[:200]}", "WARN")
+    except requests.exceptions.RequestException as e:
+        debug_log(f"Plex: Request error searching: {e}", "WARN")
+    except json.JSONDecodeError as e:
+        debug_log(f"Plex: JSON decode error searching. Response: {response.text[:200] if 'response' in locals() else 'N/A'}", "WARN")
+    return None
+
+def create_playlist_in_plex(playlist_name, track_ids, plex_server_url, plex_token, plex_machine_id):
+    if not all([plex_server_url, plex_token, plex_machine_id]):
+        debug_log("Plex server URL, token, or machine ID missing. Cannot create playlist.", "ERROR", True)
+        return None, 0
+    if not track_ids:
+        debug_log("No track IDs provided for Plex playlist creation.", "WARN", True)
+        return None, 0
+
+    headers = {'X-Plex-Token': plex_token, 'Accept': 'application/json'}
+    first_track_id = track_ids[0]
+    
+    create_playlist_url = f"{plex_server_url.rstrip('/')}/playlists"
+    # URI for the item to create the playlist from (first track)
+    # Format: server://{machine_id}/com.plexapp.plugins.library/library/metadata/{item_rating_key}
+    source_item_uri = f"server://{plex_machine_id}/com.plexapp.plugins.library/library/metadata/{first_track_id}"
+    
+    create_params = {
+        'X-Plex-Token': plex_token, 'title': playlist_name, 'smart': '0', 'type': 'audio',
+        'uri': source_item_uri
+    }
+    
+    playlist_rating_key = None
+    created_tracks_count = 0
+
+    debug_log(f"Plex: Attempting to create playlist '{playlist_name}' with first track ID: {first_track_id} (URI: {source_item_uri})", "INFO", True)
+    # debug_log(f"Plex Create URL: {create_playlist_url}, Params: { {k:v for k,v in create_params.items() if k != 'X-Plex-Token'} }", "DEBUG")
+
+    try:
+        response = requests.post(create_playlist_url, headers=headers, params=create_params, timeout=30)
+        # debug_log(f"Plex Create POST Status: {response.status_code}, Headers: {response.headers}", "DEBUG", True)
+        # response_text_snippet = response.text[:1000] if response.text else "Empty"
+        # debug_log(f"Plex Create POST Response Text (first 1000 chars): {response_text_snippet}", "DEBUG", True)
+        response.raise_for_status() 
+        
+        created_playlist_data = response.json()
+        if created_playlist_data.get('MediaContainer', {}).get('Metadata'):
+            playlist_metadata = created_playlist_data['MediaContainer']['Metadata'][0]
+            playlist_rating_key = playlist_metadata.get('ratingKey')
+            created_tracks_count = int(playlist_metadata.get('leafCount', 0))
+            debug_log(f"Plex: Playlist '{playlist_metadata.get('title')}' created. ID: {playlist_rating_key}, Initial items: {created_tracks_count}", "INFO", True)
+        else:
+            debug_log(f"Plex: Playlist created but response format unexpected: {json.dumps(created_playlist_data)[:500]}", "WARN", True)
+            # Try to find ratingKey if possible, otherwise this will fail.
+            # This path implies success (2xx) but unexpected JSON.
+
+        if not playlist_rating_key:
+            debug_log(f"Plex: Could not determine playlist ID from POST response.", "ERROR", True)
+            return None, 0
+        
+        # At this point, the playlist is created with the first track.
+        # created_tracks_count was set from the POST response (ideally 1).
+
+        additional_track_ids = track_ids[1:]
+        if additional_track_ids:
+            add_items_url = f"{plex_server_url.rstrip('/')}/playlists/{playlist_rating_key}/items"
+            items_uri_list = [f"server://{plex_machine_id}/com.plexapp.plugins.library/library/metadata/{tid}" for tid in additional_track_ids]
+            items_uri_param = ",".join(items_uri_list)
+            put_params = {'X-Plex-Token': plex_token, 'uri': items_uri_param}
+            
+            debug_log(f"Plex: Adding {len(additional_track_ids)} additional tracks to playlist ID {playlist_rating_key}.", "INFO", True)
+
+            put_response = requests.put(add_items_url, headers=headers, params=put_params, timeout=60)
+            debug_log(f"Plex Add Items PUT Status: {put_response.status_code}", "DEBUG", True)
+            put_response.raise_for_status()
+
+            updated_playlist_data = put_response.json()
+            # Check the response from the PUT request to confirm tracks were added.
+            if updated_playlist_data.get('MediaContainer', {}).get('Metadata'):
+                playlist_meta_put = updated_playlist_data['MediaContainer']['Metadata'][0]
+                # leafCountAdded is the most reliable field if present
+                leaf_count_added_str = playlist_meta_put.get('leafCountAdded')
+                if leaf_count_added_str is not None:
+                    leaf_count_added = int(leaf_count_added_str)
+                    # The initial track is already counted in created_tracks_count from POST
+                    # So, we add the newly added tracks from PUT.
+                    # However, the total count is in 'leafCount' or 'size'.
+                    # Let's use the final leafCount from the PUT response directly.
+                    final_leaf_count_str = playlist_meta_put.get('leafCount', playlist_meta_put.get('size'))
+                    if final_leaf_count_str is not None:
+                        final_leaf_count = int(final_leaf_count_str)
+                        debug_log(f"Plex: Playlist updated. leafCountAdded: {leaf_count_added}, Final leafCount: {final_leaf_count}", "INFO", True)
+                        created_tracks_count = final_leaf_count # This is the total number of tracks in the playlist
+                    else:
+                        # If leafCount is not available, but leafCountAdded is, it implies an issue or partial success.
+                        # We can be conservative or try to infer. For now, let's assume the reported added count is on top of the first one.
+                        debug_log(f"Plex: PUT successful, leafCountAdded: {leaf_count_added}, but final leafCount missing. Assuming initial + added.", "WARN")
+                        created_tracks_count = created_tracks_count + leaf_count_added # created_tracks_count is 1 from POST
+                else:
+                    # If 'leafCountAdded' is not present, try to use 'leafCount' or 'size' from PUT response
+                    final_leaf_count_str = playlist_meta_put.get('leafCount', playlist_meta_put.get('size'))
+                    if final_leaf_count_str is not None:
+                        final_leaf_count = int(final_leaf_count_str)
+                        debug_log(f"Plex: Playlist updated. Final leafCount (from PUT JSON): {final_leaf_count}. leafCountAdded was missing.", "INFO", True)
+                        created_tracks_count = final_leaf_count
+                    else:
+                        debug_log(f"Plex: Add items PUT successful (status {put_response.status_code}), but response format for counts unexpected. Current count: {created_tracks_count}", "WARN")
+                        # created_tracks_count remains as it was from the POST (likely 1), as we can't confirm more were added from PUT response.
+            else:
+                debug_log(f"Plex: Add items PUT successful (status {put_response.status_code}), but MediaContainer or Metadata missing in response. Count remains {created_tracks_count}.", "WARN")
+                # created_tracks_count remains as it was from the POST (likely 1)
+        
+        if created_tracks_count != len(track_ids):
+             debug_log(f"Plex: Playlist item count mismatch. Expected {len(track_ids)}, got {created_tracks_count}. Check Plex server.", "WARN")
+        else:
+             debug_log(f"Plex: Playlist successfully created/updated with {created_tracks_count} tracks.", "INFO", True)
+
+        return playlist_rating_key, created_tracks_count
+
+    except requests.exceptions.HTTPError as e:
+        error_details = e.response.text[:500] if e.response else "No response body"
+        debug_log(f"Plex: HTTP error during playlist operation for '{playlist_name}': {e}. Status: {e.response.status_code if e.response else 'N/A'}. Details: {error_details}", "ERROR", True)
+        return None, 0
+    except requests.exceptions.RequestException as e:
+        debug_log(f"Plex: Request error during playlist operation for '{playlist_name}': {e}", "ERROR", True)
+        return None, 0
+    except json.JSONDecodeError as e:
+        resp_text = "N/A"
+        if 'response' in locals() and response: resp_text = response.text[:200]
+        elif 'put_response' in locals() and put_response: resp_text = put_response.text[:200]
+        debug_log(f"Plex: JSON decode error during playlist op for '{playlist_name}': {e}. Response: {resp_text}", "ERROR", True)
+        return None, 0
+    except Exception as e:
+        debug_log(f"Plex: Unexpected error during playlist op for '{playlist_name}': {e}", "ERROR", True)
+        return None, 0
+
+def search_tracks_in_plex(plex_url, plex_token, ollama_suggested_tracks, final_unique_matched_tracks_map, library_section_id):
+    newly_matched_for_batch = []
+    if not all([plex_url, plex_token, library_section_id]):
+        debug_log("Plex credentials/URL/SectionID missing, skipping Plex search batch.", "WARN")
+        return newly_matched_for_batch
+
+    for suggested_track in ollama_suggested_tracks:
+        title, artist, album = suggested_track.get("title"), suggested_track.get("artist"), suggested_track.get("album", "Unknown Album")
+        if not title or not artist: continue
+
+        track_key = (title.lower(), artist.lower())
+        if track_key in final_unique_matched_tracks_map: continue
+
+        found_plex_track = search_track_in_plex(plex_url, plex_token, title, artist, album, library_section_id)
+        if found_plex_track:
+            match_details = {
+                'id': found_plex_track['id'], 'title': found_plex_track['title'], 'artist': found_plex_track['artist'],
+                'album': found_plex_track['album'], 'source': 'plex',
+                'original_suggestion': {'title': title, 'artist': artist, 'album': album}
+            }
+            final_unique_matched_tracks_map[track_key] = match_details
+            newly_matched_for_batch.append(match_details)
+            debug_log(f"Plex: Matched '{found_plex_track['title']}' by '{found_plex_track['artist']}' for suggestion '{title}' by '{artist}'.", "INFO")
+        # else:
+            # debug_log(f"Plex: No match for '{title}' by '{artist}' (Album: '{album}') in section {library_section_id}.", "DEBUG")
+            
+    return newly_matched_for_batch
+
+def test_plex_connection(plex_url, plex_token):
+    result = {'success': False, 'error': None, 'message': 'Test not fully executed.', 'details': {}, 'server_info': None}
+    if not all([plex_url, plex_token]):
+        result['error'] = "Plex Server URL or Token missing."
+        result['message'] = "Plex Server URL and Token are required."
+        return result
+
+    base_url = plex_url.rstrip('/')
+    identity_url = f"{base_url}/identity"
+    result['details']['attempted_url'] = identity_url
+
+    headers = {'X-Plex-Token': plex_token, 'Accept': 'application/json'}
+    response = None  # Initialize response variable
+    
+    try:
+        response = requests.get(identity_url, headers=headers, timeout=10)
+        result['details']['status_code'] = response.status_code
+        
+        try:
+            result['details']['response_snippet'] = response.text[:500]
+        except Exception:
+            result['details']['response_snippet'] = "Could not retrieve response text."
+
+        if response.status_code == 200:
+            data = response.json()
+            mc = data.get('MediaContainer', {})
+            server_info_data = {
+                'friendlyName': mc.get('friendlyName'),
+                'machineIdentifier': mc.get('machineIdentifier'),
+                'version': mc.get('version'),
+                'platform': mc.get('platform'),
+                'platformVersion': mc.get('platformVersion'),
+            }
+            result['server_info'] = server_info_data
+            
+            if mc.get('machineIdentifier'):
+                 result['success'] = True
+                 result['message'] = f"Successfully connected to Plex server: {server_info_data.get('friendlyName', 'Unknown Name')} (Version: {server_info_data.get('version', 'Unknown')})"
+            else:
+                result['error'] = "Connected, but couldn't retrieve essential server identity (e.g., Machine ID)."
+                result['message'] = "Connection attempt returned 200 OK, but the response format was unexpected for server identity."
+
+        elif response.status_code == 401:
+            result['error'] = "Plex connection failed: Unauthorized (401). Check your Plex Token."
+            result['message'] = "Authentication failed. Please verify your Plex token."
+        else:
+            response.raise_for_status()
+
+    except requests.exceptions.HTTPError as e:
+        result['error'] = f"Plex connection failed: HTTP Error {e.response.status_code if e.response else 'Unknown'} when accessing {identity_url}."
+        result['message'] = f"Server returned an HTTP error: {e.response.status_code if e.response else 'Unknown'}."
+        if e.response and e.response.text:
+             result['details']['response_snippet'] = e.response.text[:500]
+    except requests.exceptions.ConnectionError:
+        result['error'] = f"Plex connection failed: Could not connect to server at {plex_url} (tried {identity_url})."
+        result['message'] = "Unable to establish a connection with the Plex server. Check the URL and network."
+    except requests.exceptions.Timeout:
+        result['error'] = f"Plex connection failed: Connection timed out when accessing {identity_url}."
+        result['message'] = "The connection to the Plex server timed out."
+    except json.JSONDecodeError:
+        result['error'] = f"Plex connection failed: Could not parse JSON response from {identity_url}."
+        result['message'] = "Received an invalid JSON response from the server."
+        if response and response.text: # response_snippet might already be set
+             result['details']['response_snippet'] = response.text[:500]
+    except requests.exceptions.RequestException as e:
+        result['error'] = f"Plex connection failed: A request error occurred - {str(e)}."
+        result['message'] = f"An unexpected error occurred during the request: {str(e)}."
+    except Exception as e:
+        result['error'] = f"An unexpected error occurred: {str(e)}"
+        result['message'] = "An unexpected error occurred during the Plex connection test."
+        debug_log(f"Unexpected error in test_plex_connection: {e}", "ERROR", True)
+
+    return result
+
+# --- Flask Routes ---
 @main_bp.route('/')
 def index():
     return render_template('index.html')
@@ -76,1089 +732,357 @@ def history():
 @main_bp.route('/settings', methods=['GET', 'POST'])
 def settings():
     if request.method == 'POST':
-        config = load_config()
+        # This is form data, not JSON
+        current_config = load_config() # Load existing to preserve sections/keys not in form
+        
         # OLLAMA section
-        config.set('OLLAMA', 'URL', request.form.get('ollama_url', get_config_value('OLLAMA', 'URL', '')))
-        config.set('OLLAMA', 'Model', request.form.get('ollama_model', get_config_value('OLLAMA', 'Model', '')))
-        config.set('OLLAMA', 'ContextWindow', request.form.get('context_window', get_config_value('OLLAMA', 'ContextWindow', '2048')))
-        config.set('OLLAMA', 'MaxAttempts', request.form.get('max_attempts', get_config_value('OLLAMA', 'MaxAttempts', '3')))
+        if not current_config.has_section('OLLAMA'): current_config.add_section('OLLAMA')
+        current_config.set('OLLAMA', 'URL', request.form.get('ollama_url', get_config_value('OLLAMA', 'URL', '')))
+        current_config.set('OLLAMA', 'Model', request.form.get('ollama_model', get_config_value('OLLAMA', 'Model', '')))
+        current_config.set('OLLAMA', 'ContextWindow', request.form.get('context_window', get_config_value('OLLAMA', 'ContextWindow', '2048')))
+        current_config.set('OLLAMA', 'MaxAttempts', request.form.get('max_attempts', get_config_value('OLLAMA', 'MaxAttempts', '3')))
+        current_config.set('OLLAMA', 'Temperature', request.form.get('ollama_temperature', get_config_value('OLLAMA', 'Temperature', '0.7')))
+        current_config.set('OLLAMA', 'TopP', request.form.get('ollama_top_p', get_config_value('OLLAMA', 'TopP', '0.9')))
+        current_config.set('OLLAMA', 'DebugOllamaResponse', request.form.get('debug_ollama_response', get_config_value('OLLAMA', 'DebugOllamaResponse', 'no')))
 
-        # APP section (Music Preferences & Platform Selection)
-        if not config.has_section('APP'): config.add_section('APP')
-        config.set('APP', 'Likes', request.form.get('likes', get_config_value('APP', 'Likes', '')))
-        config.set('APP', 'Dislikes', request.form.get('dislikes', get_config_value('APP', 'Dislikes', '')))
-        config.set('APP', 'FavoriteArtists', request.form.get('favorite_artists', get_config_value('APP', 'FavoriteArtists', '')))
-        config.set('APP', 'EnableNavidrome', request.form.get('enable_navidrome', get_config_value('APP', 'EnableNavidrome', 'no')))
-        config.set('APP', 'EnablePlex', request.form.get('enable_plex', get_config_value('APP', 'EnablePlex', 'no')))
+
+        # APP section
+        if not current_config.has_section('APP'): current_config.add_section('APP')
+        current_config.set('APP', 'Likes', request.form.get('likes', get_config_value('APP', 'Likes', '')))
+        current_config.set('APP', 'Dislikes', request.form.get('dislikes', get_config_value('APP', 'Dislikes', '')))
+        current_config.set('APP', 'FavoriteArtists', request.form.get('favorite_artists', get_config_value('APP', 'FavoriteArtists', '')))
+        current_config.set('APP', 'EnableNavidrome', request.form.get('enable_navidrome', get_config_value('APP', 'EnableNavidrome', 'no')))
+        current_config.set('APP', 'EnablePlex', request.form.get('enable_plex', get_config_value('APP', 'EnablePlex', 'no')))
+        current_config.set('APP', 'Debug', request.form.get('app_debug_mode', get_config_value('APP', 'Debug', 'yes'))) # Ensure this matches the form field name
+
 
         # NAVIDROME section
-        if not config.has_section('NAVIDROME'): config.add_section('NAVIDROME')
-        config.set('NAVIDROME', 'URL', request.form.get('navidrome_url', get_config_value('NAVIDROME', 'URL', '')))
-        config.set('NAVIDROME', 'Username', request.form.get('navidrome_username', get_config_value('NAVIDROME', 'Username', '')))
-        config.set('NAVIDROME', 'Password', request.form.get('navidrome_password', get_config_value('NAVIDROME', 'Password', '')))
+        if not current_config.has_section('NAVIDROME'): current_config.add_section('NAVIDROME')
+        current_config.set('NAVIDROME', 'URL', request.form.get('navidrome_url', get_config_value('NAVIDROME', 'URL', '')))
+        current_config.set('NAVIDROME', 'Username', request.form.get('navidrome_username', get_config_value('NAVIDROME', 'Username', '')))
+        current_config.set('NAVIDROME', 'Password', request.form.get('navidrome_password', get_config_value('NAVIDROME', 'Password', '')))
         
         # PLEX section
-        if not config.has_section('PLEX'): config.add_section('PLEX')
-        config.set('PLEX', 'ServerURL', request.form.get('plex_server_url', get_config_value('PLEX', 'ServerURL', '')))
-        config.set('PLEX', 'Token', request.form.get('plex_token', get_config_value('PLEX', 'Token', '')))
-        config.set('PLEX', 'MachineID', request.form.get('plex_machine_id', get_config_value('PLEX', 'MachineID', '')))
-        config.set('PLEX', 'PlaylistType', request.form.get('plex_playlist_type', get_config_value('PLEX', 'PlaylistType', 'audio')))
-        config.set('PLEX', 'MusicSectionID', request.form.get('plex_music_section_id', get_config_value('PLEX', 'MusicSectionID', '')))
+        if not current_config.has_section('PLEX'): current_config.add_section('PLEX')
+        current_config.set('PLEX', 'ServerURL', request.form.get('plex_server_url', get_config_value('PLEX', 'ServerURL', '')))
+        current_config.set('PLEX', 'Token', request.form.get('plex_token', get_config_value('PLEX', 'Token', '')))
+        current_config.set('PLEX', 'MachineID', request.form.get('plex_machine_id', get_config_value('PLEX', 'MachineID', '')))
+        current_config.set('PLEX', 'MusicSectionID', request.form.get('plex_music_section_id', get_config_value('PLEX', 'MusicSectionID', '')))
+        current_config.set('PLEX', 'PlaylistType', request.form.get('plex_playlist_type', get_config_value('PLEX', 'PlaylistType', 'audio')))
+
 
         with open(CONFIG_FILE, 'w') as configfile:
-            config.write(configfile)
-        # The JavaScript on settings.html expects a JSON response for fetch
+            current_config.write(configfile)
+        # Instead of redirect, return JSON for AJAX handling
         return jsonify({'status': 'success', 'message': 'Settings saved successfully!'})
 
-    # GET request: Load settings and display them
+    # GET request
     context = {
         'ollama_url': get_config_value('OLLAMA', 'URL', 'http://localhost:11434'),
         'ollama_model': get_config_value('OLLAMA', 'Model', 'llama3'),
         'context_window': get_config_value('OLLAMA', 'ContextWindow', '2048'),
         'max_attempts': get_config_value('OLLAMA', 'MaxAttempts', '3'),
+        'ollama_temperature': get_config_value('OLLAMA', 'Temperature', '0.7'),
+        'ollama_top_p': get_config_value('OLLAMA', 'TopP', '0.9'),
+        'debug_ollama_response': get_config_value('OLLAMA', 'DebugOllamaResponse', 'no'),
+
         'likes': get_config_value('APP', 'Likes', ''),
         'dislikes': get_config_value('APP', 'Dislikes', ''),
         'favorite_artists': get_config_value('APP', 'FavoriteArtists', ''),
         'enable_navidrome': get_config_value('APP', 'EnableNavidrome', 'no'),
         'enable_plex': get_config_value('APP', 'EnablePlex', 'no'),
+        'app_debug_mode': get_config_value('APP', 'Debug', 'yes'), # Ensure this matches the form field name and context variable
+
         'navidrome_url': get_config_value('NAVIDROME', 'URL', ''),
         'navidrome_username': get_config_value('NAVIDROME', 'Username', ''),
         'navidrome_password': get_config_value('NAVIDROME', 'Password', ''),
+        
         'plex_server_url': get_config_value('PLEX', 'ServerURL', ''),
         'plex_token': get_config_value('PLEX', 'Token', ''),
         'plex_machine_id': get_config_value('PLEX', 'MachineID', ''),
-        'plex_playlist_type': get_config_value('PLEX', 'PlaylistType', 'audio'),
+        'plex_playlist_type': get_config_value('PLEX', 'PlaylistType', 'audio'), 
         'plex_music_section_id': get_config_value('PLEX', 'MusicSectionID', '')
     }
     return render_template('settings.html', **context)
 
-@main_bp.route('/test-navidrome')
+@main_bp.route('/test-navidrome') # Renders the test page
 def test_navidrome_page():
     return render_template('test_navidrome.html')
 
-@main_bp.route('/api/test-navidrome-connection', methods=['POST'])
+@main_bp.route('/api/test-navidrome-connection', methods=['POST']) # API endpoint for testing
 def api_test_navidrome_connection():
-    data = request.json
+    data = request.get_json() # Use get_json() for better error handling
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON payload"}), 400
     navidrome_url = data.get('navidrome_url')
     username = data.get('username')
     password = data.get('password')
-    
     result = test_navidrome_connection(navidrome_url, username, password)
     return jsonify(result)
 
-def test_navidrome_connection(navidrome_url, username, password):
-    """Test connection to Navidrome and return diagnostic information"""
-    result = {
-        'success': False,
-        'error': None,
-        'details': {},
-        'server_info': None
+@main_bp.route('/test-plex') # Renders the Plex test page
+def test_plex_page():
+    context = {
+        'plex_server_url': get_config_value('PLEX', 'ServerURL', ''),
+        'plex_token': get_config_value('PLEX', 'Token', ''),
+        'plex_music_section_id': get_config_value('PLEX', 'MusicSectionID', '')
     }
-    
-    # Check for missing parameters
-    if not navidrome_url:
-        result['error'] = "Navidrome URL is missing"
-        return result
-    
-    if not username:
-        result['error'] = "Username is missing"
-        return result
-    
-    if not password:
-        result['error'] = "Password is missing"
-        return result
-    
-    # Process the URL to ensure it's correctly formatted
-    base_url = navidrome_url.rstrip('/')
-    
-    # Check if URL already has /rest path
-    result['details']['original_url'] = navidrome_url
-    result['details']['processed_url'] = base_url
-    
-    if '/rest' not in base_url:
-        base_url = f"{base_url}/rest"
-        result['details']['rest_path_added'] = True
-    else:
-        result['details']['rest_path_added'] = False
-    
-    result['details']['final_url'] = base_url
-    
-    # Try to ping the server
-    ping_url = f"{base_url}/ping.view"
-    params = {
-        'u': username,
-        'p': password,
-        'v': '1.16.1',
-        'c': 'flask-ollama-playlist',
-        'f': 'json'
-    }
-    
-    try:
-        # Test ping endpoint
-        result['details']['ping_url'] = ping_url
-        ping_response = requests.get(ping_url, params=params, timeout=10)
-        result['details']['ping_status_code'] = ping_response.status_code
-        
-        if ping_response.status_code == 200:
-            try:
-                ping_data = ping_response.json()
-                result['details']['ping_response'] = ping_data
-                
-                if ping_data.get('subsonic-response', {}).get('status') == 'ok':
-                    result['success'] = True
-                else:
-                    error = ping_data.get('subsonic-response', {}).get('error', {})
-                    result['error'] = f"API Error: {error.get('message')} (code {error.get('code')})"
-            except json.JSONDecodeError:
-                result['error'] = "Could not parse JSON response from server"
-                result['details']['ping_response_text'] = ping_response.text[:500]  # First 500 chars
-        else:
-            result['error'] = f"Server returned status code {ping_response.status_code}"
-            result['details']['ping_response_text'] = ping_response.text[:500]  # First 500 chars
-            
-        # Try to get server version info if ping was successful
-        if result['success']:
-            system_url = f"{base_url}/getSystemInfo.view"
-            system_response = requests.get(system_url, params=params, timeout=10)
-            
-            if system_response.status_code == 200:
-                try:
-                    system_data = system_response.json()
-                    if system_data.get('subsonic-response', {}).get('status') == 'ok':
-                        result['server_info'] = system_data.get('subsonic-response', {}).get('systemInfo', {})
-                except:
-                    pass  # Silently fail on system info
-            
-    except requests.exceptions.ConnectionError:
-        result['error'] = "Connection error - could not connect to server"
-    except requests.exceptions.Timeout:
-        result['error'] = "Connection timed out"
-    except requests.exceptions.RequestException as e:
-        result['error'] = f"Request error: {str(e)}"
-    
-    return result
+    return render_template('test_plex.html', **context)
 
-def search_track_in_navidrome(query, navidrome_url, username, password):
-    """Search for tracks in Navidrome using the search3 endpoint"""
-    if not navidrome_url:
-        debug_log("Navidrome URL is not configured", "ERROR")
-        return []
-        
-    # Remove trailing slash if present
-    base_url = navidrome_url.rstrip('/')
+@main_bp.route('/api/test-plex-connection', methods=['POST']) # API endpoint for testing Plex connection
+def api_test_plex_connection():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON payload", "success": False}), 400
     
-    # Check if URL already has /rest path - don't add it if it's already there
-    if '/rest' not in base_url:
-        base_url = f"{base_url}/rest"
-        debug_log(f"Added /rest to Navidrome URL: {base_url}", "DEBUG")
-    
-    # Setup the search endpoint URL with proper parameter encoding
-    url = f"{base_url}/search3.view"
-    params = {
-        'u': username,
-        'p': password,
-        'v': '1.16.1',
-        'c': 'flask-ollama-playlist',
-        'f': 'json',
-        'query': query,
-        'songCount': 40,  # Limit to 40 songs max
-        'artistCount': 0,  # No artists
-        'albumCount': 0    # No albums
-    }
-    
-    debug_log(f"Searching Navidrome for query: '{query}'", "INFO")
-    
-    try:
-        # Make the request using the params parameter which properly handles URL encoding
-        debug_log(f"Making request to Navidrome: {url}", "DEBUG")
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        
-        # Print the actual URL that was requested (for debugging)
-        debug_log(f"Full search URL: {response.url}", "DEBUG")
-        
-        data = response.json()
-        
-        # Debug: print the raw API response
-        debug_log(f"Navidrome search response status code: {response.status_code}", "DEBUG")
-        # Log more of the response for detailed inspection
-        debug_log(f"Navidrome search raw response: {json.dumps(data)}", "DEBUG") 
-        
-        if data.get('subsonic-response', {}).get('status') == 'ok':
-            search_result = data.get('subsonic-response', {}).get('searchResult3', {})
-            songs = search_result.get('song', [])
-            debug_log(f"Found {len(songs)} songs in Navidrome", "INFO")
-            
-            # Format the results similar to how the Ollama response is processed
-            tracks = []
-            for song in songs:
-                track_id = song.get('id')
-                title = song.get('title', 'Unknown Title')
-                artist = song.get('artist', 'Unknown Artist')
-                album = song.get('album', 'Unknown Album')
-                
-                tracks.append({
-                    'id': track_id,
-                    'title': title,
-                    'artist': artist,
-                    'album': album,
-                    'source': 'navidrome'
-                })
-                
-                debug_log(f"Found track: {title} by {artist} on {album} (ID: {track_id})", "DEBUG")
-                
-            return tracks
-        else:
-            error_message = data.get('subsonic-response', {}).get('error', {}).get('message')
-            debug_log(f"Error searching Navidrome: {error_message}", "ERROR", True)
-            return []
-    except requests.exceptions.RequestException as e:
-        debug_log(f"Error searching Navidrome: {e}", "ERROR", True)
-        return []
-    except json.JSONDecodeError as e:
-        debug_log(f"Error decoding Navidrome search JSON response: {e}", "ERROR", True)
-        return []
-        return []
+    plex_server_url = data.get('plex_server_url')
+    plex_token = data.get('plex_token')
 
-def create_playlist_in_navidrome(playlist_name, track_ids, navidrome_url, username, password):
-    # Process the URL to ensure it's correctly formatted
-    if not navidrome_url:
-        debug_log("Navidrome URL is not configured", "ERROR")
-        return None
-        
-    # Remove trailing slash if present
-    base_url = navidrome_url.rstrip('/')
-    
-    # Check if URL already has /rest path - don't add it if it's already there
-    if '/rest' not in base_url:
-        base_url = f"{base_url}/rest"
-        debug_log(f"Added /rest to Navidrome URL: {base_url}", "DEBUG")
-    
-    # Start with the base URL and standard parameters
-    url = f"{base_url}/createPlaylist.view"
-    params = {
-        'u': username,
-        'p': password,
-        'v': '1.16.1',
-        'c': 'flask-ollama-playlist',
-        'f': 'json',
-        'name': playlist_name
-    }
-    
-    # Add songId parameters for each track
-    if track_ids:
-        # Use a list for multiple values with the same key
-        # requests will handle this correctly in the URL
-        if not isinstance(track_ids, list):
-            track_ids = [track_ids]
-            
-        params['songId'] = track_ids
-        
-    debug_log(f"Creating Navidrome playlist '{playlist_name}' with {len(track_ids) if track_ids else 0} tracks", "INFO", True)
-    
-    try:
-        # Use params argument instead of building URL manually
-        debug_log(f"Making request to Navidrome: {url}", "DEBUG")
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        
-        debug_log(f"Full playlist creation URL: {response.url}", "DEBUG")
-        
-        data = response.json()
-        debug_log(f"Navidrome create playlist response: {json.dumps(data)[:200]}...", "DEBUG")
-        
-        if data.get('subsonic-response', {}).get('status') == 'ok':
-            playlist_id = data['subsonic-response'].get('playlist', {}).get('id')
-            debug_log(f"Successfully created Navidrome playlist with ID: {playlist_id}", "INFO", True)
-            return playlist_id
-        else:
-            error_message = data.get('subsonic-response', {}).get('error', {}).get('message')
-            debug_log(f"Error creating Navidrome playlist: {error_message}", "ERROR", True)
-            return None
-    except requests.exceptions.RequestException as e:
-        debug_log(f"Error creating Navidrome playlist: {e}", "ERROR", True)
-        return None
-    except json.JSONDecodeError as e:
-        debug_log(f"Error decoding Navidrome playlist JSON response: {e}", "ERROR", True)
-        return None
+    if not plex_server_url or not plex_token:
+        return jsonify({"error": "Plex Server URL and Token are required in the payload.", "success": False}), 400
+
+    result = test_plex_connection(plex_server_url, plex_token)
+    return jsonify(result)
 
 @main_bp.route('/api/generate-playlist', methods=['POST'])
 def api_generate_playlist():
-    # Ensure we have JSON data
-    if not request.is_json:
-        return jsonify({"error": "Request must be JSON"}), 415
-    
-    # Extract request data
-    data = request.json
-    prompt = data.get('prompt', '')
-    num_songs = data.get('num_songs', 10)
-    playlist_name = data.get('playlist_name', 'TuneForge Playlist')
-    
-    # Debug output
-    debug_log(f"Received playlist generation request: {prompt[:100]}...", "INFO", True)
-    debug_log(f"Requested {num_songs} songs", "INFO")
-    
-    # Load configuration
-    ollama_url = get_config_value('OLLAMA', 'URL', 'http://localhost:11434')
-    ollama_model = get_config_value('OLLAMA', 'Model', 'llama3')
-    enable_navidrome = get_config_value('APP', 'EnableNavidrome', 'no').lower() == 'yes'
-    enable_plex = get_config_value('APP', 'EnablePlex', 'no').lower() == 'yes'
-    
-    debug_log(f"Configuration loaded: Ollama URL={ollama_url}, Model={ollama_model}", "INFO")
-    debug_log(f"Services enabled: Navidrome={enable_navidrome}, Plex={enable_plex}", "INFO")
-    
-    # Prepare the playlist
-    all_tracks = []
-    matched_tracks = []
-    remaining_tracks_needed = num_songs
-    retry_attempts = 0
-    max_retry_attempts = int(get_config_value('OLLAMA', 'MaxAttempts', '3'))
-    
-    # Define minimum threshold for matches before retrying
-    min_match_threshold = max(int(num_songs * 0.2), 2)  # At least 20% or 2 tracks, whichever is higher
-    
-    debug_log(f"Minimum match threshold: {min_match_threshold} tracks", "DEBUG")
-    
-    # Continue generating tracks until we have enough matches or hit retry limit
-    while remaining_tracks_needed > 0 and retry_attempts < max_retry_attempts:
-        tracks = generate_tracks_with_ollama(ollama_url, ollama_model, prompt, remaining_tracks_needed, retry_attempts)
+    data = request.get_json() # Use get_json() for better error handling
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON payload"}), 400
         
-        # Add the new tracks to our master list
-        if tracks and len(tracks) > 0:
-            all_tracks.extend(tracks)
-            
-            # Track the retry attempt
-            retry_attempts += 1
-            
-            # Search for these tracks in services
-            newly_matched_navidrome_tracks = []
-            newly_matched_plex_tracks = []
-            
-            # Search in Navidrome if enabled
-            if enable_navidrome:
-                newly_matched_navidrome_tracks = search_tracks_in_service(tracks, 'navidrome')
-                matched_tracks.extend(newly_matched_navidrome_tracks)
-                
-            # Search in Plex if enabled
-            if enable_plex:
-                newly_matched_plex_tracks = search_tracks_in_service(tracks, 'plex')
-                matched_tracks.extend(newly_matched_plex_tracks)
-            
-            # Count unique matched tracks (avoid duplicates)
-            unique_matched_tracks = {}
-            for track in matched_tracks:
-                track_id = track.get('id')
-                if track_id:
-                    # Store the track by ID, overwriting any previous instance
-                    unique_matched_tracks[track_id] = track
-            
-            # Update remaining tracks needed
-            remaining_tracks_needed = num_songs - len(unique_matched_tracks)
-            
-            debug_log(f"Found {len(newly_matched_navidrome_tracks)} new Navidrome matches, {len(newly_matched_plex_tracks)} new Plex matches", "INFO")
-            debug_log(f"Total unique matched tracks: {len(unique_matched_tracks)}/{num_songs}", "INFO")
-            
-            # If we have enough tracks, break
-            if remaining_tracks_needed <= 0:
-                debug_log(f"Found enough tracks, stopping retries", "INFO")
-                break
-                
-            # Check if we got at least some matches in this batch
-            total_new_matches = len(newly_matched_navidrome_tracks) + len(newly_matched_plex_tracks)
-            if total_new_matches < min_match_threshold and retry_attempts < max_retry_attempts:
-                debug_log(f"Only found {total_new_matches} matches in this batch, which is below threshold of {min_match_threshold}", "INFO")
-                debug_log(f"Will try again for {remaining_tracks_needed} more tracks (attempt {retry_attempts}/{max_retry_attempts})", "INFO")
-            else:
-                # We got a decent number of matches, so break
-                debug_log(f"Found {total_new_matches} matches in this batch, which is satisfactory", "INFO")
-                break
-        else:
-            # If we got no tracks from Ollama, increment retry but give up if we hit max
-            retry_attempts += 1
-            if retry_attempts >= max_retry_attempts:
-                debug_log(f"Failed to get tracks from Ollama after {retry_attempts} attempts, giving up", "ERROR")
-                break
+    prompt = data.get('prompt')
+    playlist_name = data.get('playlist_name', 'New TuneForge Playlist')
+    num_songs = int(data.get('num_songs', 10))
+    services_to_use_req = data.get('services', [])
+    services_to_use = [s.lower() for s in services_to_use_req] if services_to_use_req else ['navidrome', 'plex']
     
-    # Create the playlist data structure with all generated tracks
-    playlist = {
-        "name": playlist_name,
-        "description": prompt,
-        "created_at": datetime.datetime.now().isoformat(),
-        "tracks": all_tracks
-    }
+    max_ollama_attempts = int(get_config_value('OLLAMA', 'MaxAttempts', '3'))
+
+    if not prompt: return jsonify({"error": "Prompt is required"}), 400
+
+    ollama_url = get_config_value('OLLAMA', 'URL')
+    ollama_model = get_config_value('OLLAMA', 'Model')
+    if not ollama_url or not ollama_model:
+        return jsonify({"error": "Ollama URL or Model not configured in settings."}), 400
     
-    # Now create playlists in the music services if we have matches
+    enable_navidrome = 'navidrome' in services_to_use and get_config_value('APP', 'EnableNavidrome', 'no').lower() in ('yes', 'true', '1')
+    enable_plex = 'plex' in services_to_use and get_config_value('APP', 'EnablePlex', 'no').lower() in ('yes', 'true', '1')
+
+    navidrome_url, navidrome_user, navidrome_pass = (None,)*3
     if enable_navidrome:
-        create_playlist_in_service(playlist_name, matched_tracks, 'navidrome')
-    
+        navidrome_url = get_config_value('NAVIDROME', 'URL')
+        navidrome_user = get_config_value('NAVIDROME', 'Username')
+        navidrome_pass = get_config_value('NAVIDROME', 'Password')
+        if not all([navidrome_url, navidrome_user, navidrome_pass]):
+            debug_log("Navidrome enabled but details missing. Disabling for this run.", "WARN", True); enable_navidrome = False
+
+    plex_server_url, plex_token, plex_section_id, plex_machine_id = (None,)*4
     if enable_plex:
-        create_playlist_in_service(playlist_name, matched_tracks, 'plex')
+        plex_server_url = get_config_value('PLEX', 'ServerURL')
+        plex_token = get_config_value('PLEX', 'Token')
+        plex_section_id = get_config_value('PLEX', 'MusicSectionID')
+        plex_machine_id = get_config_value('PLEX', 'MachineID')
+        if not all([plex_server_url, plex_token, plex_section_id, plex_machine_id]):
+            debug_log("Plex enabled but critical details missing. Disabling for this run.", "WARN", True); enable_plex = False
     
-    # Save the playlist to history
-    try:
-        # Load existing history
-        history = load_playlist_history()
-        
-        # Add new playlist to history
-        history.append(playlist)
-        
-        # Save back to file
-        with open(HISTORY_FILE, 'w') as f:
-            json.dump(history, f, indent=2)
-            
-        debug_log(f"Saved playlist '{playlist_name}' to history", "INFO")
-    except Exception as e:
-        debug_log(f"Error saving playlist to history: {e}", "ERROR", True)
+    if not enable_navidrome and not enable_plex:
+        return jsonify({"error": "No services (Navidrome/Plex) are enabled or properly configured."}), 400
+
+    final_unique_matched_tracks_map = {} # Stores {(title.lower(), artist.lower()): track_details_dict}
+    all_ollama_suggestions_raw = [] # Stores all raw track dicts from Ollama for context
     
-    # Return response
-    response = {
-        "status": "success",
-        "message": "Playlist generated successfully",
-        "data": {
-            "playlist": playlist,
-            "services": {
-                "navidrome": enable_navidrome,
-                "plex": enable_plex
-            },
-            "stats": {
-                "total_tracks_generated": len(all_tracks),
-                "matched_tracks": len(matched_tracks),
-                "retry_attempts": retry_attempts
-            }
-        }
-    }
+    ollama_api_calls_made = 0
     
-    return jsonify(response)
+    while len(final_unique_matched_tracks_map) < num_songs and ollama_api_calls_made < max_ollama_attempts:
+        tracks_still_needed = num_songs - len(final_unique_matched_tracks_map)
+        debug_log(f"Playlist Gen: Attempt {ollama_api_calls_made + 1}/{max_ollama_attempts}. Tracks found: {len(final_unique_matched_tracks_map)}/{num_songs}.", "INFO", True)
 
-def generate_tracks_with_ollama(ollama_url, ollama_model, prompt, num_songs, attempt=0):
-    """Generate tracks using Ollama API with retry logic"""
-    try:
-        # Adjust prompt for retry attempts
-        retry_prompt = ""
-        if attempt > 0:
-            retry_prompt = f"\nThe previous suggestions didn't match my music library well. Please suggest {num_songs} DIFFERENT songs that are more likely to be in a typical music collection. Focus on well-known artists and popular songs."
-        
-        # Format the prompt for Ollama
-        formatted_prompt = f"""Create a playlist with these preferences:
-{prompt}{retry_prompt}
+        songs_to_request_this_ollama_call = tracks_still_needed * 2 # Request more to account for filtering/matching
+        if tracks_still_needed <= 3: songs_to_request_this_ollama_call = tracks_still_needed + 7
+        songs_to_request_this_ollama_call = max(5, min(songs_to_request_this_ollama_call, 20)) # Bounds: 5-20
 
-For each song, provide the following in JSON format:
-1. Title
-2. Artist 
-3. Album
+        debug_log(f"Ollama: Requesting {songs_to_request_this_ollama_call} new tracks.", "INFO")
+        current_ollama_batch = generate_tracks_with_ollama(
+            ollama_url, ollama_model, prompt, songs_to_request_this_ollama_call, 
+            ollama_api_calls_made, all_ollama_suggestions_raw
+        )
+        ollama_api_calls_made += 1
 
-Generate exactly {num_songs} songs. Output ONLY valid JSON in this format:
-[
-  {{"title": "Song Title 1", "artist": "Artist Name 1", "album": "Album Name 1"}},
-  {{"title": "Song Title 2", "artist": "Artist Name 2", "album": "Album Name 2"}},
-  ...
-]
-"""
+        if not current_ollama_batch:
+            debug_log(f"Ollama: Attempt {ollama_api_calls_made} yielded no tracks. {'Retrying...' if ollama_api_calls_made < max_ollama_attempts else 'Max attempts reached.'}", "WARN", True)
+            if ollama_api_calls_made < max_ollama_attempts: time.sleep(1); continue
+            else: break # Max Ollama attempts reached
+
+        all_ollama_suggestions_raw.extend(current_ollama_batch)
         
-        # Create the API request to Ollama
-        ollama_api_url = f"{ollama_url.rstrip('/')}/api/generate"
-        ollama_payload = {
-            "model": ollama_model,
-            "prompt": formatted_prompt,
-            "stream": False
-        }
-        
-        # Make the request to Ollama
-        debug_log(f"Sending request to Ollama at {ollama_api_url} (attempt {attempt+1})", "INFO", True)
-        debug_log(f"Prompt: {formatted_prompt[:200]}...", "DEBUG")
-        
-        response = requests.post(ollama_api_url, json=ollama_payload, timeout=60)
-        
-        if response.status_code == 200:
-            response_data = response.json()
-            response_text = response_data.get('response', '')
-            
-            # Debug the response if enabled
-            debug_log(f"Ollama responded with status 200", "INFO")
-            debug_log(f"Response text (first 200 chars): {response_text[:200]}...", "DEBUG")
-            
-            # Extract the JSON part from the response
-            json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
-            if json_match:
-                json_text = json_match.group(0)
-                try:
-                    # Parse the JSON
-                    generated_tracks = json.loads(json_text)
-                    debug_log(f"Successfully parsed {len(generated_tracks)} tracks from Ollama response", "INFO", True)
-                    debug_log(f"Track sample: {json.dumps(generated_tracks[:2], indent=2)}", "DEBUG")
-                    return generated_tracks
-                except json.JSONDecodeError as e:
-                    debug_log(f"Error parsing JSON from Ollama: {e}", "ERROR", True)
-                    debug_log(f"JSON text that failed to parse: {json_text[:200]}...", "DEBUG")
-                    # Fall back to mock data if Ollama parsing fails
-                    tracks = [
-                        {"title": f"Track {i+1}", "artist": f"Artist {chr(65+i)}", "album": f"Album {chr(88+i%3)}"}
-                        for i in range(5)
-                    ]
-                    debug_log("Falling back to mock data due to JSON parse error", "WARN")
-                    return tracks
-            else:
-                debug_log("Could not find JSON in Ollama response, using mock data", "WARN", True)
-                debug_log(f"Response that didn't contain valid JSON: {response_text[:200]}...", "DEBUG")
-                # Fall back to mock data if no JSON was found
-                tracks = [
-                    {"title": f"Track {i+1}", "artist": f"Artist {chr(65+i)}", "album": f"Album {chr(88+i%3)}"}
-                    for i in range(5)
-                ]
-                return tracks
-        else:
-            debug_log(f"Error from Ollama API: {response.status_code} {response.text[:100]}...", "ERROR", True)
-            # Fall back to mock data on API error
-            tracks = [
-                {"title": f"Track {i+1}", "artist": f"Artist {chr(65+i)}", "album": f"Album {chr(88+i%3)}"}
-                for i in range(5)
-            ]
-            return tracks
-    except Exception as e:
-        debug_log(f"Error calling Ollama API: {e}", "ERROR", True)
-        # Fall back to mock data on any error
-        tracks = [
-            {"title": f"Track {i+1}", "artist": f"Artist {chr(65+i)}", "album": f"Album {chr(88+i%3)}"}
-            for i in range(5)
+        # Pre-filter Ollama suggestions (live, instrumental, already found etc.)
+        undesirable_patterns = [ # Regex patterns
+            r"\(live\b", r"\[live\b", r"- live\b", r"\blive at\b", r"\blive from\b",
+            r"\(instrumental\b", r"\[instrumental\b", r"- instrumental\b",
+            r"\(karaoke\b", r"\[karaoke\b", r"- karaoke\b", r"karaoke version\b",
+            r"\(cover\b", r"\[cover\b", r"- cover\b", r" tribute\b",
+            r"\(remix\b", r"\[remix\b", r"- remix\b",
+            r"\(acoustic\b", r"\[acoustic\b", r"- acoustic\b",
+            r"\(edit\b", r"\[edit\b", r"- radio edit\b", r"single version\b",
+            r"\(demo\b", r"\[demo\b", r"- demo\b", r"\(session\b", r"\[session\b",
         ]
-        return tracks
+        undesirable_artist_keywords = ["karaoke", "tribute band", "the karaoke crew", "various artists", "soundtrack"]
+        
+        eligible_tracks_for_search = []
+        for track in current_ollama_batch:
+            title_l, artist_l, album_l = track.get("title","").lower(), track.get("artist","").lower(), track.get("album","").lower()
+            if not title_l or not artist_l: continue
+            if (title_l, artist_l) in final_unique_matched_tracks_map: continue # Already found
 
-def search_tracks_in_service(tracks, service):
-    """Search for tracks in a specific service (Navidrome or Plex)"""
-    if service == 'navidrome':
-        navidrome_url = get_config_value('NAVIDROME', 'URL', '')
-        navidrome_username = get_config_value('NAVIDROME', 'Username', '')
-        navidrome_password = get_config_value('NAVIDROME', 'Password', '')
+            is_undesirable = any(re.search(p, title_l) or re.search(p, album_l) for p in undesirable_patterns) or \
+                             any(k in artist_l for k in undesirable_artist_keywords)
+            if is_undesirable:
+                # debug_log(f"Filtering out undesirable: '{track.get('title')}' by '{track.get('artist')}'", "DEBUG")
+                continue
+            eligible_tracks_for_search.append(track)
         
-        debug_log(f"Searching for {len(tracks)} tracks in Navidrome", "INFO")
-        
-        if not navidrome_url or not navidrome_username or not navidrome_password:
-            debug_log("Navidrome credentials incomplete, skipping search", "WARN")
-            return []
-            
-        matched_tracks = []
-        for track in tracks:
-            title = track.get('title', '')
-            artist = track.get('artist', '')
-            
-            search_query = f"{artist} {title}"
-            debug_log(f"Searching Navidrome for: {search_query}", "INFO")
-            
-            found_tracks = search_track_in_navidrome(search_query, navidrome_url, navidrome_username, navidrome_password)
-            
-            if found_tracks:
-                debug_log(f"Found {len(found_tracks)} matching tracks in Navidrome", "INFO")
-                matched_tracks.extend(found_tracks)
-            else:
-                debug_log(f"No matches found in Navidrome for: {search_query}", "WARN")
-                
-        debug_log(f"Found a total of {len(matched_tracks)} tracks in Navidrome", "INFO")
-        return matched_tracks
-    
-    elif service == 'plex':
-        plex_server_url = get_config_value('PLEX', 'ServerURL', '')
-        plex_token = get_config_value('PLEX', 'Token', '')
-        plex_music_section_id = get_config_value('PLEX', 'MusicSectionID', '')
-        
-        debug_log(f"Searching for {len(tracks)} tracks in Plex", "INFO")
-        
-        if not plex_server_url or not plex_token or not plex_music_section_id:
-            debug_log("Plex credentials incomplete, skipping search", "WARN")
-            return []
-            
-        matched_tracks = []
-        for track in tracks:
-            title = track.get('title', '')
-            artist = track.get('artist', '')
-            
-            search_query = f"{artist} {title}"
-            debug_log(f"Searching Plex for: {search_query}", "INFO")
-            
-            found_tracks = search_track_in_plex(search_query, plex_server_url, plex_token, plex_music_section_id)
-            
-            if found_tracks:
-                debug_log(f"Found {len(found_tracks)} matching tracks in Plex", "INFO")
-                matched_tracks.extend(found_tracks)
-            else:
-                debug_log(f"No matches found in Plex for: {search_query}", "WARN")
-                
-        debug_log(f"Found a total of {len(matched_tracks)} tracks in Plex", "INFO")
-        return matched_tracks
-    
-    return []
+        debug_log(f"Ollama: {len(eligible_tracks_for_search)} tracks eligible for searching after filtering batch of {len(current_ollama_batch)}.", "INFO")
+        if not eligible_tracks_for_search: continue
 
-def create_playlist_in_service(playlist_name, tracks, service):
-    """Create a playlist in a specific service (Navidrome or Plex)"""
-    if not tracks or len(tracks) == 0:
-        debug_log(f"No tracks to create playlist in {service}", "WARN")
-        return None
+        if enable_navidrome:
+            search_tracks_in_navidrome(navidrome_url, navidrome_user, navidrome_pass, eligible_tracks_for_search, final_unique_matched_tracks_map)
+            if len(final_unique_matched_tracks_map) >= num_songs: break
         
-    # Filter tracks by service and get unique IDs
-    service_tracks = [track for track in tracks if track.get('source') == service]
-    track_ids = []
-    
-    # Use a set to deduplicate tracks
-    seen_ids = set()
-    for track in service_tracks:
-        track_id = track.get('id')
-        if track_id and track_id not in seen_ids:
-            track_ids.append(track_id)
-            seen_ids.add(track_id)
-    
-    if not track_ids or len(track_ids) == 0:
-        debug_log(f"No valid track IDs for {service} playlist", "WARN")
-        return None
+        if enable_plex:
+            search_tracks_in_plex(plex_server_url, plex_token, eligible_tracks_for_search, final_unique_matched_tracks_map, plex_section_id)
+            if len(final_unique_matched_tracks_map) >= num_songs: break
         
-    debug_log(f"Creating {service} playlist with {len(track_ids)} unique tracks", "INFO")
-    
-    if service == 'navidrome':
-        navidrome_url = get_config_value('NAVIDROME', 'URL', '')
-        navidrome_username = get_config_value('NAVIDROME', 'Username', '')
-        navidrome_password = get_config_value('NAVIDROME', 'Password', '')
-        
-        return create_playlist_in_navidrome(playlist_name, track_ids, navidrome_url, navidrome_username, navidrome_password)
-    
-    elif service == 'plex':
-        plex_server_url = get_config_value('PLEX', 'ServerURL', '')
-        plex_token = get_config_value('PLEX', 'Token', '')
-        plex_machine_id = get_config_value('PLEX', 'MachineID', '')
-        plex_playlist_type = get_config_value('PLEX', 'PlaylistType', 'audio')
-        
-        return create_playlist_in_plex(playlist_name, track_ids, plex_server_url, plex_token, plex_machine_id, plex_playlist_type)
-    
-    return None
-    
-    # Save the playlist to history
-    try:
-        # Load existing history
-        history = load_playlist_history()
-        
-        # Add new playlist to history
-        history.append(playlist)
-        
-        # Save back to file
-        with open(HISTORY_FILE, 'w') as f:
-            json.dump(history, f, indent=2)
-            
-        debug_log(f"Saved playlist '{playlist_name}' to history", "INFO")
-    except Exception as e:
-        debug_log(f"Error saving playlist to history: {e}", "ERROR", True)
-    
-    # Return response
-    response = {
-        "status": "success",
-        "message": "Playlist generated successfully",
-        "data": {
-            "playlist": playlist,
-            "services": {
-                "navidrome": enable_navidrome,
-                "plex": enable_plex
-            }
-        }
-    }
-    
-    return jsonify(response)
+        if ollama_api_calls_made < max_ollama_attempts and len(final_unique_matched_tracks_map) < num_songs : time.sleep(0.5)
 
-def search_track_in_plex(query, plex_server_url, plex_token, section_id):
-    """Search for tracks in Plex using the search endpoint"""
-    if not plex_server_url:
-        debug_log("Plex Server URL is not configured", "ERROR")
-        return []
-        
-    # Remove trailing slash if present
-    base_url = plex_server_url.rstrip('/')
-    
-    # Split query into artist and title components for better search
-    parts = query.split(" ", 1)
-    artist = parts[0] if len(parts) > 0 else ""
-    title = parts[1] if len(parts) > 1 else query
-    
-    debug_log(f"Parsed query into artist='{artist}' and title='{title}'", "DEBUG")
-    
-    # Setup the search endpoint URL
-    # Use the library endpoint instead of search for better results
-    url = f"{base_url}/library/sections/{section_id}/all"
-    
-    headers = {
-        'X-Plex-Token': plex_token,
-        'Accept': 'application/json'
-    }
-    
-    # First try: search using a more flexible approach
-    params = {
-        'title': title,
-        'type': '10',  # 10 is the type for tracks
-        'limit': 50    # Increase limit to get more potential matches
-    }
-    
-    # Only add artist filter if it's not empty and reasonably long
-    if artist and len(artist) > 2:
-        params['artist.title'] = artist
-    
-    debug_log(f"Searching Plex for query: '{query}'", "INFO")
-    debug_log(f"Using artist filter: '{artist}' and title filter: '{title}'", "DEBUG")
-    
-    try:
-        # Make the request
-        debug_log(f"Making request to Plex: {url}", "DEBUG")
-        response = requests.get(url, params=params, headers=headers)
-        response.raise_for_status()
-        
-        # Print the actual URL that was requested (for debugging)
-        debug_log(f"Full search URL: {response.url}", "DEBUG")
-        
-        data = response.json()
-        
-        # Debug: print the raw API response
-        debug_log(f"Plex search response status code: {response.status_code}", "DEBUG")
-        debug_log(f"Plex search response first 200 chars: {json.dumps(data)[:200]}...", "DEBUG")
-        
-        # Analyze the MediaContainer structure
-        if 'MediaContainer' in data:
-            container = data['MediaContainer']
-            debug_log(f"MediaContainer keys: {list(container.keys())}", "DEBUG")
-            debug_log(f"MediaContainer size: {container.get('size', 0)}", "DEBUG")
-            if 'Metadata' not in container and container.get('size', 0) == 0:
-                debug_log("No Metadata found in MediaContainer with size 0", "DEBUG")
-            elif 'Metadata' not in container:
-                debug_log(f"No Metadata found but container has size {container.get('size', 0)}", "DEBUG")
-        
-        tracks = []
-        if 'MediaContainer' in data and 'Metadata' in data['MediaContainer']:
-            results = data['MediaContainer'].get('Metadata', [])
-            debug_log(f"Found {len(results)} items in Plex search results", "INFO")
-            
-            for item in results:
-                if item.get('type') == 'track':
-                    track = {
-                        'id': item.get('ratingKey'),
-                        'title': item.get('title', 'Unknown Title'),
-                        'artist': item.get('grandparentTitle', 'Unknown Artist'),
-                        'album': item.get('parentTitle', 'Unknown Album'),
-                        'source': 'plex'
-                    }
-                    tracks.append(track)
-                    debug_log(f"Found track: {track['title']} by {track['artist']} on {track['album']} (ID: {track['id']})", "DEBUG")
-        
-        # If we got no results with the first approach, try a more general search
-        if not tracks:
-            debug_log("No tracks found with specific search, trying more general search", "INFO")
-            
-            # Use the search endpoint as a fallback with a more general query
-            search_url = f"{base_url}/search"
-            
-            # Use just the title part for a more general search
-            search_query = title
-            
-            # If title is too short or generic, fall back to the original query
-            if len(title.strip()) < 3:
-                search_query = query
-                
-            search_params = {
-                'query': search_query,
-                'sectionId': section_id,
-                'type': '10',  # 10 is the type for tracks
-                'limit': 50
-            }
-            
-            search_response = requests.get(search_url, params=search_params, headers=headers)
-            search_response.raise_for_status()
-            
-            debug_log(f"Full fallback search URL: {search_response.url}", "DEBUG")
-            
-            search_data = search_response.json()
-            
-            if 'MediaContainer' in search_data and 'Metadata' in search_data['MediaContainer']:
-                search_results = search_data['MediaContainer'].get('Metadata', [])
-                debug_log(f"Found {len(search_results)} items in Plex fallback search results", "INFO")
-                
-                for item in search_results:
-                    if item.get('type') == 'track':
-                        track = {
-                            'id': item.get('ratingKey'),
-                            'title': item.get('title', 'Unknown Title'),
-                            'artist': item.get('grandparentTitle', 'Unknown Artist'),
-                            'album': item.get('parentTitle', 'Unknown Album'),
-                            'source': 'plex'
-                        }
-                        tracks.append(track)
-                        debug_log(f"Found track: {track['title']} by {track['artist']} on {track['album']} (ID: {track['id']})", "DEBUG")
-        
-        # Try a third approach if still no results - use artist search
-        if not tracks:
-            debug_log("No tracks found with general search, trying artist-only search", "INFO")
-            
-            # Try searching just by artist if we have one
-            if artist and len(artist.strip()) > 2:
-                artist_search_url = f"{base_url}/library/sections/{section_id}/all"
-                artist_search_params = {
-                    'artist.title': artist,
-                    'type': '10',  # 10 is the type for tracks
-                    'limit': 100   # Increase limit for broader results
-                }
-                
-                artist_response = requests.get(artist_search_url, params=artist_search_params, headers=headers)
-                artist_response.raise_for_status()
-                
-                debug_log(f"Full artist search URL: {artist_response.url}", "DEBUG")
-                
-                artist_data = artist_response.json()
-                
-                if 'MediaContainer' in artist_data and 'Metadata' in artist_data['MediaContainer']:
-                    artist_results = artist_data['MediaContainer'].get('Metadata', [])
-                    debug_log(f"Found {len(artist_results)} items in Plex artist search results", "INFO")
-                    
-                    for item in artist_results:
-                        if item.get('type') == 'track':
-                            track = {
-                                'id': item.get('ratingKey'),
-                                'title': item.get('title', 'Unknown Title'),
-                                'artist': item.get('grandparentTitle', 'Unknown Artist'),
-                                'album': item.get('parentTitle', 'Unknown Album'),
-                                'source': 'plex'
-                            }
-                            tracks.append(track)
-                            debug_log(f"Found track: {track['title']} by {track['artist']} on {track['album']} (ID: {track['id']})", "DEBUG")
-        
-        debug_log(f"Found {len(tracks)} tracks in Plex", "INFO")
-        return tracks
-    except requests.exceptions.RequestException as e:
-        debug_log(f"Error searching Plex: {e}", "ERROR", True)
-        return []
-    except json.JSONDecodeError as e:
-        debug_log(f"Error decoding Plex search JSON response: {e}", "ERROR", True)
-        debug_log(f"Raw response: {response.text[:500]}", "DEBUG")
-        return []
-    except Exception as e:
-        debug_log(f"Unexpected error searching Plex: {e}", "ERROR", True)
-        return []
+    # --- End of main generation loop ---
+    final_tracklist_details = list(final_unique_matched_tracks_map.values())
 
-def create_playlist_in_plex(playlist_name, track_ids, plex_server_url, plex_token, plex_machine_id, playlist_type='audio'):
-    """Create a playlist in Plex with the given tracks, mirroring the previously functional approach."""
-    if not plex_server_url:
-        debug_log("Plex Server URL is not configured", "ERROR")
-        return None
-    
-    if not plex_machine_id:
-        debug_log("Plex Machine ID is not configured", "ERROR")
-        return None
+    if not final_tracklist_details:
+        msg = f"Could not find any tracks for prompt '{prompt}' after {ollama_api_calls_made} Ollama attempts."
+        debug_log(msg, "ERROR", True)
+        return jsonify({"message": msg, "playlist_name": playlist_name, "tracks_found": 0}), 500
 
-    if not track_ids or len(track_ids) == 0:
-        debug_log("No track IDs provided for Plex playlist", "ERROR")
-        return None
-        
-    base_url = plex_server_url.rstrip('/')
-    headers = {
-        'X-Plex-Token': plex_token,
-        'Accept': 'application/json' # Plex often returns XML by default, JSON is easier
-    }
+    debug_log(f"Playlist Gen: Total {len(final_tracklist_details)} unique tracks found for playlist '{playlist_name}'.", "INFO", True)
 
-    first_track_id = track_ids[0]
-    # The URI for creating the playlist and adding the first track.
-    # This URI points to the specific item to be added to the new playlist.
-    playlist_creation_item_uri = f"server://{plex_machine_id}/com.plexapp.plugins.library/library/metadata/{first_track_id}"
-    
-    create_playlist_url = f"{base_url}/playlists"
-    create_params = {
-        'title': playlist_name,
-        'type': playlist_type,
-        'smart': '0',
-        'uri': playlist_creation_item_uri
-    }
-    
-    debug_log(f"Creating Plex playlist \'{playlist_name}\' with first track ID: {first_track_id}", "INFO", True)
-    debug_log(f"Request URL (Create): {create_playlist_url}", "DEBUG")
-    debug_log(f"Request params (Create): {create_params}", "DEBUG")
+    created_playlists_summary = {}
+    navidrome_ids = [t['id'] for t in final_tracklist_details if t['source'] == 'navidrome']
+    plex_ids = [t['id'] for t in final_tracklist_details if t['source'] == 'plex']
 
-    playlist_id = None
-    try:
-        response = requests.post(create_playlist_url, params=create_params, headers=headers)
-        debug_log(f"Create Playlist Response status: {response.status_code}", "DEBUG")
-        debug_log(f"Create Playlist Response text: {response.text[:500]}", "DEBUG") # Log more of the response
-        response.raise_for_status()
+    if enable_navidrome:
+        if navidrome_ids:
+            nid = create_playlist_in_navidrome(navidrome_url, navidrome_user, navidrome_pass, playlist_name, navidrome_ids)
+            created_playlists_summary['navidrome'] = {'id': nid, 'track_count': len(navidrome_ids) if nid else 0, 'status': 'success' if nid else 'failed'}
+        else: created_playlists_summary['navidrome'] = {'id': None, 'track_count': 0, 'status': 'no_tracks'}
 
-        # Plex usually returns XML upon successful playlist creation with an item.
-        # We need to parse XML to get the playlist ID (ratingKey).
+    if enable_plex:
+        if plex_ids:
+            pid, plex_count = create_playlist_in_plex(playlist_name, plex_ids, plex_server_url, plex_token, plex_machine_id)
+            created_playlists_summary['plex'] = {'id': pid, 'track_count': plex_count if pid else 0, 'status': 'success' if pid else 'failed'}
+        else: created_playlists_summary['plex'] = {'id': None, 'track_count': 0, 'status': 'no_tracks'}
+
+    history = load_playlist_history()
+    history.append({
+        "name": playlist_name, "prompt": prompt, "num_songs_requested": num_songs,
+        "num_songs_added_total": len(final_tracklist_details),
+        "services_targeted": services_to_use, "creation_results": created_playlists_summary,
+        "tracks_details": final_tracklist_details, "timestamp": datetime.datetime.now().isoformat()
+    })
+    save_playlist_history(history)
+
+    return jsonify({
+        "message": f"Playlist '{playlist_name}' generation complete. Found {len(final_tracklist_details)}/{num_songs} tracks.",
+        "playlist_name": playlist_name, "tracks_added_count": len(final_tracklist_details),
+        "target_song_count": num_songs, "created_in_services": created_playlists_summary,
+        "ollama_api_calls": ollama_api_calls_made
+    }), 200
+
+@main_bp.route('/api/config', methods=['GET', 'POST'])
+def api_config():
+    if request.method == 'POST':
+        data = request.get_json() # Use get_json() for better error handling
+        if not data:
+            return jsonify({"error": "Invalid or missing JSON payload"}), 400
         try:
-            root = ET.fromstring(response.content) # Use response.content for XML
-            playlist_element = root.find('.//Playlist[@title="%s"]' % playlist_name) # More robust find
-            if playlist_element is not None:
-                playlist_id = playlist_element.get('ratingKey')
-                debug_log(f"Successfully created Plex playlist \'{playlist_name}\' with ID: {playlist_id} (from XML response)", "INFO", True)
-            else:
-                # Fallback if JSON is returned or specific element not found
-                try:
-                    data = response.json()
-                    if 'MediaContainer' in data and 'Metadata' in data['MediaContainer'] and len(data['MediaContainer']['Metadata']) > 0:
-                        playlist_id = data['MediaContainer']['Metadata'][0].get('ratingKey')
-                        debug_log(f"Successfully created Plex playlist \'{playlist_name}\' with ID: {playlist_id} (from JSON response)", "INFO", True)
-                    else:
-                        debug_log(f"Could not find playlist ID in Plex response (XML or JSON). XML: {response.text[:500]}", "ERROR")
-                        return None
-                except json.JSONDecodeError:
-                    debug_log(f"Could not find playlist ID in Plex XML response and response is not JSON. XML: {response.text[:500]}", "ERROR")
-                    return None
-
-        except ET.ParseError as xml_err:
-            debug_log(f"Error parsing XML response from Plex: {xml_err}. Response: {response.text[:500]}", "ERROR")
-            # Attempt to parse as JSON as a fallback
-            try:
-                data = response.json()
-                if 'MediaContainer' in data and 'Metadata' in data['MediaContainer'] and len(data['MediaContainer']['Metadata']) > 0:
-                    playlist_id = data['MediaContainer']['Metadata'][0].get('ratingKey')
-                    debug_log(f"Successfully created Plex playlist \'{playlist_name}\' with ID: {playlist_id} (from JSON fallback after XML error)", "INFO", True)
-                else:
-                    debug_log(f"Could not retrieve playlist ID from Plex JSON response after XML parse error. Data: {json.dumps(data)[:500]}", "ERROR")
-                    return None
-            except json.JSONDecodeError:
-                debug_log(f"Plex response is not valid XML or JSON. Response: {response.text[:500]}", "ERROR")
-                return None
-
-    except requests.exceptions.RequestException as e:
-        debug_log(f"Error creating Plex playlist: {e}", "ERROR", True)
-        if hasattr(e, 'response') and e.response is not None:
-            debug_log(f"Error response content: {e.response.text[:500]}", "DEBUG")
-        return None
-
-    # If playlist created and there are more tracks, add them
-    if playlist_id and len(track_ids) > 1:
-        additional_track_ids = track_ids[1:]
-        
-        # Construct comma-separated string of full metadata URIs for remaining tracks
-        item_uris_to_add = []
-        for track_id_to_add in additional_track_ids:
-            item_uris_to_add.append(f"server://{plex_machine_id}/com.plexapp.plugins.library/library/metadata/{track_id_to_add}")
-        items_uri_param = ','.join(item_uris_to_add)
-
-        add_items_url = f"{base_url}/playlists/{playlist_id}/items"
-        add_params = {'uri': items_uri_param}
-
-        debug_log(f"Adding {len(additional_track_ids)} additional tracks to Plex playlist ID {playlist_id}", "INFO", True)
-        debug_log(f"Request URL (Add Items): {add_items_url}", "DEBUG")
-        debug_log(f"Request params (Add Items): {add_params}", "DEBUG")
-
-        try:
-            add_response = requests.put(add_items_url, params=add_params, headers=headers)
-            debug_log(f"Add Items Response status: {add_response.status_code}", "DEBUG")
-            debug_log(f"Add Items Response text: {add_response.text[:500]}", "DEBUG")
-            add_response.raise_for_status()
-            debug_log(f"Successfully added {len(additional_track_ids)} additional tracks to playlist ID {playlist_id}.", "INFO", True)
-            # Optionally, verify leafCount from add_response.json() if needed, similar to previous version
-        except requests.exceptions.RequestException as e:
-            debug_log(f"Error adding additional tracks to Plex playlist ID {playlist_id}: {e}", "ERROR", True)
-            if hasattr(e, 'response') and e.response is not None:
-                debug_log(f"Error response content (Add Items): {e.response.text[:500]}", "DEBUG")
-            # Playlist was created, but adding further items failed. 
-            # Return playlist_id as the playlist itself exists with at least one track.
-            return playlist_id 
+            save_config(data) # data is expected to be a dict of dicts like {section: {key: value}}
+            return jsonify({"message": "Configuration saved successfully"}), 200
         except Exception as e:
-            debug_log(f"An unexpected error occurred while adding additional items to Plex playlist: {e}", "ERROR", True)
-            return playlist_id # Return playlist_id as the playlist itself exists
+            debug_log(f"Error saving configuration via API: {e}", "ERROR", True)
+            return jsonify({"error": f"Failed to save configuration: {str(e)}"}), 500
+    else: # GET
+        config_parser = load_config()
+        config_data_to_send = {section: dict(config_parser.items(section)) for section in config_parser.sections()}
+        return jsonify(config_data_to_send)
 
-    elif not playlist_id:
-        debug_log("Playlist ID was not obtained after creation attempt.", "ERROR")
-        return None # Creation failed
+@main_bp.route('/api/history', methods=['GET'])
+def api_history():
+    history = load_playlist_history()
+    return jsonify(history)
 
-    return playlist_id # Return the playlist ID
+@main_bp.route('/api/plex_fetch_libraries', methods=['GET'])
+def plex_fetch_libraries_route():
+    plex_url = get_config_value('PLEX', 'ServerURL')
+    plex_token = get_config_value('PLEX', 'Token')
+    if not plex_url or not plex_token:
+        return jsonify({"error": "Plex ServerURL or Token not configured."}), 400
 
-@main_bp.route('/test-plex')
-def test_plex_page():
-    return render_template('test_plex.html')
-
-@main_bp.route('/api/test-plex-connection', methods=['POST'])
-def api_test_plex_connection():
-    data = request.json
-    plex_server_url = data.get('plex_server_url')
-    plex_token = data.get('plex_token')
-    plex_music_section_id = data.get('plex_music_section_id')
-    
-    result = test_plex_connection(plex_server_url, plex_token, plex_music_section_id)
-    return jsonify(result)
-
-def test_plex_connection(plex_server_url, plex_token, section_id):
-    """Test connection to Plex and return diagnostic information"""
-    result = {
-        'success': False,
-        'error': None,
-        'details': {},
-        'server_info': None
-    }
-    
-    # Check for missing parameters
-    if not plex_server_url:
-        result['error'] = "Plex Server URL is missing"
-        return result
-    
-    if not plex_token:
-        result['error'] = "Plex Token is missing"
-        return result
-    
-    # Process the URL to ensure it's correctly formatted
-    base_url = plex_server_url.rstrip('/')
-    result['details']['original_url'] = plex_server_url
-    result['details']['processed_url'] = base_url
-    
-    # Try to ping the server
-    ping_url = f"{base_url}/library/sections"
-    headers = {
-        'X-Plex-Token': plex_token,
-        'Accept': 'application/json'
-    }
-    
     try:
-        # Test library sections endpoint
-        result['details']['ping_url'] = ping_url
-        ping_response = requests.get(ping_url, headers=headers, timeout=10)
-        result['details']['ping_status_code'] = ping_response.status_code
-        
-        if ping_response.status_code == 200:
-            try:
-                ping_data = ping_response.json()
-                result['details']['ping_response'] = ping_data
-                
-                # Check if we can access the library
-                if 'MediaContainer' in ping_data and 'Directory' in ping_data['MediaContainer']:
-                    result['success'] = True
-                    
-                    # If section_id is provided, check if it exists
-                    if section_id:
-                        section_found = False
-                        for section in ping_data['MediaContainer']['Directory']:
-                            if section.get('key') == section_id or section.get('id') == section_id:
-                                section_found = True
-                                result['details']['section_info'] = section
-                                break
-                        
-                        if not section_found:
-                            result['error'] = f"Section ID {section_id} not found in Plex library"
-                            result['success'] = False
-                else:
-                    result['error'] = "Could not access Plex library sections"
-            except json.JSONDecodeError:
-                result['error'] = "Could not parse JSON response from server"
-                result['details']['ping_response_text'] = ping_response.text[:500]  # First 500 chars
-        else:
-            result['error'] = f"Server returned status code {ping_response.status_code}"
-            result['details']['ping_response_text'] = ping_response.text[:500]  # First 500 chars
-            
-        # Try to get server version info if ping was successful
-        if result['success']:
-            system_url = f"{base_url}/identity"
-            system_response = requests.get(system_url, headers=headers, timeout=10)
-            
-            if system_response.status_code == 200:
-                try:
-                    system_data = system_response.json()
-                    if 'MediaContainer' in system_data:
-                        result['server_info'] = system_data['MediaContainer']
-                except:
-                    pass  # Silently fail on system info
-    
-    except requests.exceptions.ConnectionError:
-        result['error'] = "Connection error - could not connect to server"
+        headers = {'X-Plex-Token': plex_token, 'Accept': 'application/json'}
+        response = requests.get(f"{plex_url.rstrip('/')}/library/sections", headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        libraries = []
+        if data.get('MediaContainer', {}).get('Directory'):
+            for lib in data['MediaContainer']['Directory']:
+                if lib.get('type') == 'artist': # Music libraries
+                    libraries.append({'id': lib.get('key'), 'name': lib.get('title'), 'type': lib.get('type')})
+        return jsonify(libraries)
     except requests.exceptions.Timeout:
-        result['error'] = "Connection timed out"
+        return jsonify({"error": "Timeout connecting to Plex server."}), 504
     except requests.exceptions.RequestException as e:
-        result['error'] = f"Request error: {str(e)}"
-    
-    return result
+        err_msg = str(e)
+        status = e.response.status_code if e.response is not None else 500
+        try: 
+            if e.response is not None: # Ensure response object exists
+                err_msg = e.response.json().get('errors',[{}])[0].get('message', str(e))
+        except: pass # Keep original if parsing fails
+        debug_log(f"Error fetching Plex libraries: {err_msg}", "ERROR")
+        return jsonify({"error": f"Failed to fetch Plex libraries: {err_msg}"}), status
+    except Exception as e: # Catch-all for other errors like JSONDecodeError if not caught by RequestException
+        debug_log(f"Unexpected error fetching Plex libraries: {e}", "ERROR")
+        return jsonify({"error": "An unexpected error occurred."}), 500
+
+
+@main_bp.route('/api/plex_fetch_machine_id', methods=['GET'])
+def plex_fetch_machine_id_route():
+    plex_url = get_config_value('PLEX', 'ServerURL')
+    plex_token = get_config_value('PLEX', 'Token')
+    if not plex_url or not plex_token:
+        return jsonify({"error": "Plex ServerURL or Token not configured."}), 400
+
+    try:
+        headers = {'X-Plex-Token': plex_token, 'Accept': 'application/json'}
+        # Try /identity first, then fallback to /
+        for endpoint in ['/identity', '/']:
+            response = requests.get(f"{plex_url.rstrip('/')}{endpoint}", headers=headers, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            machine_id = data.get('MediaContainer', {}).get('machineIdentifier')
+            if machine_id:
+                return jsonify({"machine_identifier": machine_id})
+        
+        return jsonify({"error": "Could not determine Plex Machine Identifier from / or /identity."}), 404
+
+    except requests.exceptions.Timeout:
+        return jsonify({"error": "Timeout connecting to Plex server for machine ID."}), 504
+    except requests.exceptions.RequestException as e:
+        err_msg = str(e)
+        status = e.response.status_code if e.response is not None else 500
+        try: 
+            if e.response is not None: # Ensure response object exists
+                err_msg = e.response.json().get('errors',[{}])[0].get('message', str(e))
+        except: pass
+        debug_log(f"Error fetching Plex machine ID: {err_msg}", "ERROR")
+        return jsonify({"error": f"Failed to fetch Plex machine ID: {err_msg}"}), status
+    except Exception as e:
+        debug_log(f"Unexpected error fetching Plex machine ID: {e}", "ERROR")
+        return jsonify({"error": "An unexpected error occurred."}), 500
