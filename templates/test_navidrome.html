@@ -1,0 +1,242 @@
+{% extends 'layout.html' %}
+
+{% block title %}Navidrome Connection Test - Ollama Playlist Generator{% endblock %}
+
+{% block content %}
+<div class="content-container">
+    <h1>Navidrome Connection Test</h1>
+    
+    <div class="test-results">
+        <div class="card">
+            <div class="card-header">
+                <h2>Connection Status</h2>
+            </div>
+            <div class="card-body">
+                <div id="loading" class="loading">
+                    <p>Testing connection to Navidrome...</p>
+                </div>
+                
+                <div id="results" class="results" style="display: none;">
+                    <div class="result-item">
+                        <div class="result-label">Connection:</div>
+                        <div id="connection-result" class="result-value"></div>
+                    </div>
+                    
+                    <div class="result-item">
+                        <div class="result-label">Processed URL:</div>
+                        <div id="url-result" class="result-value"></div>
+                    </div>
+                    
+                    <div class="result-item">
+                        <div class="result-label">API Response:</div>
+                        <div id="ping-result" class="result-value"></div>
+                    </div>
+                    
+                    <div class="result-item" id="system-info-container" style="display: none;">
+                        <div class="result-label">System Info:</div>
+                        <div id="system-info" class="result-value"></div>
+                    </div>
+                    
+                    <div class="result-item" id="api-version-container" style="display: none;">
+                        <div class="result-label">API Version:</div>
+                        <div id="api-version" class="result-value"></div>
+                    </div>
+                    
+                    <div id="error-container" class="error-container" style="display: none;">
+                        <div class="result-label">Error Details:</div>
+                        <div id="error-details" class="result-value error-text"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="actions">
+            <a href="{{ url_for('main.settings_page') }}" class="btn btn-secondary">Back to Settings</a>
+            <button id="retry-button" class="btn btn-primary">Test Again</button>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Function to fetch test results
+    function testConnection() {
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('results').style.display = 'none';
+        
+        fetch('{{ url_for("main.test_navidrome_endpoint") }}', {
+            headers: {
+                'Accept': 'application/json'
+            }
+        })
+            .then(response => response.json())
+            .then(data => {
+                // Display results
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('results').style.display = 'block';
+                
+                // Connection status
+                const connectionEl = document.getElementById('connection-result');
+                if (data.success) {
+                    connectionEl.innerHTML = '<span class="status-success">✓ Connected successfully</span>';
+                } else {
+                    connectionEl.innerHTML = '<span class="status-error">✗ Connection failed</span>';
+                }
+                
+                // URL processed
+                document.getElementById('url-result').textContent = data.url_processed || 'N/A';
+                
+                // API response
+                const pingEl = document.getElementById('ping-result');
+                if (data.ping_success) {
+                    pingEl.innerHTML = '<span class="status-success">✓ API responded correctly</span>';
+                } else {
+                    pingEl.innerHTML = '<span class="status-error">✗ API response error</span>';
+                }
+                
+                // System info
+                const systemInfoContainer = document.getElementById('system-info-container');
+                const systemInfoEl = document.getElementById('system-info');
+                if (data.system_status) {
+                    systemInfoContainer.style.display = 'flex';
+                    systemInfoEl.textContent = `Navidrome v${data.system_status.version}`;
+                } else {
+                    systemInfoContainer.style.display = 'none';
+                }
+                
+                // API version
+                const apiVersionContainer = document.getElementById('api-version-container');
+                const apiVersionEl = document.getElementById('api-version');
+                if (data.api_version) {
+                    apiVersionContainer.style.display = 'flex';
+                    apiVersionEl.textContent = data.api_version;
+                } else {
+                    apiVersionContainer.style.display = 'none';
+                }
+                
+                // Error details
+                const errorContainer = document.getElementById('error-container');
+                const errorDetails = document.getElementById('error-details');
+                
+                if (data.error) {
+                    errorContainer.style.display = 'block';
+                    errorDetails.textContent = data.error;
+                } else {
+                    errorContainer.style.display = 'none';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('results').style.display = 'block';
+                document.getElementById('connection-result').innerHTML = 
+                    '<span class="status-error">✗ Error testing connection</span>';
+                
+                document.getElementById('error-container').style.display = 'block';
+                document.getElementById('error-details').textContent = 'Failed to fetch test results: ' + error.message;
+            });
+    }
+    
+    // Run test on page load
+    testConnection();
+    
+    // Retry button
+    document.getElementById('retry-button').addEventListener('click', function() {
+        testConnection();
+    });
+});
+</script>
+
+<style>
+.test-results {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.card {
+    background-color: #333;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.card-header {
+    padding: 15px 20px;
+    border-bottom: 1px solid #444;
+}
+
+.card-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+}
+
+.card-body {
+    padding: 20px;
+}
+
+.loading {
+    text-align: center;
+    padding: 20px 0;
+}
+
+.result-item {
+    display: flex;
+    margin-bottom: 15px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #444;
+}
+
+.result-item:last-child {
+    border-bottom: none;
+}
+
+.result-label {
+    flex: 0 0 150px;
+    font-weight: bold;
+}
+
+.result-value {
+    flex: 1;
+    word-break: break-all;
+}
+
+.status-success {
+    color: #6a8a5e;
+}
+
+.status-error {
+    color: #b35555;
+}
+
+.error-text {
+    color: #b35555;
+    font-family: monospace;
+    white-space: pre-wrap;
+    background-color: #3a3232;
+    padding: 10px;
+    border-radius: 4px;
+}
+
+.actions {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 20px;
+}
+
+.btn-primary {
+    display: inline-block;
+    padding: 8px 16px;
+    background-color: #6a8a5e;
+    color: #ffffff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.3s ease;
+}
+
+.btn-primary:hover {
+    background-color: #7a9a6e;
+}
+</style>
+{% endblock %}

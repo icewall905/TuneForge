@@ -98,6 +98,11 @@
                         <label for="navidrome_password">Navidrome Password:</label>
                         <input type="password" id="navidrome_password" name="navidrome_password" value="{{ navidrome_password }}">
                     </div>
+                    
+                    <div class="form-group">
+                        <a href="{{ url_for('main.test_navidrome_endpoint') }}" class="btn btn-secondary">Test Navidrome Connection</a>
+                        <p class="help-text">Check if the Navidrome connection is working correctly.</p>
+                    </div>
                 </div>
                 
                 <div class="settings-group" id="plexSettings">
