@@ -10,3 +10,6 @@ env/
 ENV/
 *.log
 logs/
+
+# Documentation (sensitive instructions)
+notes/instructions.md
