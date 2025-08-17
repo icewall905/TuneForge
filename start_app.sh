@@ -31,7 +31,7 @@ if [[ ! -f "config.ini" ]]; then
 fi
 
 # Run the application
-echo "Starting TuneForge..."
+echo "Starting TuneForge on port 5395..."
 python run.py
 
 # Deactivate virtual environment on exit

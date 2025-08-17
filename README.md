@@ -66,7 +66,7 @@ Repository: [https://github.com/icewall905/TuneForge](https://github.com/icewall
 2. **Access the web interface**:
    Open your browser and go to:
    ```
-   http://localhost:5001
+   http://localhost:5395
    ```
 
 3. **Generate a playlist**:

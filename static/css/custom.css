@@ -12,6 +12,40 @@
     word-break: break-word;
 }
 
+.console-line {
+    margin: 5px 0;
+    padding: 5px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.console-line.success {
+    background-color: #2d4a2d;
+    color: #90ee90;
+    border-left: 3px solid #4caf50;
+}
+
+.console-line.error {
+    background-color: #4a2d2d;
+    color: #ffb3b3;
+    border-left: 3px solid #f44336;
+}
+
+.console-line.info {
+    background-color: #2d2d4a;
+    color: #b3b3ff;
+    border-left: 3px solid #2196f3;
+}
+
+.console-line.log {
+    background-color: #2d2d2d;
+    color: #e0e0e0;
+    border-left: 3px solid #666;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+}
+
 .list-group-item {
     display: flex;
     justify-content: space-between;

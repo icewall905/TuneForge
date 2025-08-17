@@ -182,8 +182,8 @@ def generate_tracks_with_ollama(ollama_url, ollama_model, prompt, num_songs, att
     # context_window = int(get_config_value('OLLAMA', 'ContextWindow', '2048')) # Not directly used here
 
     context_str = ""
+    recent_suggestions_for_prompt = []
     if previously_suggested_tracks and attempt_num > 0:
-        recent_suggestions_for_prompt = []
         seen_in_context = set()
         # Look at last N suggestions (e.g., 50) to avoid overly long context
         for track in reversed(previously_suggested_tracks[-50:]): 
@@ -191,18 +191,19 @@ def generate_tracks_with_ollama(ollama_url, ollama_model, prompt, num_songs, att
             if track.get("title") and track.get("artist") and track_key not in seen_in_context:
                 recent_suggestions_for_prompt.append(f"- '{track['title']}' by '{track['artist']}'")
                 seen_in_context.add(track_key)
-            if len(recent_suggestions_for_prompt) >= 15: # Limit context to ~15 distinct tracks
+            if len(recent_suggestions_for_prompt) >= 25: # Limit context to ~25 distinct tracks
                 break
-        if recent_suggestions_for_prompt:
-            context_str = "\\n\\nTo avoid repetition, DO NOT suggest any of the following tracks again:\\n" + "\\n".join(reversed(recent_suggestions_for_prompt))
+    if recent_suggestions_for_prompt:
+        context_str = "\\n\\nCRITICAL: To avoid repetition, DO NOT suggest any of the following tracks again. These have already been suggested and should be completely avoided:\\n" + "\\n".join(reversed(recent_suggestions_for_prompt))
 
     retry_guidance = ""
     if attempt_num > 0:
         retry_guidance = (
-            "\\n\\nIMPORTANT: Your previous suggestions might have included repeats, undesirable versions, or didn't match well. "
-            "Please provide COMPLETELY DIFFERENT suggestions this time. "
-            "Focus on well-known, studio-recorded songs. Strongly AVOID live versions, instrumentals, karaoke, covers, remixes, demos, and edits unless the prompt specifically asks for them. "
-            "Ensure variety in your new suggestions."
+            "\\n\\nCRITICAL: Your previous suggestions included repeats, undesirable versions, or didn't match well. "
+            "You MUST provide COMPLETELY DIFFERENT suggestions this time. "
+            "Focus on well-known, studio-recorded songs. STRICTLY AVOID live versions, instrumentals, karaoke, covers, remixes, demos, and edits unless the prompt specifically asks for them. "
+            "Ensure maximum variety and avoid any tracks that might be similar to previous suggestions. "
+            "Think of different artists, different time periods, and different sub-genres within the requested style."
         )
 
     full_prompt = (
@@ -241,20 +242,31 @@ def generate_tracks_with_ollama(ollama_url, ollama_model, prompt, num_songs, att
             debug_log("Ollama response content is empty.", "WARN", True)
             return []
 
+        debug_log(f"Ollama raw response content: {repr(content[:200])}...", "DEBUG")
+        
         tracks = []
-        lines = content.split('\\n')
-        for line in lines:
+        lines = content.split('\n')
+        debug_log(f"Ollama: Split response into {len(lines)} lines", "DEBUG")
+        
+        for i, line in enumerate(lines):
             line = line.strip()
-            if not line: continue
+            if not line: 
+                debug_log(f"Ollama: Skipping empty line {i+1}", "DEBUG")
+                continue
             parts = line.split(' - ')
+            debug_log(f"Ollama: Line {i+1}: '{line}' -> {len(parts)} parts: {parts}", "DEBUG")
+            
             if len(parts) >= 2:
                 title = parts[0].strip().strip('\"\'')
                 artist = parts[1].strip().strip('\"\'')
                 album = parts[2].strip().strip('\"\'') if len(parts) >= 3 else "Unknown Album"
                 if title and artist:
                     tracks.append({"title": title, "artist": artist, "album": album})
+                    debug_log(f"Ollama: Parsed track {len(tracks)}: '{title}' by '{artist}'", "DEBUG")
+                else:
+                    debug_log(f"Ollama: Skipping line {i+1} - missing title or artist: title='{title}', artist='{artist}'", "DEBUG")
             else:
-                debug_log(f"Ollama: Could not parse line: '{line}'", "WARN")
+                debug_log(f"Ollama: Could not parse line {i+1}: '{line}' (expected format: Title - Artist - Album)", "WARN")
         
         debug_log(f"Ollama generated {len(tracks)} tracks from response.", "INFO")
         return tracks
@@ -330,7 +342,7 @@ def search_track_in_navidrome(query, navidrome_url, username, password):
     url = f"{base_url}/search3.view"
     params = {
         'u': username, 'p': password, 'v': '1.16.1', 'c': 'TuneForge', 'f': 'json',
-        'query': query, 'songCount': 20, 'artistCount': 0, 'albumCount': 0
+        'query': query, 'songCount': 50, 'artistCount': 0, 'albumCount': 0
     }
     # debug_log(f"Navidrome: Searching for query: '{query}'", "DEBUG")
     try:
@@ -399,12 +411,66 @@ def create_playlist_in_navidrome(navidrome_url, username, password, playlist_nam
         debug_log(f"Navidrome: JSON decode error for playlist '{playlist_name}': {e}. Response: {response.text[:200] if 'response' in locals() else 'N/A'}", "ERROR", True)
         return None
 
+def normalize_string(text):
+    """Normalize a string for better comparison by removing common suffixes and special characters"""
+    if not text:
+        return ""
+    
+    # Convert to lowercase
+    normalized = text.lower()
+    
+    # Remove common suffixes in parentheses
+    import re
+    normalized = re.sub(r'\s*\([^)]*\)', '', normalized)  # Remove (Live), (Remastered), etc.
+    normalized = re.sub(r'\s*\[[^\]]*\]', '', normalized)  # Remove [Remix], [Album Version], etc.
+    
+    # Remove special characters and extra whitespace
+    normalized = re.sub(r'[^\w\s]', ' ', normalized)  # Replace special chars with spaces
+    normalized = re.sub(r'\s+', ' ', normalized)       # Multiple spaces to single space
+    normalized = normalized.strip()
+    
+    return normalized
+
+def calculate_similarity(str1, str2):
+    """Calculate similarity between two strings using multiple methods"""
+    if not str1 or not str2:
+        return 0.0
+    
+    # Normalize both strings
+    norm1 = normalize_string(str1)
+    norm2 = normalize_string(str2)
+    
+    # Exact match after normalization
+    if norm1 == norm2:
+        return 1.0
+    
+    # Word-based similarity
+    words1 = set(norm1.split())
+    words2 = set(norm2.split())
+    
+    if not words1 or not words2:
+        return 0.0
+    
+    # Jaccard similarity
+    intersection = len(words1.intersection(words2))
+    union = len(words1.union(words2))
+    word_similarity = intersection / union if union > 0 else 0.0
+    
+    # Character-based similarity (for handling typos)
+    import difflib
+    char_similarity = difflib.SequenceMatcher(None, norm1, norm2).ratio()
+    
+    # Return the higher of the two similarities
+    return max(word_similarity, char_similarity)
+
 def search_tracks_in_navidrome(navidrome_url, username, password, ollama_suggested_tracks, final_unique_matched_tracks_map):
-    newly_matched_for_batch = []
+    """Search for tracks in Navidrome and add them to the final matched tracks map"""
     if not all([navidrome_url, username, password]):
         debug_log("Navidrome credentials/URL missing, skipping Navidrome search batch.", "WARN")
-        return newly_matched_for_batch
-
+        return []
+    
+    newly_matched_for_batch = []
+    
     for suggested_track in ollama_suggested_tracks:
         title, artist = suggested_track.get("title"), suggested_track.get("artist")
         if not title or not artist: continue
@@ -412,15 +478,46 @@ def search_tracks_in_navidrome(navidrome_url, username, password, ollama_suggest
         track_key = (title.lower(), artist.lower())
         if track_key in final_unique_matched_tracks_map: continue # Already found
 
-        query = f"{artist} {title}" # Navidrome search query
-        found_navidrome_tracks = search_track_in_navidrome(query, navidrome_url, username, password)
-
+        debug_log(f"Navidrome: Searching for '{title}' by '{artist}'", "INFO")
+        
+        # Use more targeted search strategies
+        search_strategies = [
+            f"{artist} {title}",  # Artist Title (most specific)
+            f"{title} {artist}",  # Title Artist
+            title,                 # Just title (fallback)
+        ]
+        
         best_match = None
-        if found_navidrome_tracks:
-            for nt in found_navidrome_tracks: # Find best match
-                if nt['title'].lower() == title.lower() and nt['artist'].lower() == artist.lower():
-                    best_match = nt; break
-            if not best_match: best_match = found_navidrome_tracks[0] # Fallback to first
+        best_similarity = 0.0
+        
+        for search_query in search_strategies:
+            found_navidrome_tracks = search_track_in_navidrome(search_query, navidrome_url, username, password)
+            if found_navidrome_tracks:
+                debug_log(f"Navidrome: Strategy '{search_query}' found {len(found_navidrome_tracks)} tracks", "DEBUG")
+                
+                # Evaluate each track for similarity
+                for nt in found_navidrome_tracks:
+                    # Calculate similarity scores
+                    title_similarity = calculate_similarity(title, nt['title'])
+                    artist_similarity = calculate_similarity(artist, nt['artist'])
+                    
+                    # Combined similarity (weighted average)
+                    combined_similarity = (title_similarity * 0.6) + (artist_similarity * 0.4)
+                    
+                    debug_log(f"Navidrome: Evaluating '{nt['title']}' by '{nt['artist']}' (title: {title_similarity:.1%}, artist: {artist_similarity:.1%}, combined: {combined_similarity:.1%})", "DEBUG")
+                    
+                    # Accept if combined similarity is high enough
+                    if combined_similarity >= 0.8:  # More forgiving threshold
+                        if combined_similarity > best_similarity:
+                            best_match = nt
+                            best_similarity = combined_similarity
+                            debug_log(f"Navidrome: 🎯 New best match: '{nt['title']}' by '{nt['artist']}' (similarity: {combined_similarity:.1%})", "DEBUG")
+                
+                # If we found a good match with this strategy, break
+                if best_match and best_similarity >= 0.9:
+                    break
+            else:
+                debug_log(f"Navidrome: Strategy '{search_query}' found no tracks", "DEBUG")
         
         if best_match:
             match_details = {
@@ -430,9 +527,20 @@ def search_tracks_in_navidrome(navidrome_url, username, password, ollama_suggest
             }
             final_unique_matched_tracks_map[track_key] = match_details
             newly_matched_for_batch.append(match_details)
-            debug_log(f"Navidrome: Matched '{best_match['title']}' by '{best_match['artist']}' for suggestion '{title}' by '{artist}'.", "INFO")
-        # else:
-            # debug_log(f"Navidrome: No match for '{title}' by '{artist}'.", "DEBUG")
+            
+            # Log the match with similarity details
+            title_sim = calculate_similarity(title, best_match['title'])
+            artist_sim = calculate_similarity(artist, best_match['artist'])
+            combined_sim = (title_sim * 0.6) + (artist_sim * 0.4)
+            
+            if combined_sim >= 0.95:
+                debug_log(f"Navidrome: ✅ EXCELLENT MATCH: '{best_match['title']}' by '{best_match['artist']}' for suggestion '{title}' by '{artist}' (similarity: {combined_sim:.1%})", "INFO")
+            elif combined_sim >= 0.9:
+                debug_log(f"Navidrome: ✅ GOOD MATCH: '{best_match['title']}' by '{best_match['artist']}' for suggestion '{title}' by '{artist}' (similarity: {combined_sim:.1%})", "INFO")
+            else:
+                debug_log(f"Navidrome: ⚠️ ACCEPTABLE MATCH: '{best_match['title']}' by '{best_match['artist']}' for suggestion '{title}' by '{artist}' (similarity: {combined_sim:.1%})", "WARN")
+        else:
+            debug_log(f"Navidrome: ❌ No suitable match found for '{title}' by '{artist}' after trying all search strategies", "WARN")
             
     return newly_matched_for_batch
 
@@ -740,7 +848,7 @@ def settings():
         current_config.set('OLLAMA', 'URL', request.form.get('ollama_url', get_config_value('OLLAMA', 'URL', '')))
         current_config.set('OLLAMA', 'Model', request.form.get('ollama_model', get_config_value('OLLAMA', 'Model', '')))
         current_config.set('OLLAMA', 'ContextWindow', request.form.get('context_window', get_config_value('OLLAMA', 'ContextWindow', '2048')))
-        current_config.set('OLLAMA', 'MaxAttempts', request.form.get('max_attempts', get_config_value('OLLAMA', 'MaxAttempts', '3')))
+        current_config.set('OLLAMA', 'MaxAttempts', request.form.get('max_attempts', get_config_value('OLLAMA', 'MaxAttempts', '10')))
         current_config.set('OLLAMA', 'Temperature', request.form.get('ollama_temperature', get_config_value('OLLAMA', 'Temperature', '0.7')))
         current_config.set('OLLAMA', 'TopP', request.form.get('ollama_top_p', get_config_value('OLLAMA', 'TopP', '0.9')))
         current_config.set('OLLAMA', 'DebugOllamaResponse', request.form.get('debug_ollama_response', get_config_value('OLLAMA', 'DebugOllamaResponse', 'no')))
@@ -754,6 +862,7 @@ def settings():
         current_config.set('APP', 'EnableNavidrome', request.form.get('enable_navidrome', get_config_value('APP', 'EnableNavidrome', 'no')))
         current_config.set('APP', 'EnablePlex', request.form.get('enable_plex', get_config_value('APP', 'EnablePlex', 'no')))
         current_config.set('APP', 'Debug', request.form.get('app_debug_mode', get_config_value('APP', 'Debug', 'yes'))) # Ensure this matches the form field name
+        current_config.set('APP', 'VerboseLogging', request.form.get('verbose_logging', get_config_value('APP', 'VerboseLogging', 'no')))
 
 
         # NAVIDROME section
@@ -781,7 +890,7 @@ def settings():
         'ollama_url': get_config_value('OLLAMA', 'URL', 'http://localhost:11434'),
         'ollama_model': get_config_value('OLLAMA', 'Model', 'llama3'),
         'context_window': get_config_value('OLLAMA', 'ContextWindow', '2048'),
-        'max_attempts': get_config_value('OLLAMA', 'MaxAttempts', '3'),
+        'max_attempts': get_config_value('OLLAMA', 'MaxAttempts', '10'),
         'ollama_temperature': get_config_value('OLLAMA', 'Temperature', '0.7'),
         'ollama_top_p': get_config_value('OLLAMA', 'TopP', '0.9'),
         'debug_ollama_response': get_config_value('OLLAMA', 'DebugOllamaResponse', 'no'),
@@ -792,6 +901,7 @@ def settings():
         'enable_navidrome': get_config_value('APP', 'EnableNavidrome', 'no'),
         'enable_plex': get_config_value('APP', 'EnablePlex', 'no'),
         'app_debug_mode': get_config_value('APP', 'Debug', 'yes'), # Ensure this matches the form field name and context variable
+        'verbose_logging': get_config_value('APP', 'VerboseLogging', 'no'),
 
         'navidrome_url': get_config_value('NAVIDROME', 'URL', ''),
         'navidrome_username': get_config_value('NAVIDROME', 'Username', ''),
@@ -896,10 +1006,11 @@ def api_generate_playlist():
     while len(final_unique_matched_tracks_map) < num_songs and ollama_api_calls_made < max_ollama_attempts:
         tracks_still_needed = num_songs - len(final_unique_matched_tracks_map)
         debug_log(f"Playlist Gen: Attempt {ollama_api_calls_made + 1}/{max_ollama_attempts}. Tracks found: {len(final_unique_matched_tracks_map)}/{num_songs}.", "INFO", True)
+        debug_log(f"Playlist Gen: Starting Ollama call {ollama_api_calls_made + 1} to find {tracks_still_needed} more tracks...", "INFO", True)
 
-        songs_to_request_this_ollama_call = tracks_still_needed * 2 # Request more to account for filtering/matching
-        if tracks_still_needed <= 3: songs_to_request_this_ollama_call = tracks_still_needed + 7
-        songs_to_request_this_ollama_call = max(5, min(songs_to_request_this_ollama_call, 20)) # Bounds: 5-20
+        songs_to_request_this_ollama_call = tracks_still_needed * 3 # Request more to account for filtering/matching
+        if tracks_still_needed <= 3: songs_to_request_this_ollama_call = tracks_still_needed + 10
+        songs_to_request_this_ollama_call = max(10, min(songs_to_request_this_ollama_call, 40)) # Bounds: 10-40
 
         debug_log(f"Ollama: Requesting {songs_to_request_this_ollama_call} new tracks.", "INFO")
         current_ollama_batch = generate_tracks_with_ollama(
@@ -937,22 +1048,28 @@ def api_generate_playlist():
             is_undesirable = any(re.search(p, title_l) or re.search(p, album_l) for p in undesirable_patterns) or \
                              any(k in artist_l for k in undesirable_artist_keywords)
             if is_undesirable:
-                # debug_log(f"Filtering out undesirable: '{track.get('title')}' by '{track.get('artist')}'", "DEBUG")
+                debug_log(f"Filtering out undesirable: '{track.get('title')}' by '{track.get('artist')}' (pattern: {[p for p in undesirable_patterns if re.search(p, title_l or '') or re.search(p, album_l or '')]} artist keywords: {[k for k in undesirable_artist_keywords if k in artist_l]})", "DEBUG")
                 continue
             eligible_tracks_for_search.append(track)
         
         debug_log(f"Ollama: {len(eligible_tracks_for_search)} tracks eligible for searching after filtering batch of {len(current_ollama_batch)}.", "INFO")
+        debug_log(f"Ollama: Processing {len(eligible_tracks_for_search)} tracks for Navidrome search...", "INFO")
         if not eligible_tracks_for_search: continue
 
         if enable_navidrome:
-            search_tracks_in_navidrome(navidrome_url, navidrome_user, navidrome_pass, eligible_tracks_for_search, final_unique_matched_tracks_map)
+            debug_log(f"Navidrome: Starting search for {len(eligible_tracks_for_search)} eligible tracks", "INFO")
+            newly_matched = search_tracks_in_navidrome(navidrome_url, navidrome_user, navidrome_pass, eligible_tracks_for_search, final_unique_matched_tracks_map)
+            debug_log(f"Navidrome: Search completed. Found {len(newly_matched)} new matches", "INFO")
             if len(final_unique_matched_tracks_map) >= num_songs: break
         
         if enable_plex:
             search_tracks_in_plex(plex_server_url, plex_token, eligible_tracks_for_search, final_unique_matched_tracks_map, plex_section_id)
             if len(final_unique_matched_tracks_map) >= num_songs: break
         
-        if ollama_api_calls_made < max_ollama_attempts and len(final_unique_matched_tracks_map) < num_songs : time.sleep(0.5)
+        if ollama_api_calls_made < max_ollama_attempts and len(final_unique_matched_tracks_map) < num_songs:
+            tracks_still_needed = num_songs - len(final_unique_matched_tracks_map)
+            debug_log(f"Playlist Gen: Need more tracks. Current: {len(final_unique_matched_tracks_map)}/{num_songs}. Continuing to next Ollama call...", "INFO", True)
+            time.sleep(0.5)
 
     # --- End of main generation loop ---
     final_tracklist_details = list(final_unique_matched_tracks_map.values())
@@ -1086,3 +1203,80 @@ def plex_fetch_machine_id_route():
     except Exception as e:
         debug_log(f"Unexpected error fetching Plex machine ID: {e}", "ERROR")
         return jsonify({"error": "An unexpected error occurred."}), 500
+
+@main_bp.route('/api/logs/stream')
+def api_logs_stream():
+    """Stream logs in real-time for the frontend"""
+    def generate():
+        log_file = os.path.join(LOG_DIR, 'tuneforge_app.log')
+        verbose_logging = get_config_value('APP', 'VerboseLogging', 'no').lower() == 'yes'
+        
+        # Send initial message
+        yield f"data: {json.dumps({'type': 'info', 'message': 'Starting log stream for current session...'})}\n\n"
+        
+        # Get current file size to only show NEW logs from this point forward
+        initial_size = os.path.exists(log_file) and os.path.getsize(log_file) or 0
+        
+        # Now monitor for new logs only
+        yield f"data: {json.dumps({'type': 'info', 'message': 'Monitoring for new logs...'})}\n\n"
+        
+        # Monitor indefinitely until the connection is closed or an error occurs
+        while True:
+            try:
+                if os.path.exists(log_file):
+                    current_size = os.path.getsize(log_file)
+                    if current_size > initial_size:
+                        # New content added
+                        with open(log_file, 'r', encoding='utf-8') as file:
+                            file.seek(initial_size)
+                            new_content = file.read()
+                            for line in new_content.splitlines():
+                                if line.strip():
+                                    # Determine what to show based on verbose setting
+                                    should_show = False
+                                    
+                                    if verbose_logging:
+                                        # Verbose mode: show all detailed logs
+                                        should_show = any(keyword in line for keyword in [
+                                            'Playlist Gen:',  # Playlist generation progress
+                                            'Ollama: Requesting',  # New Ollama requests
+                                            'Ollama: Successfully parsed',  # Track parsing results
+                                            'Navidrome: Searching for',  # Track search attempts
+                                            'Navidrome: ✅ EXCELLENT MATCH',  # Excellent matches
+                                            'Navidrome: ✅ GOOD MATCH',  # Good matches
+                                            'Navidrome: ⚠️ ACCEPTABLE MATCH',  # Acceptable matches
+                                            'Navidrome: 🎯 New best match',  # Best match updates
+                                            'Navidrome: Evaluating',  # Track evaluation
+                                            'Navidrome: ❌ No suitable match',  # No matches found
+                                            'Navidrome: Creating/updating playlist',  # Playlist creation
+                                            'Navidrome: Successfully created/updated playlist'  # Completion
+                                        ])
+                                    else:
+                                        # Basic mode: only show live playlist additions
+                                        should_show = any(keyword in line for keyword in [
+                                            'Playlist Gen:',  # Playlist generation progress
+                                            'Navidrome: ✅ EXCELLENT MATCH',  # Excellent matches
+                                            'Navidrome: ✅ GOOD MATCH',  # Good matches
+                                            'Navidrome: ⚠️ ACCEPTABLE MATCH',  # Acceptable matches
+                                            'Navidrome: Creating/updating playlist',  # Playlist creation
+                                            'Navidrome: Successfully created/updated playlist'  # Completion
+                                        ])
+                                    
+                                    if should_show:
+                                        yield f"data: {json.dumps({'type': 'log', 'message': line.strip()})}\n\n"
+                        
+                        initial_size = current_size
+                
+                # Use a shorter sleep to be more responsive
+                time.sleep(0.5)
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Error reading logs: {str(e)}'})}\n\n"
+                break
+        
+        yield f"data: {json.dumps({'type': 'complete', 'message': 'Log stream complete'})}\n\n"
+    
+    response = Response(generate(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['Connection'] = 'keep-alive'
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response

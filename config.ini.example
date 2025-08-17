@@ -5,7 +5,7 @@
 URL = http://localhost:11434
 Model = llama3
 ContextWindow = 2048
-MaxAttempts = 3
+MaxAttempts = 10
 
 [NAVIDROME]
 URL = 
@@ -25,3 +25,4 @@ Dislikes = genres: country, pop. artists: taylor swift
 FavoriteArtists = 
 EnableNavidrome = no
 EnablePlex = no
+VerboseLogging = no

@@ -138,7 +138,7 @@
             
             document.getElementById('loading').style.display = 'block';
             const outputElement = document.getElementById('console_output');
-            outputElement.innerHTML = '';
+            outputElement.innerHTML = '<div class="console-line">🚀 Starting playlist generation...</div>';
             
             // Collect form data
             const formData = new FormData(this);
@@ -158,6 +158,10 @@
                 playlist_name: formDataObj.playlist_name || "TuneForge Playlist"
             };
             
+            // Start log streaming IMMEDIATELY to capture logs as they happen
+            startLogStreaming(outputElement);
+            
+            // Start the playlist generation
             fetch('/api/generate-playlist', {
                 method: 'POST',
                 headers: {
@@ -167,32 +171,130 @@
             })
             .then(response => response.json())
             .then(data => {
-                // Display the response data
-                outputElement.innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
-                
-                if (data.status === 'success') {
-                    // If playlist was successfully generated, show a success message
-                    outputElement.innerHTML += '<br><p class="success">Playlist generation initiated. Check the history page in a few moments for your new playlist.</p>';
-                    
-                    // Optional: Check the playlist generation status after a short delay
-                    setTimeout(() => {
-                        fetch('/history')
-                            .then(() => {
-                                outputElement.innerHTML += '<p>✅ Generation complete! <a href="/history">View your playlists</a></p>';
-                            });
-                    }, 3000);
-                } else if (data.error) {
-                    outputElement.innerHTML += `<p class="error">Error: ${data.error}</p>`;
-                }
-                
-                document.getElementById('loading').style.display = 'none';
+                // Show the final result immediately
+                displayFinalResult(outputElement, data);
             })
             .catch(error => {
                 console.error('Error:', error);
                 document.getElementById('loading').style.display = 'none';
-                outputElement.innerHTML += `<p class="error">Error: ${error}</p>`;
+                outputElement.innerHTML += `<div class="console-line error">❌ Error: ${error}</div>`;
             });
         });
+        
+        function startLogStreaming(outputElement) {
+            console.log('Starting log streaming...');
+            outputElement.innerHTML += `<div class="console-line info">🔌 Connecting to log stream...</div>`;
+            
+            // Start real-time log streaming
+            const eventSource = new EventSource('/api/logs/stream');
+            
+            // Store reference to close later
+            window.currentEventSource = eventSource;
+            
+            eventSource.onopen = function(event) {
+                console.log('EventSource opened');
+                outputElement.innerHTML += `<div class="console-line success">🔗 Log stream connected!</div>`;
+            };
+            
+            eventSource.onmessage = function(event) {
+                console.log('Received message:', event.data);
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    switch(data.type) {
+                        case 'info':
+                            outputElement.innerHTML += `<div class="console-line info">ℹ️ ${data.message}</div>`;
+                            break;
+                        case 'log':
+                            // Parse the log message and display it nicely
+                            const logMessage = parseLogMessage(data.message);
+                            outputElement.innerHTML += `<div class="console-line log">${logMessage}</div>`;
+                            break;
+                        case 'error':
+                            outputElement.innerHTML += `<div class="console-line error">❌ ${data.message}</div>`;
+                            break;
+                        case 'complete':
+                            outputElement.innerHTML += `<div class="console-line success">✅ ${data.message}</div>`;
+                            // Don't close here - let it keep running to capture more logs
+                            break;
+                    }
+                    
+                    // Auto-scroll to bottom
+                    outputElement.scrollTop = outputElement.scrollHeight;
+                } catch (e) {
+                    console.error('Error parsing log message:', e);
+                    outputElement.innerHTML += `<div class="console-line error">❌ Parse error: ${e.message}</div>`;
+                }
+            };
+            
+            eventSource.onerror = function(event) {
+                console.error('EventSource error:', event);
+                outputElement.innerHTML += `<div class="console-line error">❌ Connection error - check browser console</div>`;
+                // Don't close on error - let it retry
+            };
+        }
+        
+        function parseLogMessage(logLine) {
+            // Extract the relevant part of the log message
+            if (logLine.includes('Ollama:')) {
+                const message = logLine.split('Ollama:')[1]?.trim() || logLine;
+                return `🤖 ${message}`;
+            } else if (logLine.includes('Navidrome:')) {
+                const message = logLine.split('Navidrome:')[1]?.trim() || logLine;
+                return `🎵 ${message}`;
+            } else if (logLine.includes('Playlist Gen:')) {
+                const message = logLine.split('Playlist Gen:')[1]?.trim() || logLine;
+                return `📋 ${message}`;
+            } else {
+                return `📝 ${logLine}`;
+            }
+        }
+        
+        function displayLogMessage(outputElement, data) {
+            let className = 'console-line';
+            let icon = '📝';
+            
+            switch(data.status) {
+                case 'starting':
+                    className += ' info';
+                    icon = '🔄';
+                    break;
+                case 'progress':
+                    className += ' info';
+                    icon = '📝';
+                    break;
+                case 'complete':
+                    className += ' success';
+                    icon = '✅';
+                    break;
+                case 'error':
+                    className += ' error';
+                    icon = '❌';
+                    break;
+            }
+            
+            outputElement.innerHTML += `<div class="${className}">${icon} ${data.message}</div>`;
+            outputElement.scrollTop = outputElement.scrollHeight;
+        }
+        
+        function displayFinalResult(outputElement, data) {
+            outputElement.innerHTML += '<div class="console-line">📊 Final Result:</div>';
+            outputElement.innerHTML += '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+            
+            if (data.status === 'success') {
+                outputElement.innerHTML += '<div class="console-line success">✅ Playlist generation complete!</div>';
+            } else if (data.error) {
+                outputElement.innerHTML += `<div class="console-line error">❌ Error: ${data.error}</div>`;
+            }
+            
+            // Close the event source when we're done
+            if (window.currentEventSource) {
+                window.currentEventSource.close();
+                window.currentEventSource = null;
+            }
+            
+            document.getElementById('loading').style.display = 'none';
+        }
     });
 </script>
 {% endblock %}
