@@ -13,3 +13,4 @@ logs/
 
 # Documentation (sensitive instructions)
 notes/instructions.md
+notes/*

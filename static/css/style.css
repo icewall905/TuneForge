@@ -720,3 +720,88 @@ body:has(.global-status[style*="display: block"]) .main-content {
 body:has(.global-status[style*="display: block"]) .sidebar {
     padding-top: 70px; /* Adjust based on status bar height */
 }
+
+/* Simple Floating Progress Indicator */
+.floating-progress {
+    position: fixed;
+    bottom: 120px; /* Above the sidebar footer */
+    left: 20px;
+    width: 200px;
+    z-index: 1000;
+}
+
+.progress-indicator {
+    background: rgba(42, 42, 42, 0.95);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 8px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(68, 68, 68, 0.3);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.progress-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.progress-icon {
+    font-size: 14px;
+    animation: spin 2s linear infinite;
+}
+
+.progress-folder {
+    font-weight: 500;
+    color: #e0e0e0;
+    font-size: 13px;
+}
+
+.progress-bar {
+    height: 4px;
+    background: rgba(68, 68, 68, 0.5);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #6a8a5e, #8bc34a);
+    transition: width 0.3s ease;
+    border-radius: 2px;
+}
+
+.progress-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.progress-text {
+    font-size: 11px;
+    color: #6a8a5e;
+    font-weight: 500;
+}
+
+.progress-counts {
+    color: #888;
+    font-family: monospace;
+    font-size: 10px;
+}
+
+.progress-current {
+    color: #ccc;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.3;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}

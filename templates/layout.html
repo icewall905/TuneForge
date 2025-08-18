@@ -22,11 +22,18 @@
                 <h3>Menu</h3>
                 <ul>
                     <li><a href="{{ url_for('main.index') }}" class="{% if request.endpoint == 'main.index' %}active{% endif %}">Generate</a></li>
+                    <li><a href="{{ url_for('main.local_music_page') }}" class="{% if request.endpoint == 'main.local_music_page' %}active{% endif %}">Local Music</a></li>
                     <li><a href="{{ url_for('main.history') }}" class="{% if request.endpoint == 'main.history' %}active{% endif %}">History</a></li>
                     <li><a href="{{ url_for('main.settings') }}" class="{% if request.endpoint == 'main.settings' %}active{% endif %}">Settings</a></li>
                 </ul>
             </div>
         </nav>
+        
+                    <!-- Simple Floating Progress Indicator -->
+            <div id="floating-progress" class="floating-progress" style="display: none;">
+                <div id="progress-content"></div>
+            </div>
+        
         <div class="sidebar-footer">
             <p class="version-info">v0.1.2</p>
         </div>
@@ -70,6 +77,181 @@
             }
         });
     </script>
+    
+    <!-- Global Status Management Script -->
+    <script>
+    // Global status management
+    window.globalStatusManager = {
+        activeScans: new Map(),
+        progressPanel: null,
+        progressContent: null,
+        
+        init() {
+            this.progressPanel = document.getElementById('floating-progress');
+            this.progressContent = document.getElementById('progress-content');
+            
+            // Start background polling
+            this.startBackgroundPolling();
+        },
+        
+        showPanel() {
+            if (this.progressPanel) {
+                this.progressPanel.style.display = 'block';
+            }
+        },
+        
+        hidePanel() {
+            if (this.progressPanel) {
+                this.progressPanel.style.display = 'none';
+            }
+        },
+        
+        addScan(scanId, folderPath) {
+            this.activeScans.set(scanId, {
+                id: scanId,
+                folder: folderPath,
+                status: 'starting',
+                progress: 0,
+                currentFile: '',
+                totalFiles: 0,
+                processedFiles: 0,
+                startTime: Date.now()
+            });
+            
+            this.showPanel();
+            this.updateDisplay();
+            this.startPolling(scanId);
+        },
+        
+        updateScan(scanId, data) {
+            const scan = this.activeScans.get(scanId);
+            if (scan) {
+                Object.assign(scan, data);
+                this.updateDisplay();
+            }
+        },
+        
+        removeScan(scanId) {
+            this.activeScans.delete(scanId);
+            this.updateDisplay();
+            
+            if (this.activeScans.size === 0) {
+                this.hidePanel();
+            }
+        },
+        
+        updateDisplay() {
+            if (!this.progressContent) return;
+            
+            if (this.activeScans.size === 0) {
+                this.hidePanel();
+                return;
+            }
+            
+            let html = '';
+            for (const [scanId, scan] of this.activeScans) {
+                const elapsed = Math.round((Date.now() - scan.startTime) / 1000);
+                const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.round(elapsed/60)}m ${elapsed%60}s`;
+                
+                html += `
+                    <div class="progress-indicator">
+                        <div class="progress-header">
+                            <span class="progress-icon">🔄</span>
+                            <span class="progress-folder">${scan.folder.split('/').pop()}</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${scan.progress}%"></div>
+                        </div>
+                        <div class="progress-info">
+                            <span class="progress-text">${scan.progress}%</span>
+                            <span class="progress-counts">${scan.processedFiles}/${scan.totalFiles}</span>
+                        </div>
+                        <div class="progress-current">${scan.currentFile || 'Starting...'}</div>
+                    </div>
+                `;
+            }
+            
+            this.progressContent.innerHTML = html;
+            this.showPanel();
+        },
+        
+        startPolling(scanId) {
+            const pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/scan-progress/${scanId}`);
+                    const progress = await response.json();
+                    
+                    if (progress.error) {
+                        this.updateScan(scanId, { status: 'error', currentFile: `Error: ${progress.error}` });
+                        clearInterval(pollInterval);
+                        setTimeout(() => this.removeScan(scanId), 5000);
+                        return;
+                    }
+                    
+                    if (progress.status === 'completed') {
+                        this.updateScan(scanId, { 
+                            status: 'completed', 
+                            progress: 100,
+                            currentFile: 'Completed!'
+                        });
+                        clearInterval(pollInterval);
+                        setTimeout(() => this.removeScan(scanId), 5000);
+                    } else if (progress.status === 'error') {
+                        this.updateScan(scanId, { 
+                            status: 'error', 
+                            currentFile: `Failed: ${progress.error}` 
+                        });
+                        clearInterval(pollInterval);
+                        setTimeout(() => this.removeScan(scanId), 5000);
+                    } else {
+                        // Update progress
+                        let progressPercent = 0;
+                        if (progress.total_files > 0) {
+                            progressPercent = Math.round((progress.files_processed / progress.total_files) * 100);
+                        }
+                        
+                        this.updateScan(scanId, {
+                            status: progress.status,
+                            progress: progressPercent,
+                            currentFile: progress.current_file || 'Processing...',
+                            totalFiles: progress.total_files || 0,
+                            processedFiles: progress.files_processed || 0
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error polling scan progress:', error);
+                }
+            }, 2000); // Poll every 2 seconds
+        },
+        
+        startBackgroundPolling() {
+            // Keep the status panel alive and check for any orphaned scans
+            setInterval(() => {
+                if (this.activeScans.size > 0) {
+                    this.showPanel();
+                }
+            }, 5000); // Check every 5 seconds
+            
+            // Also restore panel state when page becomes visible
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) {
+                    this.restorePanelState();
+                }
+            });
+            
+            // Restore panel state when returning to the page
+            window.addEventListener('focus', () => {
+                this.restorePanelState();
+            });
+        }
+    };
+
+    // Initialize when DOM is ready
+    document.addEventListener('DOMContentLoaded', () => {
+        window.globalStatusManager.init();
+    });
+    </script>
+    
     {% block extra_js %}{% endblock %}
 </body>
 </html>

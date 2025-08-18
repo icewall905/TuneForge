@@ -11,11 +11,19 @@ import xml.etree.ElementTree as ET
 from urllib.parse import quote
 import logging
 from logging.handlers import RotatingFileHandler
+import sqlite3
+from pathlib import Path
+import mutagen
+from mutagen.easyid3 import EasyID3
+from mutagen.flac import FLAC
 
 # --- Logger Setup ---
 LOG_DIR = 'logs'  # This will be relative to the project root (TuneForge/)
+DB_DIR = 'db'    # Database directory
 # Ensure the log directory exists
 os.makedirs(LOG_DIR, exist_ok=True)
+# Ensure the database directory exists
+os.makedirs(DB_DIR, exist_ok=True)
 
 app_file_logger = logging.getLogger('TuneForgeApp')
 app_file_logger.setLevel(logging.DEBUG)  # Process all levels from debug_log
@@ -48,6 +56,21 @@ DEBUG_ENABLED = True  # Master debug switch
 DEBUG_OLLAMA_RESPONSE = False  # Specific for Ollama response logging, can also be set in config.ini
 
 main_bp = Blueprint('main', __name__)
+
+# Jinja2 custom filters
+def filesizeformat(bytes):
+    """Convert bytes to human readable format"""
+    if bytes == 0:
+        return "0 B"
+    size_names = ["B", "KB", "MB", "GB", "TB"]
+    i = 0
+    while bytes >= 1024 and i < len(size_names) - 1:
+        bytes /= 1024.0
+        i += 1
+    return f"{bytes:.1f} {size_names[i]}"
+
+# Register the filter with the blueprint
+main_bp.add_app_template_filter(filesizeformat, 'filesizeformat')
 
 CONFIG_FILE = 'config.ini'
 HISTORY_FILE = 'playlist_history.json'
@@ -1280,3 +1303,575 @@ def api_logs_stream():
     response.headers['Connection'] = 'keep-alive'
     response.headers['Access-Control-Allow-Origin'] = '*'
     return response
+
+# --- Local Music Management ---
+def init_local_music_db():
+    """Initialize the local music database"""
+    db_path = os.path.join(DB_DIR, 'local_music.db')
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_path TEXT UNIQUE NOT NULL,
+            title TEXT,
+            artist TEXT,
+            album TEXT,
+            genre TEXT,
+            year INTEGER,
+            track_number INTEGER,
+            duration REAL,
+            file_size INTEGER,
+            last_modified REAL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_title ON tracks(title)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_artist ON tracks(artist)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_album ON tracks(album)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_genre ON tracks(genre)')
+    
+    conn.commit()
+    conn.close()
+    return db_path
+
+def scan_music_folder(folder_path):
+    """Scan a music folder and index all tracks"""
+    if not os.path.exists(folder_path):
+        return {'success': False, 'error': 'Folder does not exist'}
+    
+    supported_extensions = {'.mp3', '.flac', '.m4a', '.ogg', '.wav', '.aac'}
+    db_path = init_local_music_db()
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    stats = {'total_files': 0, 'indexed': 0, 'errors': 0, 'skipped': 0}
+    
+    try:
+        for root, dirs, files in os.walk(folder_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                file_ext = os.path.splitext(file)[1].lower()
+                
+                if file_ext not in supported_extensions:
+                    stats['skipped'] += 1
+                    continue
+                
+                stats['total_files'] += 1
+                
+                try:
+                    # Extract metadata using mutagen
+                    metadata = extract_track_metadata(file_path)
+                    if metadata:
+                        # Check if track already exists
+                        cursor.execute('SELECT id FROM tracks WHERE file_path = ?', (file_path,))
+                        existing = cursor.fetchone()
+                        
+                        if existing:
+                            # Update existing track
+                            cursor.execute('''
+                                UPDATE tracks SET 
+                                    title = ?, artist = ?, album = ?, genre = ?, 
+                                    year = ?, track_number, duration = ?, 
+                                    file_size = ?, last_modified = ?
+                                WHERE file_path = ?
+                            ''', (
+                                metadata.get('title'), metadata.get('artist'), metadata.get('album'),
+                                metadata.get('genre'), metadata.get('year'), metadata.get('track_number'),
+                                metadata.get('duration'), metadata.get('file_size'), metadata.get('last_modified'),
+                                file_path
+                            ))
+                        else:
+                            # Insert new track
+                            cursor.execute('''
+                                INSERT INTO tracks (file_path, title, artist, album, genre, 
+                                                  year, track_number, duration, file_size, last_modified)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (
+                                file_path, metadata.get('title'), metadata.get('artist'), metadata.get('album'),
+                                metadata.get('genre'), metadata.get('year'), metadata.get('track_number'),
+                                metadata.get('duration'), metadata.get('file_size'), metadata.get('last_modified')
+                            ))
+                        
+                        stats['indexed'] += 1
+                    else:
+                        stats['errors'] += 1
+                        
+                except Exception as e:
+                    debug_log(f"Error indexing {file_path}: {str(e)}", "ERROR")
+                    stats['errors'] += 1
+        
+        conn.commit()
+        conn.close()
+        
+        return {'success': True, 'stats': stats}
+        
+    except Exception as e:
+        conn.close()
+        return {'success': False, 'error': str(e)}
+
+def scan_music_folder_with_progress(folder_path, scan_id):
+    """Scan a music folder with progress tracking"""
+    if not os.path.exists(folder_path):
+        return {'success': False, 'error': 'Folder does not exist'}
+    
+    # Get the progress tracker
+    progress_tracker = api_scan_music_folder.scan_progress.get(scan_id)
+    if not progress_tracker:
+        return {'success': False, 'error': 'Progress tracker not found'}
+    
+    supported_extensions = {'.mp3', '.flac', '.m4a', '.ogg', '.wav', '.aac'}
+    db_path = init_local_music_db()
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    stats = {'total_files': 0, 'indexed': 0, 'errors': 0, 'skipped': 0}
+    
+    try:
+        # First pass: count total files
+        progress_tracker['status'] = 'counting'
+        progress_tracker['current_file'] = 'Counting files...'
+        
+        total_files = 0
+        for root, dirs, files in os.walk(folder_path):
+            for file in files:
+                file_ext = os.path.splitext(file)[1].lower()
+                if file_ext in supported_extensions:
+                    total_files += 1
+        
+        progress_tracker['total_files'] = total_files
+        progress_tracker['status'] = 'scanning'
+        
+        # Second pass: process files with progress updates
+        for root, dirs, files in os.walk(folder_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                file_ext = os.path.splitext(file)[1].lower()
+                
+                if file_ext not in supported_extensions:
+                    stats['skipped'] += 1
+                    continue
+                
+                stats['total_files'] += 1
+                progress_tracker['files_processed'] = stats['total_files']
+                progress_tracker['current_file'] = os.path.basename(file_path)
+                
+                try:
+                    # Extract metadata using mutagen
+                    metadata = extract_track_metadata(file_path)
+                    if metadata:
+                        # Check if track already exists
+                        cursor.execute('SELECT id FROM tracks WHERE file_path = ?', (file_path,))
+                        existing = cursor.fetchone()
+                        
+                        if existing:
+                            # Update existing track
+                            cursor.execute('''
+                                UPDATE tracks SET 
+                                    title = ?, artist = ?, album = ?, genre = ?, 
+                                    year = ?, track_number = ?, duration = ?, 
+                                    file_size = ?, last_modified = ?
+                                WHERE file_path = ?
+                            ''', (
+                                metadata.get('title'), metadata.get('artist'), metadata.get('album'),
+                                metadata.get('genre'), metadata.get('year'), metadata.get('track_number'),
+                                metadata.get('duration'), metadata.get('file_size'), metadata.get('last_modified'),
+                                file_path
+                            ))
+                        else:
+                            # Insert new track
+                            cursor.execute('''
+                                INSERT INTO tracks (file_path, title, artist, album, genre, 
+                                                  year, track_number, duration, file_size, last_modified)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (
+                                file_path, metadata.get('title'), metadata.get('artist'), metadata.get('album'),
+                                metadata.get('genre'), metadata.get('year'), metadata.get('track_number'),
+                                metadata.get('duration'), metadata.get('file_size'), metadata.get('last_modified')
+                            ))
+                        
+                        stats['indexed'] += 1
+                        progress_tracker['indexed'] = stats['indexed']
+                    else:
+                        stats['errors'] += 1
+                        progress_tracker['errors'] = stats['errors']
+                        
+                except Exception as e:
+                    debug_log(f"Error indexing {file_path}: {str(e)}", "ERROR")
+                    stats['errors'] += 1
+                    progress_tracker['errors'] = stats['errors']
+        
+        conn.commit()
+        conn.close()
+        
+        return {'success': True, 'stats': stats}
+        
+    except Exception as e:
+        conn.close()
+        return {'success': False, 'error': str(e)}
+
+def extract_track_metadata(file_path):
+    """Extract metadata from a music file"""
+    try:
+        file_stat = os.stat(file_path)
+        file_size = file_stat.st_size
+        last_modified = file_stat.st_mtime
+        
+        # Try to load metadata
+        audio = mutagen.File(file_path, easy=True)
+        
+        if audio is None:
+            # Try without easy=True for FLAC files
+            audio = mutagen.File(file_path)
+        
+        metadata = {
+            'title': None,
+            'artist': None,
+            'album': None,
+            'genre': None,
+            'year': None,
+            'track_number': None,
+            'duration': None,
+            'file_size': file_size,
+            'last_modified': last_modified
+        }
+        
+        if audio:
+            # Extract common metadata fields
+            if hasattr(audio, 'tags'):
+                tags = audio.tags
+                
+                # Handle different tag formats
+                if hasattr(tags, 'get'):
+                    metadata['title'] = tags.get('title', [None])[0] if tags.get('title') else None
+                    metadata['artist'] = tags.get('artist', [None])[0] if tags.get('artist') else None
+                    metadata['album'] = tags.get('album', [None])[0] if tags.get('album') else None
+                    metadata['genre'] = tags.get('genre', [None])[0] if tags.get('genre') else None
+                    
+                    # Handle year
+                    year_str = tags.get('date', [None])[0] if tags.get('date') else None
+                    if year_str:
+                        try:
+                            metadata['year'] = int(year_str[:4])
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    # Handle track number
+                    track_str = tags.get('tracknumber', [None])[0] if tags.get('tracknumber') else None
+                    if track_str:
+                        try:
+                            metadata['track_number'] = int(track_str)
+                        except (ValueError, TypeError):
+                            pass
+            
+            # Get duration
+            if hasattr(audio, 'info') and hasattr(audio.info, 'length'):
+                metadata['duration'] = audio.info.length
+        
+        # Use filename as fallback for title if no metadata
+        if not metadata['title']:
+            filename = os.path.splitext(os.path.basename(file_path))[0]
+            metadata['title'] = filename
+        
+        return metadata
+        
+    except Exception as e:
+        debug_log(f"Error extracting metadata from {file_path}: {str(e)}", "ERROR")
+        return None
+
+def search_local_tracks(query, limit=50):
+    """Search for tracks in the local database"""
+    db_path = os.path.join(DB_DIR, 'local_music.db')
+    if not os.path.exists(db_path):
+        return []
+    
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # Search in title, artist, and album
+    search_query = f"%{query}%"
+    cursor.execute('''
+        SELECT id, title, artist, album, genre, year, duration, file_path
+        FROM tracks 
+        WHERE title LIKE ? OR artist LIKE ? OR album LIKE ?
+        ORDER BY title, artist
+        LIMIT ?
+    ''', (search_query, search_query, search_query, limit))
+    
+    results = []
+    for row in cursor.fetchall():
+        results.append({
+            'id': row[0],
+            'title': row[1] or 'Unknown Title',
+            'artist': row[2] or 'Unknown Artist',
+            'album': row[3] or 'Unknown Album',
+            'genre': row[4],
+            'year': row[5],
+            'duration': row[6],
+            'file_path': row[7]
+        })
+    
+    conn.close()
+    return results
+
+def get_local_track_stats():
+    """Get statistics about the local music database"""
+    db_path = os.path.join(DB_DIR, 'local_music.db')
+    if not os.path.exists(db_path):
+        return {'total_tracks': 0, 'total_size': 0, 'genres': [], 'artists': 0}
+    
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # Total tracks
+    cursor.execute('SELECT COUNT(*) FROM tracks')
+    total_tracks = cursor.fetchone()[0]
+    
+    # Total size
+    cursor.execute('SELECT SUM(file_size) FROM tracks')
+    total_size = cursor.fetchone()[0] or 0
+    
+    # Unique genres
+    cursor.execute('SELECT DISTINCT genre FROM tracks WHERE genre IS NOT NULL')
+    genres = [row[0] for row in cursor.fetchall()]
+    
+    # Unique artists
+    cursor.execute('SELECT COUNT(DISTINCT artist) FROM tracks WHERE artist IS NOT NULL')
+    unique_artists = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    return {
+        'total_tracks': total_tracks,
+        'total_size': total_size,
+        'genres': genres,
+        'artists': unique_artists
+    }
+
+@main_bp.route('/local-music')
+def local_music_page():
+    """Local music management page"""
+    stats = get_local_track_stats()
+    return render_template('local_music.html', stats=stats)
+
+@main_bp.route('/api/scan-music-folder', methods=['POST'])
+def api_scan_music_folder():
+    """API endpoint to scan a music folder"""
+    data = request.get_json()
+    if not data or 'folder_path' not in data:
+        return jsonify({'success': False, 'error': 'Folder path is required'})
+    
+    folder_path = data['folder_path']
+    
+    # Start scanning in background with progress tracking
+    import threading
+    import time
+    
+    # Create a unique scan ID for this operation
+    scan_id = f"scan_{int(time.time())}"
+    
+    # Initialize scan progress in a simple in-memory store
+    if not hasattr(api_scan_music_folder, 'scan_progress'):
+        api_scan_music_folder.scan_progress = {}
+    
+    api_scan_music_folder.scan_progress[scan_id] = {
+        'status': 'starting',
+        'current_file': '',
+        'files_processed': 0,
+        'total_files': 0,
+        'indexed': 0,
+        'errors': 0,
+        'skipped': 0,
+        'start_time': time.time()
+    }
+    
+    def scan_with_progress():
+        try:
+            result = scan_music_folder_with_progress(folder_path, scan_id)
+            api_scan_music_folder.scan_progress[scan_id]['status'] = 'completed'
+            api_scan_music_folder.scan_progress[scan_id]['result'] = result
+        except Exception as e:
+            api_scan_music_folder.scan_progress[scan_id]['status'] = 'error'
+            api_scan_music_folder.scan_progress[scan_id]['error'] = str(e)
+    
+    # Start scanning in background thread
+    thread = threading.Thread(target=scan_with_progress)
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({
+        'success': True, 
+        'scan_id': scan_id,
+        'message': 'Scan started in background'
+    })
+
+@main_bp.route('/api/scan-progress/<scan_id>')
+def api_scan_progress(scan_id):
+    """API endpoint to get scan progress"""
+    if not hasattr(api_scan_music_folder, 'scan_progress'):
+        return jsonify({'error': 'No scan progress available'})
+    
+    progress = api_scan_music_folder.scan_progress.get(scan_id)
+    if not progress:
+        return jsonify({'error': 'Scan ID not found'})
+    
+    if progress['status'] == 'completed':
+        # Clean up completed scan
+        result = progress.get('result', {})
+        if result.get('success'):
+            stats = get_local_track_stats()
+            return jsonify({
+                'status': 'completed',
+                'stats': stats,
+                'result': result
+            })
+        else:
+            return jsonify({
+                'status': 'error',
+                'error': result.get('error', 'Unknown error')
+            })
+    
+    return jsonify(progress)
+
+@main_bp.route('/api/search-local-tracks', methods=['POST'])
+def api_search_local_tracks():
+    """API endpoint to search local tracks"""
+    data = request.get_json()
+    if not data or 'query' not in data:
+        return jsonify({'success': False, 'error': 'Search query is required'})
+    
+    query = data['query']
+    limit = data.get('limit', 50)
+    
+    results = search_local_tracks(query, limit)
+    return jsonify({'success': True, 'results': results})
+
+@main_bp.route('/api/local-music-stats')
+def api_local_music_stats():
+    """API endpoint to get local music statistics"""
+    stats = get_local_track_stats()
+    return jsonify({'success': True, 'stats': stats})
+
+@main_bp.route('/api/browse-path')
+def api_browse_path():
+    """API endpoint for file browsing"""
+    import os
+    from pathlib import Path
+    
+    # Get the path parameter, default to user's home directory
+    path = request.args.get('path', '')
+    
+    if not path:
+        # Default to user's home directory
+        path = str(Path.home())
+    
+    try:
+        # Ensure the path exists and is accessible
+        if not os.path.exists(path):
+            return jsonify({'error': 'Path does not exist'}), 404
+        
+        if not os.access(path, os.R_OK):
+            return jsonify({'error': 'Path is not accessible'}), 403
+        
+        # List directory contents - optimized for performance
+        try:
+            items = os.listdir(path)
+        except (OSError, PermissionError) as e:
+            return jsonify({'error': f'Cannot read directory: {str(e)}'}), 403
+        
+        # Separate directories and files for faster processing
+        dirs = []
+        files = []
+        
+        # Process directories first (always fast)
+        for item in items:
+            if item.startswith('.'):  # Skip hidden items
+                continue
+                
+            item_path = os.path.join(path, item)
+            try:
+                if os.path.isdir(item_path):
+                    dirs.append({
+                        'name': item,
+                        'path': item_path,
+                        'readable': os.access(item_path, os.R_OK)
+                    })
+            except (OSError, PermissionError):
+                continue
+        
+        # Sort directories for better UX
+        dirs.sort(key=lambda x: x['name'].lower())
+        
+        # Only scan for audio files if directory isn't too large
+        total_items = len(items)
+        if total_items <= 200:  # Much more aggressive limit for faster browsing
+            max_files_to_scan = 25  # Reduced limit for faster browsing
+            files_found = 0
+            
+            for item in items:
+                if item.startswith('.'):
+                    continue
+                    
+                item_path = os.path.join(path, item)
+                try:
+                    if os.path.isfile(item_path) and files_found < max_files_to_scan:
+                        # Quick audio file check
+                        if any(item.lower().endswith(ext) for ext in ['.mp3', '.flac', '.m4a', '.ogg', '.wav', '.aac']):
+                            try:
+                                size = os.path.getsize(item_path)
+                                files.append({
+                                    'name': item,
+                                    'path': item_path,
+                                    'size': size
+                                })
+                                files_found += 1
+                            except (OSError, PermissionError):
+                                continue
+                except (OSError, PermissionError):
+                    continue
+            
+            # Sort files for better UX
+            files.sort(key=lambda x: x['name'].lower())
+        else:
+            # For large directories, skip file scanning entirely for speed
+            files = []
+            max_files_to_scan = 0
+            files_found = 0
+        
+        # Get parent directory
+        parent_path = str(Path(path).parent)
+        if parent_path == path:  # We're at root
+            parent_path = None
+        
+        # Add performance info
+        total_items = len(items)
+        hidden_items = len([i for i in items if i.startswith('.')])
+        visible_items = total_items - hidden_items
+        
+        # Performance notes
+        performance_note = None
+        if total_items > 500:
+            performance_note = "Large directory - audio files hidden for performance"
+        elif files_found >= max_files_to_scan:
+            performance_note = f"Showing first {max_files_to_scan} audio files for performance"
+        
+        return jsonify({
+            'current_path': path,
+            'parent_path': parent_path,
+            'directories': dirs,
+            'files': files,
+            'performance_info': {
+                'total_items': total_items,
+                'visible_items': visible_items,
+                'directories_count': len(dirs),
+                'files_scanned': files_found,
+                'max_files_scanned': max_files_to_scan,
+                'note': performance_note
+            }
+        })
+        
+    except Exception as e:
+        debug_log(f"Error browsing path {path}: {str(e)}", "ERROR")
+        return jsonify({'error': f'Error browsing directory: {str(e)}'}), 500
