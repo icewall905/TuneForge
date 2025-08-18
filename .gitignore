@@ -11,6 +11,10 @@ ENV/
 *.log
 logs/
 
+# Cache directories
+.cache/
+.cache/*
+
 # Documentation (sensitive instructions)
 notes/instructions.md
 notes/*

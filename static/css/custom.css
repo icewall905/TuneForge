@@ -783,3 +783,7 @@
         padding: 16px;
     }
 }
+
+.art-and-tracks { display: flex; gap: 12px; align-items: flex-start; }
+.art-thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #444; background: #333; }
+.tracks-col { display: flex; flex-direction: column; }

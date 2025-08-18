@@ -39,16 +39,22 @@
                         <div class="playlist-tracks-preview">
                             <strong>Sample Tracks:</strong>
                             <div class="tracks-list">
-                                {% for track in playlist.tracks_details[:5] %}
-                                    <div class="track-item">
-                                        <span class="track-artist">{{ track.artist or 'Unknown Artist' }}</span>
-                                        <span class="track-separator">•</span>
-                                        <span class="track-title">{{ track.title or 'Unknown Title' }}</span>
+                                {% set sample = playlist.tracks_details[0] %}
+                                <div class="art-and-tracks">
+                                    <img class="art-thumb" src="/art?artist={{ sample.artist|urlencode }}&album={{ sample.album|default('')|urlencode }}&title={{ sample.title|urlencode }}" onerror="this.style.display='none'" alt="art" />
+                                    <div class="tracks-col">
+                                        {% for track in playlist.tracks_details[:5] %}
+                                            <div class="track-item">
+                                                <span class="track-artist">{{ track.artist or 'Unknown Artist' }}</span>
+                                                <span class="track-separator">•</span>
+                                                <span class="track-title">{{ track.title or 'Unknown Title' }}</span>
+                                            </div>
+                                        {% endfor %}
+                                        {% if playlist.tracks_details|length > 5 %}
+                                            <div class="track-more">... and {{ playlist.tracks_details|length - 5 }} more</div>
+                                        {% endif %}
                                     </div>
-                                {% endfor %}
-                                {% if playlist.tracks_details|length > 5 %}
-                                    <div class="track-more">... and {{ playlist.tracks_details|length - 5 }} more</div>
-                                {% endif %}
+                                </div>
                             </div>
                         </div>
                         {% endif %}

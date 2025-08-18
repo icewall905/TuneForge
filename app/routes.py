@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, jsonify, Response, current_app
+from flask import Blueprint, render_template, request, jsonify, Response, current_app, send_file
 import requests
 import json
 import configparser
@@ -17,6 +17,7 @@ import mutagen
 from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC
 from collections import OrderedDict
+import hashlib
 
 # --- Logger Setup ---
 LOG_DIR = 'logs'  # This will be relative to the project root (TuneForge/)
@@ -2218,3 +2219,83 @@ def api_browse_path():
     except Exception as e:
         debug_log(f"Error browsing path {path}: {str(e)}", "ERROR")
         return jsonify({'error': f'Error browsing directory: {str(e)}'}), 500
+
+# Cache directories
+CACHE_DIR = os.path.join(os.getcwd(), '.cache')
+ART_CACHE_DIR = os.path.join(CACHE_DIR, 'art')
+os.makedirs(ART_CACHE_DIR, exist_ok=True)
+
+
+def _build_art_cache_key(artist: str = '', album: str = '', title: str = '') -> str:
+    base = f"artist={artist.strip().lower()}|album={album.strip().lower()}|title={title.strip().lower()}"
+    return hashlib.md5(base.encode('utf-8')).hexdigest() + '.jpg'
+
+
+def _itunes_search(term: str, entity: str = 'album'):
+    try:
+        params = {'term': term, 'entity': entity, 'limit': 1}
+        r = requests.get('https://itunes.apple.com/search', params=params, timeout=6)
+        if r.ok:
+            return r.json()
+    except Exception as e:
+        debug_log(f"iTunes search failed: {e}", "WARN")
+    return None
+
+
+def _download_and_cache_image(url: str, dest_path: str) -> bool:
+    try:
+        resp = requests.get(url, timeout=10)
+        if resp.ok and resp.content:
+            with open(dest_path, 'wb') as f:
+                f.write(resp.content)
+            return True
+    except Exception as e:
+        debug_log(f"Download art failed: {e}", "WARN")
+    return False
+
+
+def fetch_art_image(artist: str = '', album: str = '', title: str = '') -> str:
+    """Fetch art for given artist/album/title from cache or iTunes. Returns file path or empty string."""
+    if not (artist or album or title):
+        return ''
+    cache_name = _build_art_cache_key(artist or '', album or '', title or '')
+    cache_path = os.path.join(ART_CACHE_DIR, cache_name)
+    if os.path.exists(cache_path):
+        return cache_path
+
+    # Try album art first if album provided
+    artwork_url = None
+    if artist and album:
+        data = _itunes_search(f"{artist} {album}", entity='album')
+        if data and data.get('resultCount'):
+            artwork_url = data['results'][0].get('artworkUrl100')
+    # Fallback to track art via song entity
+    if not artwork_url and artist and title:
+        data = _itunes_search(f"{artist} {title}", entity='song')
+        if data and data.get('resultCount'):
+            artwork_url = data['results'][0].get('artworkUrl100')
+    # Fallback to artist
+    if not artwork_url and artist:
+        data = _itunes_search(artist, entity='musicArtist')
+        if data and data.get('resultCount'):
+            artwork_url = data['results'][0].get('artworkUrl100')
+
+    if artwork_url:
+        # Upscale to higher resolution if possible
+        larger = artwork_url.replace('100x100', '600x600')
+        if _download_and_cache_image(larger, cache_path) or _download_and_cache_image(artwork_url, cache_path):
+            return cache_path
+
+    return ''
+
+
+@main_bp.route('/art')
+def art_image():
+    artist = request.args.get('artist', '', type=str)
+    album = request.args.get('album', '', type=str)
+    title = request.args.get('title', '', type=str)
+    path = fetch_art_image(artist=artist, album=album, title=title)
+    if path and os.path.exists(path):
+        return send_file(path, mimetype='image/jpeg', conditional=True)
+    # No art, return 204 to let frontend handle placeholder
+    return ('', 204)

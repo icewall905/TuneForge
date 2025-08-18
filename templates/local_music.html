@@ -252,6 +252,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <input type="checkbox" id="track-${track.id}" class="track-select" 
                            onchange="toggleTrackSelection(${track.id}, '${track.title}', '${track.artist}')">
                 </div>
+                <img class="art-thumb" src="/art?artist=${encodeURIComponent(track.artist || '')}&album=${encodeURIComponent(track.album || '')}&title=${encodeURIComponent(track.title || '')}" onerror="this.style.display='none'" alt="art" />
                 <div class="track-info">
                     <h4>${track.title}</h4>
                     <p class="track-artist">${track.artist}</p>
