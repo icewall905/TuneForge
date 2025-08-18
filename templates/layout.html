@@ -95,12 +95,8 @@
             
             // Restore state from localStorage
             this.restoreState();
-            // Start polling for any restored playlists
-            for (const [playlistId, playlist] of this.activePlaylists) {
-                if (playlist.status !== 'completed' && playlist.status !== 'cancelled' && playlist.status !== 'error') {
-                    this.startPlaylistPolling(playlistId);
-                }
-            }
+            // Validate any restored playlists with the server before polling
+            this.validateRestoredPlaylists();
             
             // Start background polling
             this.startBackgroundPolling();
@@ -110,6 +106,37 @@
             
             // Set up page visibility and focus handlers
             this.setupEventHandlers();
+        },
+        
+        async validateRestoredPlaylists() {
+            try {
+                const toRemove = [];
+                for (const [playlistId, playlist] of this.activePlaylists) {
+                    try {
+                        const resp = await fetch(`/api/playlist-progress/${playlistId}`);
+                        const progress = await resp.json();
+                        if (progress.error) {
+                            // Server has no progress for this ID; remove immediately
+                            toRemove.push(playlistId);
+                            continue;
+                        }
+                        if (['completed','cancelled','error'].includes(progress.status)) {
+                            // Terminal on server; remove soon for UX
+                            setTimeout(() => this.removePlaylist(playlistId), 3000);
+                            continue;
+                        }
+                        // Active on server; ensure polling is running
+                        this.startPlaylistPolling(playlistId);
+                    } catch (e) {
+                        // Network or parse error: remove to avoid stale UI
+                        toRemove.push(playlistId);
+                    }
+                }
+                // Bulk remove any stale entries
+                toRemove.forEach(id => this.removePlaylist(id));
+            } catch (e) {
+                console.error('Failed to validate restored playlists:', e);
+            }
         },
         
                         // Persistent state management
@@ -346,7 +373,7 @@
                         </div>
                         <div class="progress-current">${playlist.currentStatus}</div>
                         <div class="progress-details">Ollama calls: ${playlist.ollamaCalls}</div>
-                        <button class="cancel-btn" onclick="window.globalStatusManager.cancelPlaylist('${playlistId}')">Cancel</button>
+                        ${(['completed','cancelled','error'].includes(playlist.status)) ? '' : `<button class="cancel-btn" onclick="window.globalStatusManager.cancelPlaylist('${playlistId}')">Cancel</button>`}
                     </div>
                 `;
             }
@@ -481,9 +508,14 @@
                     const progress = await response.json();
                     
                     if (progress.error) {
-                        // Stop polling and remove
+                        // Server has no knowledge of this playlist (likely after restart)
+                        this.updatePlaylist(playlistId, {
+                            status: 'error',
+                            currentStatus: 'No server progress (likely after restart). Removing…'
+                        });
                         clearInterval(pollInterval);
                         this.playlistPollIntervals.delete(playlistId);
+                        setTimeout(() => this.removePlaylist(playlistId), 3000);
                         return;
                     }
                     
@@ -498,12 +530,18 @@
                     if (progress.status === 'completed' || progress.status === 'cancelled' || progress.status === 'error') {
                         clearInterval(pollInterval);
                         this.playlistPollIntervals.delete(playlistId);
-                        setTimeout(() => {
-                            this.removePlaylist(playlistId);
-                        }, 10000);
+                        setTimeout(() => { this.removePlaylist(playlistId); }, 5000);
                     }
                 } catch (error) {
                     console.error('Error polling playlist progress:', error);
+                    // On fetch error, stop polling and remove stale entry after a short delay
+                    this.updatePlaylist(playlistId, {
+                        status: 'error',
+                        currentStatus: 'Progress polling failed. Removing…'
+                    });
+                    clearInterval(pollInterval);
+                    this.playlistPollIntervals.delete(playlistId);
+                    setTimeout(() => this.removePlaylist(playlistId), 3000);
                 }
             }, 2000);
             this.playlistPollIntervals.set(playlistId, pollInterval);

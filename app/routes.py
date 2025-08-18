@@ -1218,9 +1218,13 @@ def api_generate_playlist():
 
     debug_log(f"Playlist Gen: Total {len(final_tracklist_details)} unique tracks found for playlist '{playlist_name}'.", "INFO", True)
 
+    # Cap the number of tracks to the target count when creating playlists
+    max_tracks_to_add = min(num_songs, len(final_tracklist_details))
+    selected_tracks_for_creation = final_tracklist_details[:max_tracks_to_add]
+
     created_playlists_summary = {}
-    navidrome_ids = [t['id'] for t in final_tracklist_details if t['source'] == 'navidrome']
-    plex_ids = [t['id'] for t in final_tracklist_details if t['source'] == 'plex']
+    navidrome_ids = [t['id'] for t in selected_tracks_for_creation if t['source'] == 'navidrome']
+    plex_ids = [t['id'] for t in selected_tracks_for_creation if t['source'] == 'plex']
 
     if enable_navidrome:
         if navidrome_ids:
@@ -1237,15 +1241,15 @@ def api_generate_playlist():
     history = load_playlist_history()
     history.append({
         "name": playlist_name, "prompt": prompt, "num_songs_requested": num_songs,
-        "num_songs_added_total": len(final_tracklist_details),
+        "num_songs_added_total": len(selected_tracks_for_creation),
         "services_targeted": services_to_use, "creation_results": created_playlists_summary,
-        "tracks_details": final_tracklist_details, "timestamp": datetime.datetime.now().isoformat()
+        "tracks_details": selected_tracks_for_creation, "timestamp": datetime.datetime.now().isoformat()
     })
     save_playlist_history(history)
 
     return jsonify({
         "message": f"Playlist '{playlist_name}' generation complete. Found {len(final_tracklist_details)}/{num_songs} tracks.",
-        "playlist_name": playlist_name, "tracks_added_count": len(final_tracklist_details),
+        "playlist_name": playlist_name, "tracks_added_count": len(selected_tracks_for_creation),
         "target_song_count": num_songs, "created_in_services": created_playlists_summary,
         "ollama_api_calls": ollama_api_calls_made, "playlist_id": playlist_id
     }), 200
@@ -1897,7 +1901,7 @@ def api_playlist_progress(playlist_id):
     if not progress:
         return jsonify({'error': 'Playlist ID not found'})
     
-    if progress['status'] == 'completed':
+    if progress['status'] in ['completed', 'cancelled', 'error']:
         # Clean up completed playlist after a delay
         import threading
         def cleanup():
