@@ -945,6 +945,14 @@ def index_get():
 @main_bp.route('/history')
 def history():
     playlist_history = load_playlist_history()
+    # Sort by timestamp descending so newest appear first (top-left in grid)
+    def _parse_ts(item):
+        try:
+            ts = item.get('timestamp')
+            return datetime.datetime.fromisoformat(ts) if ts else datetime.datetime.min
+        except Exception:
+            return datetime.datetime.min
+    playlist_history.sort(key=_parse_ts, reverse=True)
     return render_template('history.html', history=playlist_history)
 
 @main_bp.route('/settings', methods=['GET', 'POST'])

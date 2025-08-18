@@ -151,49 +151,6 @@
         
         document.getElementById('add_artist').addEventListener('click', addArtist);
         
-        // Test button to verify JavaScript is working
-        const submitButton = document.querySelector('button[type="submit"]');
-        if (submitButton) {
-            submitButton.addEventListener('click', function(e) {
-                console.log('=== SUBMIT BUTTON CLICKED ===');
-                console.log('Event type:', e.type);
-                console.log('Event target:', e.target);
-                console.log('Form element:', this.form);
-                console.log('Form action:', this.form.action);
-                console.log('Form method:', this.form.method);
-            });
-            console.log('✅ Submit button click handler attached');
-        } else {
-            console.error('❌ Submit button not found!');
-        }
-        
-        // Add manual test button for debugging
-        const testButton = document.createElement('button');
-        testButton.type = 'button';
-        testButton.textContent = 'Test JavaScript';
-        testButton.className = 'secondary-button';
-        testButton.style.marginTop = '10px';
-        testButton.onclick = function() {
-            console.log('=== MANUAL TEST BUTTON CLICKED ===');
-            console.log('JavaScript is working!');
-            console.log('Form element:', document.getElementById('playlistForm'));
-            console.log('Global status manager:', window.globalStatusManager);
-            
-            // Test form submission manually
-            const form = document.getElementById('playlistForm');
-            if (form) {
-                console.log('Testing form submission manually...');
-                const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-                form.dispatchEvent(submitEvent);
-            }
-        };
-        
-        // Insert test button after the submit button
-        if (submitButton && submitButton.parentNode) {
-            submitButton.parentNode.insertBefore(testButton, submitButton.nextSibling);
-            console.log('✅ Test button added to page');
-        }
-        
         // Initialize favorite artists from hidden input
         window.onload = function() {
             const hiddenInput = document.getElementById('favorite_artists');

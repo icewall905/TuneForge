@@ -7,27 +7,78 @@
     <h1>Playlist History</h1>
     
     {% if history %}
-        <div class="track-grid">
+        <div class="playlist-grid">
             {% for playlist in history %}
-                <div class="track-card">
-                    <div class="track-art default-art">
-                        <div class="art-placeholder">🎵</div>
+                <div class="playlist-card" data-playlist-index="{{ loop.index0 }}">
+                    <div class="playlist-header">
+                        <div class="playlist-icon">🎵</div>
+                        <div class="playlist-title">{{ playlist.name }}</div>
+                        <div class="playlist-date">{{ playlist.timestamp|replace('T', ' ')|truncate(16, true, '') }}</div>
                     </div>
-                    <div class="track-info">
-                        <div class="track-title">{{ playlist.name }}</div>
-                        <div class="track-artist">{{ playlist.tracks|length }} tracks</div>
-                        <div class="track-album">{{ playlist.created_at|replace('T', ' ')|truncate(16, true, '') }}</div>
+                    
+                    <div class="playlist-preview">
+                        <div class="playlist-stats">
+                            <span class="stat-item">
+                                <strong>{{ playlist.tracks_details|length }}</strong> tracks
+                            </span>
+                            <span class="stat-item">
+                                Requested: <strong>{{ playlist.num_songs_requested }}</strong>
+                            </span>
+                            <span class="stat-item">
+                                Created: <strong>{{ playlist.timestamp|replace('T', ' ')|truncate(10, true, '') }}</strong>
+                            </span>
+                        </div>
+                        
+                        {% if playlist.prompt %}
+                        <div class="playlist-description">
+                            <strong>Description:</strong> {{ playlist.prompt|truncate(150, true, '...') }}
+                        </div>
+                        {% endif %}
+                        
+                        {% if playlist.tracks_details and playlist.tracks_details|length > 0 %}
+                        <div class="playlist-tracks-preview">
+                            <strong>Sample Tracks:</strong>
+                            <div class="tracks-list">
+                                {% for track in playlist.tracks_details[:5] %}
+                                    <div class="track-item">
+                                        <span class="track-artist">{{ track.artist or 'Unknown Artist' }}</span>
+                                        <span class="track-separator">•</span>
+                                        <span class="track-title">{{ track.title or 'Unknown Title' }}</span>
+                                    </div>
+                                {% endfor %}
+                                {% if playlist.tracks_details|length > 5 %}
+                                    <div class="track-more">... and {{ playlist.tracks_details|length - 5 }} more</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
+                        
+                        {% if playlist.creation_results %}
+                        <div class="playlist-services">
+                            <strong>Created in:</strong>
+                            {% for service, result in playlist.creation_results.items() %}
+                                {% if result.status == 'success' %}
+                                    <span class="service-badge success">{{ service|title }}</span>
+                                {% else %}
+                                    <span class="service-badge failed">{{ service|title }}</span>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                        {% endif %}
                     </div>
-                    <div class="track-actions">
+                    
+                    <div class="playlist-actions">
+                        <button class="btn btn-primary" onclick="viewFullPlaylist({{ loop.index0 }})">
+                            View Full Playlist
+                        </button>
                         <div class="rating">
                             {% for i in range(1, 6) %}
-                                <button class="text-button rating-star {% if playlist.get('rating') == i %}active{% endif %}" 
-                                    data-playlist-id="{{ playlist.get('id', loop.index) }}" data-rating="{{ i }}">
+                                <button class="rating-star {% if playlist.get('rating') == i %}active{% endif %}" 
+                                    data-playlist-index="{{ loop.index0 }}" data-rating="{{ i }}">
                                     {% if playlist.get('rating', 0) >= i %}★{% else %}☆{% endif %}
                                 </button>
                             {% endfor %}
                         </div>
-                        <button class="text-button" data-playlist-id="{{ playlist.get('id', loop.index) }}">Details</button>
                     </div>
                 </div>
             {% endfor %}
@@ -38,15 +89,15 @@
         </div>
     {% endif %}
 
-    <!-- Modal for playlist details -->
+    <!-- Modal for full playlist details -->
     <div id="playlistDetailsModal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeModal()">&times;</span>
             <h2 id="modalPlaylistName"></h2>
-            <p id="modalPlaylistDescription" class="track-artist"></p>
-            <p id="modalPlaylistInfo" class="track-album"></p>
+            <p id="modalPlaylistDescription" class="playlist-description-modal"></p>
+            <p id="modalPlaylistInfo" class="playlist-info-modal"></p>
             
-            <div class="playlist-actions">
+            <div class="playlist-actions-modal">
                 <button class="btn btn-primary" onclick="sharePlaylist()">Share Playlist</button>
                 <div id="share-link-container" style="display: none; margin-top: 10px;">
                     <input type="text" id="share-link" class="form-control" readonly>
@@ -54,14 +105,14 @@
                 </div>
             </div>
             
-            <div class="playlist-tracks">
-                <h3>Tracks</h3>
+            <div class="playlist-tracks-full">
+                <h3>All Tracks</h3>
                 <table>
                     <thead>
                         <tr>
                             <th>Artist</th>
                             <th>Title</th>
-                            <th>Platform</th>
+                            <th>Source</th>
                         </tr>
                     </thead>
                     <tbody id="modalTracksList">
@@ -76,6 +127,9 @@
 
 {% block extra_js %}
 <script type="text/javascript">
+    // Expose history data once (no JSON.parse needed)
+    const historyData = {{ history|tojson|safe }};
+
     // Variables for sharing
     let currentPlaylistId = null;
     
@@ -84,152 +138,111 @@
         // Add event listeners for rating stars
         document.querySelectorAll('.rating-star').forEach(star => {
             star.addEventListener('click', function() {
-                const playlistId = this.getAttribute('data-playlist-id');
+                const playlistIndex = this.getAttribute('data-playlist-index');
                 const rating = this.getAttribute('data-rating');
-                ratePlaylist(playlistId, rating);
-            });
-        });
-        
-        // Add event listeners for details buttons
-        document.querySelectorAll('.text-button:not(.rating-star)').forEach(button => {
-            button.addEventListener('click', function() {
-                const playlistId = this.getAttribute('data-playlist-id');
-                viewPlaylistDetails(playlistId);
+                ratePlaylist(playlistIndex, rating);
             });
         });
     });
     
     // Function to rate a playlist
-    function ratePlaylist(playlistId, rating) {
-        const formData = new FormData();
-        formData.append('rating', rating);
-        
-        fetch(`/history/rate/${playlistId}`, {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => {
-            if (response.ok) {
-                // Update UI
-                const stars = document.querySelectorAll(`.rating-star[onclick*="${playlistId}"]`);
-                stars.forEach((star, index) => {
-                    if (index < rating) {
-                        star.textContent = '★';
-                        star.classList.add('active');
-                    } else {
-                        star.textContent = '☆';
-                        star.classList.remove('active');
-                    }
-                });
+    function ratePlaylist(playlistIndex, rating) {
+        console.log(`Rating playlist ${playlistIndex} with ${rating} stars`);
+        const stars = document.querySelectorAll(`[data-playlist-index="${playlistIndex}"].rating-star`);
+        stars.forEach((star, index) => {
+            if (index < rating) {
+                star.textContent = '★';
+                star.classList.add('active');
+            } else {
+                star.textContent = '☆';
+                star.classList.remove('active');
             }
-        })
-        .catch(error => console.error('Error rating playlist:', error));
+        });
     }
     
-    // Function to view playlist details
-    function viewPlaylistDetails(playlistId) {
-        // Store the current playlist ID for sharing
-        currentPlaylistId = playlistId;
-        
-        // Fetch the playlist from our history array
-        const historyData = JSON.parse('{{ history|tojson|safe }}');
-        const playlist = historyData.find(p => p.id === playlistId);
-        
-        // Return early if playlist not found
-        if (!playlist) {
-            console.error('Playlist not found:', playlistId);
-            return;
-        }
-        
-        // Update modal content
-        document.getElementById('modalPlaylistName').textContent = playlist.name;
-        document.getElementById('modalPlaylistDescription').textContent = playlist.description || '(No description)';
-        
-        // Hide the share link container when opening a new playlist
-        document.getElementById('share-link-container').style.display = 'none';
-        
-        let infoText = `Created: ${playlist.created_at.replace('T', ' ').substring(0, 16)}`;
-        if (playlist.platform_playlist_id) {
-            infoText += ` • ${playlist.platform} ID: ${playlist.platform_playlist_id}`;
-        }
-        document.getElementById('modalPlaylistInfo').textContent = infoText;
-        
-        // Add tracks to the table
-        const tracksList = document.getElementById('modalTracksList');
-        tracksList.innerHTML = '';
-        
-        if (playlist.tracks && playlist.tracks.length > 0) {
-            playlist.tracks.forEach(track => {
+    // Function to view full playlist details
+    function viewFullPlaylist(playlistIndex) {
+        try {
+            console.log('Opening playlist details for index:', playlistIndex);
+            currentPlaylistId = playlistIndex;
+            const playlist = historyData[playlistIndex];
+            if (!playlist) {
+                console.error('Playlist not found at index:', playlistIndex);
+                return;
+            }
+            document.getElementById('modalPlaylistName').textContent = playlist.name || 'Untitled Playlist';
+            document.getElementById('modalPlaylistDescription').textContent = (playlist.prompt || playlist.description || '(No description)');
+            document.getElementById('share-link-container').style.display = 'none';
+            let infoText = '';
+            if (playlist.timestamp) {
+                infoText = `Created: ${playlist.timestamp.replace('T', ' ').substring(0, 16)}`;
+            }
+            if (typeof playlist.num_songs_added_total !== 'undefined' && typeof playlist.num_songs_requested !== 'undefined') {
+                infoText += (infoText ? ' • ' : '') + `${playlist.num_songs_added_total}/${playlist.num_songs_requested} tracks`;
+            }
+            document.getElementById('modalPlaylistInfo').textContent = infoText;
+            const tracksList = document.getElementById('modalTracksList');
+            tracksList.innerHTML = '';
+            const tracks = playlist.tracks_details || playlist.tracks || [];
+            if (tracks.length > 0) {
+                tracks.forEach(track => {
+                    const row = document.createElement('tr');
+                    const artistCell = document.createElement('td');
+                    artistCell.textContent = (track.artist || 'Unknown Artist');
+                    const titleCell = document.createElement('td');
+                    titleCell.textContent = (track.title || 'Unknown Title');
+                    const sourceCell = document.createElement('td');
+                    sourceCell.textContent = (track.source || track.found_on || 'Unknown');
+                    row.appendChild(artistCell);
+                    row.appendChild(titleCell);
+                    row.appendChild(sourceCell);
+                    tracksList.appendChild(row);
+                });
+            } else {
                 const row = document.createElement('tr');
-                
-                const artistCell = document.createElement('td');
-                artistCell.textContent = track.artist;
-                
-                const titleCell = document.createElement('td');
-                titleCell.textContent = track.title;
-                
-                const platformCell = document.createElement('td');
-                platformCell.textContent = track.found_on || playlist.platform;
-                
-                row.appendChild(artistCell);
-                row.appendChild(titleCell);
-                row.appendChild(platformCell);
-                
+                const cell = document.createElement('td');
+                cell.colSpan = 3;
+                cell.textContent = 'No tracks found';
+                cell.style.textAlign = 'center';
+                row.appendChild(cell);
                 tracksList.appendChild(row);
-            });
-        } else {
-            const row = document.createElement('tr');
-            const cell = document.createElement('td');
-            cell.colSpan = 3;
-            cell.textContent = 'No tracks found';
-            cell.style.textAlign = 'center';
-            row.appendChild(cell);
-            tracksList.appendChild(row);
+            }
+            const modal = document.getElementById('playlistDetailsModal');
+            if (!modal) {
+                console.error('Modal element not found');
+                return;
+            }
+            modal.style.display = 'block';
+        } catch (err) {
+            console.error('Failed to open playlist details:', err);
         }
-        
-        // Show the modal
-        document.getElementById('playlistDetailsModal').style.display = 'block';
     }
-    
+    // Ensure inline onclick can access it
+    window.viewFullPlaylist = viewFullPlaylist;
+
     // Close the modal
-    function closeModal() {
-        document.getElementById('playlistDetailsModal').style.display = 'none';
-    }
-    
+    function closeModal() { document.getElementById('playlistDetailsModal').style.display = 'none'; }
+
     // Close modal when clicking outside of it
     window.onclick = function(event) {
         const modal = document.getElementById('playlistDetailsModal');
-        if (event.target === modal) {
-            modal.style.display = 'none';
-        }
+        if (event.target === modal) { modal.style.display = 'none'; }
     }
-    
-    // Function to share a playlist
+
+    // Sharing helpers
     function sharePlaylist() {
-        if (!currentPlaylistId) return;
-        
-        // Create a shareable link using the current hostname
+        if (currentPlaylistId === null) return;
         const shareLink = `${window.location.origin}/shared-playlist/${currentPlaylistId}`;
-        
-        // Show the share container
         const container = document.getElementById('share-link-container');
         container.style.display = 'block';
-        
-        // Set the link in the input field
-        const linkInput = document.getElementById('share-link');
-        linkInput.value = shareLink;
-        linkInput.focus();
-        linkInput.select();
+        document.getElementById('share-link').value = shareLink;
     }
-    
-    // Function to copy the share link
     function copyShareLink() {
         const linkInput = document.getElementById('share-link');
-        linkInput.select();
-        document.execCommand('copy');
-        
-        // Show a small toast or notification
-        alert('Link copied to clipboard!');
+        linkInput.select(); linkInput.setSelectionRange(0, 99999);
+        (navigator.clipboard ? navigator.clipboard.writeText(linkInput.value) : document.execCommand('copy'))
+            .then?.(() => alert('Link copied to clipboard!'))
+            .catch?.(() => alert('Failed to copy link'));
     }
 </script>
 {% endblock %}
