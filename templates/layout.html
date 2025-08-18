@@ -41,7 +41,11 @@
             <p class="version-info">v0.1.3</p>
         </div>
     </div>
-
+    
+    <!-- Mobile toggle and backdrop for off-canvas sidebar -->
+    <button id="mobile-sidebar-toggle" class="mobile-sidebar-toggle" aria-label="Open menu"><span class="toggle-icon">☰</span></button>
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+    
     <div class="main-content">
         {% block content %}{% endblock %}
     </div>
@@ -557,6 +561,8 @@
         const sidebar = document.querySelector('.sidebar');
         const sidebarToggle = document.getElementById('sidebar-toggle');
         const mainContent = document.querySelector('.main-content');
+        const mobileToggle = document.getElementById('mobile-sidebar-toggle');
+        const backdrop = document.getElementById('sidebar-backdrop');
         
         console.log('🔧 Sidebar element:', sidebar);
         console.log('🔧 Toggle button:', sidebarToggle);
@@ -567,7 +573,7 @@
             return;
         }
         
-        // Check localStorage for saved state
+        // Check localStorage for saved state (desktop)
         const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
         console.log('🔧 Saved state - collapsed:', isCollapsed);
         
@@ -576,33 +582,54 @@
             if (mainContent) mainContent.classList.add('sidebar-collapsed');
         }
         
-        // Handle toggle click
+        // Desktop toggle
         sidebarToggle.addEventListener('click', function() {
             console.log('🔧 Toggle button clicked!');
             sidebar.classList.toggle('collapsed');
             if (mainContent) mainContent.classList.toggle('sidebar-collapsed');
-            
             const isNowCollapsed = sidebar.classList.contains('collapsed');
-            console.log('🔧 Sidebar now collapsed:', isNowCollapsed);
-            
-            // Save state to localStorage
             localStorage.setItem('sidebarCollapsed', isNowCollapsed);
         });
         
-        // Auto-collapse on mobile
-        function checkMobile() {
+        // Mobile toggle
+        if (mobileToggle && backdrop) {
+            const openMobileSidebar = () => {
+                sidebar.classList.add('open');
+                backdrop.style.display = 'block';
+            };
+            const closeMobileSidebar = () => {
+                sidebar.classList.remove('open');
+                backdrop.style.display = 'none';
+            };
+            mobileToggle.addEventListener('click', () => {
+                if (sidebar.classList.contains('open')) closeMobileSidebar();
+                else openMobileSidebar();
+            });
+            backdrop.addEventListener('click', closeMobileSidebar);
+        }
+        
+        // Auto-collapse on mobile and close off-canvas state on resize
+        function handleResponsive() {
             if (window.innerWidth <= 768) {
-                if (!sidebar.classList.contains('collapsed')) {
+                // Ensure desktop collapsed state doesn't force width on mobile
+                if (!sidebar.classList.contains('open')) {
+                    sidebar.classList.remove('collapsed');
+                    if (mainContent) mainContent.classList.remove('sidebar-collapsed');
+                }
+            } else {
+                // Hide mobile backdrop and off-canvas state
+                if (backdrop) backdrop.style.display = 'none';
+                sidebar.classList.remove('open');
+                // Restore desktop collapsed state
+                const isCollapsedNow = localStorage.getItem('sidebarCollapsed') === 'true';
+                if (isCollapsedNow) {
                     sidebar.classList.add('collapsed');
                     if (mainContent) mainContent.classList.add('sidebar-collapsed');
-                    localStorage.setItem('sidebarCollapsed', 'true');
                 }
             }
         }
-        
-        // Check on load and resize
-        checkMobile();
-        window.addEventListener('resize', checkMobile);
+        handleResponsive();
+        window.addEventListener('resize', handleResponsive);
         console.log('✅ Sidebar toggle functionality initialized');
     }
     
@@ -620,4 +647,5 @@
     
     {% block extra_js %}{% endblock %}
 </body>
+</html>
 </html>
