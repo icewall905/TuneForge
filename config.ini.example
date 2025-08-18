@@ -26,3 +26,4 @@ FavoriteArtists =
 EnableNavidrome = no
 EnablePlex = no
 VerboseLogging = no
+LocalMusicFolder = 

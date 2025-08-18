@@ -973,6 +973,7 @@ def settings():
         current_config.set('APP', 'EnablePlex', request.form.get('enable_plex', get_config_value('APP', 'EnablePlex', 'no')))
         current_config.set('APP', 'Debug', request.form.get('app_debug_mode', get_config_value('APP', 'Debug', 'yes'))) # Ensure this matches the form field name
         current_config.set('APP', 'VerboseLogging', request.form.get('verbose_logging', get_config_value('APP', 'VerboseLogging', 'no')))
+        current_config.set('APP', 'LocalMusicFolder', request.form.get('local_music_folder', get_config_value('APP', 'LocalMusicFolder', '')))
 
 
         # NAVIDROME section
@@ -1012,6 +1013,7 @@ def settings():
         'enable_plex': get_config_value('APP', 'EnablePlex', 'no'),
         'app_debug_mode': get_config_value('APP', 'Debug', 'yes'), # Ensure this matches the form field name and context variable
         'verbose_logging': get_config_value('APP', 'VerboseLogging', 'no'),
+        'local_music_folder': get_config_value('APP', 'LocalMusicFolder', ''),
 
         'navidrome_url': get_config_value('NAVIDROME', 'URL', ''),
         'navidrome_username': get_config_value('NAVIDROME', 'Username', ''),
@@ -1023,6 +1025,15 @@ def settings():
         'plex_playlist_type': get_config_value('PLEX', 'PlaylistType', 'audio'), 
         'plex_music_section_id': get_config_value('PLEX', 'MusicSectionID', '')
     }
+    
+    # Add local music statistics
+    try:
+        local_stats = get_local_track_stats()
+        context['local_stats'] = local_stats
+    except Exception as e:
+        debug_log(f"Error getting local music stats for settings: {e}", "WARN")
+        context['local_stats'] = None
+    
     return render_template('settings.html', **context)
 
 @main_bp.route('/test-navidrome') # Renders the test page
@@ -1765,8 +1776,8 @@ def extract_track_metadata(file_path):
         debug_log(f"Error extracting metadata from {file_path}: {str(e)}", "ERROR")
         return None
 
-def search_local_tracks(query, limit=50):
-    """Search for tracks in the local database"""
+def search_local_tracks(query, limit=50, genre=None, year=None, sort_by='title', sort_order='asc'):
+    """Search for tracks in the local database with filters and sorting"""
     db_path = os.path.join(DB_DIR, 'local_music.db')
     if not os.path.exists(db_path):
         return []
@@ -1774,15 +1785,71 @@ def search_local_tracks(query, limit=50):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    # Search in title, artist, and album
-    search_query = f"%{query}%"
-    cursor.execute('''
+    # Build the WHERE clause based on filters
+    where_conditions = []
+    params = []
+    
+    if query:
+        search_query = f"%{query}%"
+        where_conditions.append("(title LIKE ? OR artist LIKE ? OR album LIKE ?)")
+        params.extend([search_query, search_query, search_query])
+    
+    if genre:
+        where_conditions.append("genre = ?")
+        params.append(genre)
+    
+    if year:
+        # Handle decade filtering
+        if year == '2020s':
+            where_conditions.append("year >= 2020")
+        elif year == '2010s':
+            where_conditions.append("year >= 2010 AND year < 2020")
+        elif year == '2000s':
+            where_conditions.append("year >= 2000 AND year < 2010")
+        elif year == '1990s':
+            where_conditions.append("year >= 1990 AND year < 2000")
+        elif year == '1980s':
+            where_conditions.append("year >= 1980 AND year < 1990")
+        elif year == '1970s':
+            where_conditions.append("year >= 1970 AND year < 1980")
+        elif year == '1960s':
+            where_conditions.append("year >= 1960 AND year < 1970")
+        elif year == '1950s':
+            where_conditions.append("year >= 1950 AND year < 1960")
+    
+    # Build the WHERE clause
+    where_clause = " AND ".join(where_conditions) if where_conditions else "1=1"
+    
+    # Build the ORDER BY clause
+    sort_field_map = {
+        'title': 'title',
+        'artist': 'artist', 
+        'album': 'album',
+        'year': 'year',
+        'genre': 'genre',
+        'duration': 'duration'
+    }
+    
+    sort_field = sort_field_map.get(sort_by, 'title')
+    order_direction = 'DESC' if sort_order == 'desc' else 'ASC'
+    
+    # Handle NULL values in sorting
+    if sort_field in ['year', 'duration']:
+        order_clause = f"{sort_field} {order_direction}, title ASC"
+    else:
+        order_clause = f"{sort_field} {order_direction}"
+    
+    # Execute the query
+    sql = f'''
         SELECT id, title, artist, album, genre, year, duration, file_path
         FROM tracks 
-        WHERE title LIKE ? OR artist LIKE ? OR album LIKE ?
-        ORDER BY title, artist
+        WHERE {where_clause}
+        ORDER BY {order_clause}
         LIMIT ?
-    ''', (search_query, search_query, search_query, limit))
+    '''
+    
+    params.append(limit)
+    cursor.execute(sql, params)
     
     results = []
     for row in cursor.fetchall():
@@ -1804,7 +1871,7 @@ def get_local_track_stats():
     """Get statistics about the local music database"""
     db_path = os.path.join(DB_DIR, 'local_music.db')
     if not os.path.exists(db_path):
-        return {'total_tracks': 0, 'total_size': 0, 'genres': [], 'artists': 0}
+        return {'total_tracks': 0, 'total_size': 0, 'genres': [], 'artists': 0, 'genre_counts': {}}
     
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -1821,6 +1888,13 @@ def get_local_track_stats():
     cursor.execute('SELECT DISTINCT genre FROM tracks WHERE genre IS NOT NULL')
     genres = [row[0] for row in cursor.fetchall()]
     
+    # Genre counts
+    genre_counts = {}
+    for genre in genres:
+        cursor.execute('SELECT COUNT(*) FROM tracks WHERE genre = ?', (genre,))
+        count = cursor.fetchone()[0]
+        genre_counts[genre] = count
+    
     # Unique artists
     cursor.execute('SELECT COUNT(DISTINCT artist) FROM tracks WHERE artist IS NOT NULL')
     unique_artists = cursor.fetchone()[0]
@@ -1831,7 +1905,8 @@ def get_local_track_stats():
         'total_tracks': total_tracks,
         'total_size': total_size,
         'genres': genres,
-        'artists': unique_artists
+        'artists': unique_artists,
+        'genre_counts': genre_counts
     }
 
 @main_bp.route('/local-music')
@@ -1981,13 +2056,31 @@ def api_log_error():
 def api_search_local_tracks():
     """API endpoint to search local tracks"""
     data = request.get_json()
-    if not data or 'query' not in data:
-        return jsonify({'success': False, 'error': 'Search query is required'})
+    if not data:
+        return jsonify({'success': False, 'error': 'Request data is required'})
     
-    query = data['query']
+    # Get search parameters with defaults
+    query = data.get('query', '')
     limit = data.get('limit', 50)
+    genre = data.get('genre', None)
+    year = data.get('year', None)
+    sort_by = data.get('sort_by', 'title')
+    sort_order = data.get('sort_order', 'asc')
     
-    results = search_local_tracks(query, limit)
+    # Validate sort parameters
+    valid_sort_fields = ['title', 'artist', 'album', 'year', 'genre', 'duration']
+    valid_sort_orders = ['asc', 'desc']
+    
+    if sort_by not in valid_sort_fields:
+        sort_by = 'title'
+    if sort_order not in valid_sort_orders:
+        sort_order = 'asc'
+    
+    # If no query and no filters, return empty results
+    if not query and not genre and not year:
+        return jsonify({'success': True, 'results': []})
+    
+    results = search_local_tracks(query, limit, genre, year, sort_by, sort_order)
     return jsonify({'success': True, 'results': results})
 
 @main_bp.route('/api/local-music-stats')

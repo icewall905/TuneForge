@@ -169,10 +169,585 @@
             </div>
         </form>
     </div>
+    
+    <!-- Local Music Management Section -->
+    <div class="settings-section">
+        <h2>Local Music Management</h2>
+        <p class="section-description">Index and manage your local music collection</p>
+        
+        <!-- Statistics Dashboard -->
+        <div class="stats-grid">
+            <div class="stat-box">
+                <div class="stat-icon">🎵</div>
+                <div class="stat-content">
+                    <h3>Total Tracks</h3>
+                    <p class="stat-number" id="total-tracks">{{ local_stats.total_tracks if local_stats else 0 }}</p>
+                </div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-icon">💾</div>
+                <div class="stat-content">
+                    <h3>Total Size</h3>
+                    <p class="stat-number" id="total-size">{{ local_stats.total_size | filesizeformat if local_stats else '0 B' }}</p>
+                </div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-icon">👥</div>
+                <div class="stat-content">
+                    <h3>Unique Artists</h3>
+                    <p class="stat-number" id="unique-artists">{{ local_stats.artists if local_stats else 0 }}</p>
+                </div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-icon">🎭</div>
+                <div class="stat-content">
+                    <h3>Genres</h3>
+                    <p class="stat-number" id="genres-count">{{ local_stats.genres | length if local_stats and local_stats.genres else 0 }}</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Folder Scanning Section -->
+        <div class="folder-scanning-section">
+            <h3>Index Music Folder</h3>
+            <p>Select a folder to scan and index your music collection</p>
+            
+            <form id="localMusicForm" class="local-music-form">
+                <div class="form-group">
+                    <label for="local_music_folder">Default Music Folder Path:</label>
+                    <div class="folder-input-group">
+                        <input type="text" id="local_music_folder" name="local_music_folder" 
+                               value="{{ local_music_folder }}" 
+                               placeholder="Enter the full path to your music folder (e.g., /home/user/Music)" 
+                               class="folder-input">
+                        <button type="button" id="browse-folder-btn" class="browse-btn">Browse</button>
+                    </div>
+                    <p class="help-text">This path will be saved and recalled automatically. You can change it anytime.</p>
+                </div>
+                
+                <div class="form-group">
+                    <button type="button" id="scan-folder-btn" class="primary-button">Scan Folder</button>
+                    <button type="button" id="save-folder-btn" class="secondary-button">Save Path</button>
+                </div>
+            </form>
+            
+            <div id="scan-progress" class="scan-progress" style="display: none;">
+                <div class="progress-indicator">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                </div>
+                <p id="scan-status" class="scan-status">Scanning...</p>
+            </div>
+        </div>
+        
+        <!-- Genre Breakdown -->
+        <div class="genre-breakdown-section">
+            <h3>Genre Breakdown</h3>
+            <p>Explore the musical diversity in your collection</p>
+            <div id="genre-breakdown" class="genre-breakdown">
+                {% if local_stats and local_stats.genres %}
+                    {% for genre in local_stats.genres %}
+                    <span class="genre-tag">{{ genre }}</span>
+                    {% endfor %}
+                {% else %}
+                    <p class="no-genres">No genres found. Scan a music folder to populate this section.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
+<style>
+/* Local Music Management Styles */
+.section-description {
+    color: var(--text-secondary);
+    margin-bottom: 1.5rem;
+    font-size: 1rem;
+}
+
+/* Local Music Form */
+.local-music-form {
+    margin-bottom: 1.5rem;
+}
+
+.local-music-form .form-group {
+    margin-bottom: 1rem;
+}
+
+.local-music-form .form-group label {
+    display: block;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.help-text {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin: 0.5rem 0 0 0;
+    font-style: italic;
+}
+
+/* Message Display */
+.message {
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+
+.message.success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.message.error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+/* Statistics Grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.stat-box:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.stat-icon {
+    font-size: 1.8rem;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-color);
+    border-radius: 50%;
+    color: white;
+}
+
+.stat-content h3 {
+    color: var(--text-secondary);
+    margin: 0 0 0.25rem 0;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-number {
+    color: var(--text-primary);
+    font-size: 1.4rem;
+    font-weight: bold;
+    margin: 0;
+}
+
+/* Folder Scanning Section */
+.folder-scanning-section {
+    margin-bottom: 2rem;
+}
+
+.folder-scanning-section h3 {
+    color: var(--text-primary);
+    margin: 0 0 0.5rem 0;
+    font-size: 1.2rem;
+}
+
+.folder-scanning-section p {
+    color: var(--text-secondary);
+    margin: 0 0 1rem 0;
+    font-size: 0.9rem;
+}
+
+.folder-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.folder-help {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin: 0.25rem 0;
+}
+
+.folder-help p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
+.folder-input-group {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.folder-input {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.folder-input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(var(--accent-color-rgb), 0.1);
+}
+
+.browse-btn {
+    padding: 0.75rem 1rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.browse-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-color);
+}
+
+/* Progress Indicator */
+.scan-progress {
+    margin-top: 1rem;
+    text-align: center;
+}
+
+.progress-indicator {
+    margin-bottom: 1rem;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 6px;
+    background: var(--border-color);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    width: 100%;
+    height: 100%;
+    background: var(--accent-color);
+    animation: progress-animation 2s ease-in-out infinite;
+}
+
+@keyframes progress-animation {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.scan-status {
+    color: var(--text-secondary);
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+/* Genre Breakdown */
+.genre-breakdown-section {
+    margin-bottom: 2rem;
+}
+
+.genre-breakdown-section h3 {
+    color: var(--text-primary);
+    margin: 0 0 0.5rem 0;
+    font-size: 1.2rem;
+}
+
+.genre-breakdown-section p {
+    color: var(--text-secondary);
+    margin: 0 0 1rem 0;
+    font-size: 0.9rem;
+}
+
+.genre-breakdown {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.genre-tag {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    padding: 0.4rem 0.8rem;
+    border-radius: 16px;
+    font-size: 0.8rem;
+    border: 1px solid var(--border-color);
+    transition: all 0.2s;
+}
+
+.genre-tag:hover {
+    background: var(--accent-color);
+    color: white;
+    border-color: var(--accent-color);
+    transform: translateY(-1px);
+}
+
+.no-genres {
+    color: var(--text-muted);
+    font-style: italic;
+    margin: 0;
+}
+
+/* File Browser Modal */
+.file-browser-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.file-browser-modal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    width: 90%;
+    max-width: 700px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+}
+
+.file-browser-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.file-browser-header h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 1.1rem;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.close-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.file-browser-content {
+    flex: 1;
+    padding: 1rem;
+    overflow-y: auto;
+}
+
+.current-path {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    word-break: break-all;
+}
+
+.file-browser-navigation {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.nav-btn {
+    padding: 0.4rem 0.8rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.2s;
+}
+
+.nav-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: var(--accent-color);
+}
+
+.nav-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.file-browser-list {
+    min-height: 250px;
+}
+
+.loading, .error, .empty-dir {
+    text-align: center;
+    padding: 1.5rem;
+    color: var(--text-secondary);
+}
+
+.error {
+    color: #dc3545;
+}
+
+.directory-item, .file-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.directory-item:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-color);
+}
+
+.directory-item.parent-dir {
+    background: var(--bg-primary);
+    border-color: var(--border-color);
+}
+
+.dir-icon, .file-icon {
+    font-size: 1rem;
+    width: 20px;
+    text-align: center;
+}
+
+.dir-name, .file-name {
+    flex: 1;
+    color: var(--text-primary);
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+.file-size {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.permission-warning {
+    color: #ffc107;
+    font-size: 0.9rem;
+}
+
+.files-section {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.files-section h4 {
+    margin: 0 0 0.5rem 0;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.performance-info {
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+.performance-info p {
+    margin: 0;
+    color: var(--text-secondary);
+    line-height: 1.3;
+}
+
+.performance-info strong {
+    color: var(--text-primary);
+}
+
+.performance-info em {
+    color: var(--accent-color);
+    font-style: italic;
+}
+
+.file-browser-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .folder-input-group {
+        flex-direction: column;
+    }
+    
+    .file-browser-modal {
+        width: 95%;
+        margin: 1rem;
+    }
+}
+</style>
+
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         // Function to toggle platform settings visibility
@@ -237,5 +812,332 @@
             });
         });
     });
+</script>
+
+<!-- Local Music Management JavaScript -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const scanFolderBtn = document.getElementById('scan-folder-btn');
+    const browseFolderBtn = document.getElementById('browse-folder-btn');
+    const saveFolderBtn = document.getElementById('save-folder-btn');
+    const scanProgress = document.getElementById('scan-progress');
+    const scanStatus = document.getElementById('scan-status');
+    const musicFolderInput = document.getElementById('local_music_folder');
+
+    // File browser functionality
+    browseFolderBtn.addEventListener('click', function() {
+        console.log('Browse button clicked - opening file browser');
+        openFileBrowser();
+    });
+
+    // Save folder path functionality
+    saveFolderBtn.addEventListener('click', async function() {
+        const folderPath = musicFolderInput.value.trim();
+        if (!folderPath) {
+            alert('Please enter a folder path first');
+            return;
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('local_music_folder', folderPath);
+            
+            const response = await fetch('/settings', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.ok) {
+                // Show success message
+                showMessage('Folder path saved successfully!', 'success');
+            } else {
+                showMessage('Error saving folder path', 'error');
+            }
+        } catch (error) {
+            console.error('Error saving folder path:', error);
+            showMessage('Error saving folder path: ' + error.message, 'error');
+        }
+    });
+
+    // Show message helper function
+    function showMessage(message, type) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${type}`;
+        messageDiv.textContent = message;
+        
+        // Insert it at the top of the local music section
+        const localMusicSection = document.querySelector('.settings-section:last-child');
+        localMusicSection.insertBefore(messageDiv, localMusicSection.firstChild);
+        
+        // Remove after a few seconds
+        setTimeout(() => {
+            messageDiv.remove();
+        }, 3000);
+    }
+
+    // Open the file browser modal
+    function openFileBrowser() {
+        const modal = document.createElement('div');
+        modal.className = 'file-browser-overlay';
+        modal.innerHTML = `
+            <div class="file-browser-modal">
+                <div class="file-browser-header">
+                    <h3>Select Music Folder</h3>
+                    <button class="close-btn" onclick="this.closest('.file-browser-overlay').remove()">&times;</button>
+                </div>
+                <div class="file-browser-content">
+                    <div class="current-path">
+                        <span id="current-path-display">Loading...</span>
+                    </div>
+                    <div class="file-browser-navigation">
+                        <button id="parent-dir-btn" class="nav-btn" disabled>↑ Parent Directory</button>
+                        <button id="home-dir-btn" class="nav-btn">🏠 Home</button>
+                    </div>
+                    <div class="file-browser-list" id="file-browser-list">
+                        <div class="loading">Loading directory contents...</div>
+                    </div>
+                </div>
+                <div class="file-browser-footer">
+                    <button id="select-current-path" class="primary-button" disabled>Select This Folder</button>
+                    <button class="secondary-button" onclick="this.closest('.file-browser-overlay').remove()">Cancel</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Load initial directory (home directory)
+        loadDirectory('');
+        
+        // Set up event listeners
+        setupFileBrowserEvents(modal);
+    }
+
+    // Set up file browser event listeners
+    function setupFileBrowserEvents(modal) {
+        // Parent directory button
+        modal.querySelector('#parent-dir-btn').addEventListener('click', function() {
+            const currentPath = modal.querySelector('#current-path-display').textContent;
+            if (currentPath && currentPath !== '/') {
+                const parentPath = currentPath.split('/').slice(0, -1).join('/') || '/';
+                loadDirectory(parentPath);
+            }
+        });
+        
+        // Home directory button
+        modal.querySelector('#home-dir-btn').addEventListener('click', function() {
+            loadDirectory('');
+        });
+        
+        // Select current path button
+        modal.querySelector('#select-current-path').addEventListener('click', function() {
+            const currentPath = modal.querySelector('#current-path-display').textContent;
+            if (currentPath) {
+                musicFolderInput.value = currentPath;
+                modal.remove();
+            }
+        });
+    }
+
+    // Load directory contents
+    function loadDirectory(path) {
+        const modal = document.querySelector('.file-browser-overlay');
+        if (!modal) return;
+        
+        const listElement = modal.querySelector('#file-browser-list');
+        const currentPathDisplay = modal.querySelector('#current-path-display');
+        const parentDirBtn = modal.querySelector('#parent-dir-btn');
+        const selectBtn = modal.querySelector('#select-current-path');
+        
+        // Show loading state
+        listElement.innerHTML = '<div class="loading">Loading directory contents...</div>';
+        
+        // Make API call to browse path
+        fetch(`/api/browse-path?path=${encodeURIComponent(path)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    listElement.innerHTML = `<div class="error">Error: ${data.error}</div>`;
+                    return;
+                }
+                
+                // Update current path display
+                currentPathDisplay.textContent = data.current_path;
+                
+                // Enable/disable parent directory button
+                parentDirBtn.disabled = !data.parent_path;
+                
+                // Enable select button
+                selectBtn.disabled = false;
+                
+                // Build directory listing
+                let html = '';
+                
+                // Add parent directory if available
+                if (data.parent_path) {
+                    html += `<div class="directory-item parent-dir" data-path="${data.parent_path}">
+                        <span class="dir-icon">📁</span>
+                        <span class="dir-name">.. (Parent Directory)</span>
+                    </div>`;
+                }
+                
+                // Add directories
+                data.directories.forEach(dir => {
+                    html += `<div class="directory-item" data-path="${dir.path}">
+                        <span class="dir-icon">📁</span>
+                        <span class="dir-name">${dir.name}</span>
+                        ${!dir.readable ? '<span class="permission-warning">⚠️</span>' : ''}
+                    </div>`;
+                });
+                
+                // Add files (if any)
+                if (data.files.length > 0) {
+                    html += '<div class="files-section"><h4>Audio Files Found:</h4>';
+                    data.files.forEach(file => {
+                        const size = formatFileSize(file.size);
+                        html += `<div class="file-item">
+                            <span class="file-icon">🎵</span>
+                            <span class="file-name">${file.name}</span>
+                            <span class="file-size">${size}</span>
+                        </div>`;
+                    });
+                    html += '</div>';
+                }
+                
+                // Show performance info
+                if (data.performance_info) {
+                    const perf = data.performance_info;
+                    html += '<div class="performance-info">';
+                    html += `<p><strong>Directory Summary:</strong> ${perf.directories_count} folders, ${perf.files_scanned} audio files`;
+                    if (perf.note) {
+                        html += `<br><em>${perf.note}</em>`;
+                    }
+                    html += '</p>';
+                    html += '</div>';
+                }
+                
+                // Show message if no directories
+                if (data.directories.length === 0 && data.files.length === 0) {
+                    html += '<div class="empty-dir">This directory is empty</div>';
+                }
+                
+                listElement.innerHTML = html;
+                
+                // Add click handlers for directories
+                listElement.querySelectorAll('.directory-item').forEach(item => {
+                    item.addEventListener('click', function() {
+                        const dirPath = this.dataset.path;
+                        if (dirPath) {
+                            loadDirectory(dirPath);
+                        }
+                    });
+                });
+            })
+            .catch(error => {
+                console.error('Error loading directory:', error);
+                listElement.innerHTML = '<div class="error">Error loading directory contents</div>';
+            });
+    }
+
+    // Helper function to format file sizes
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    // Enable scan button when there's text in the input
+    musicFolderInput.addEventListener('input', function() {
+        scanFolderBtn.disabled = !this.value.trim();
+        saveFolderBtn.disabled = !this.value.trim();
+    });
+
+    // Scan folder functionality
+    scanFolderBtn.addEventListener('click', async function() {
+        const folderPath = musicFolderInput.value.trim();
+        if (!folderPath) {
+            alert('Please select a folder first');
+            return;
+        }
+
+        scanFolderBtn.disabled = true;
+        browseFolderBtn.disabled = true;
+        saveFolderBtn.disabled = true;
+        scanProgress.style.display = 'block';
+        scanStatus.textContent = 'Starting scan...';
+
+        try {
+            const response = await fetch('/api/scan-music-folder', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ folder_path: folderPath })
+            });
+
+            const result = await response.json();
+            
+            if (result.success && result.scan_id) {
+                // Add scan to global status manager
+                window.globalStatusManager.addScan(result.scan_id, folderPath);
+                scanStatus.textContent = 'Scan started - check sidebar for progress';
+                scanFolderBtn.disabled = false;
+                browseFolderBtn.disabled = false;
+                saveFolderBtn.disabled = false;
+            } else {
+                scanStatus.textContent = `Error: ${result.error || 'Unknown error'}`;
+                scanFolderBtn.disabled = false;
+                browseFolderBtn.disabled = false;
+                saveFolderBtn.disabled = false;
+            }
+        } catch (error) {
+            scanStatus.textContent = `Error: ${error.message}`;
+            scanFolderBtn.disabled = false;
+            browseFolderBtn.disabled = false;
+            saveFolderBtn.disabled = false;
+        }
+    });
+
+    // Refresh stats after scan completion
+    function refreshStats() {
+        fetch('/api/local-music-stats')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateStatsDisplay(data.stats);
+                }
+            })
+            .catch(error => {
+                console.error('Error refreshing stats:', error);
+            });
+    }
+
+    function updateStatsDisplay(stats) {
+        document.getElementById('total-tracks').textContent = stats.total_tracks || 0;
+        document.getElementById('total-size').textContent = formatFileSize(stats.total_size || 0);
+        document.getElementById('unique-artists').textContent = stats.artists || 0;
+        document.getElementById('genres-count').textContent = stats.genres ? stats.genres.length : 0;
+        
+        // Update genre breakdown
+        const genreBreakdown = document.getElementById('genre-breakdown');
+        if (stats.genres && stats.genres.length > 0) {
+            genreBreakdown.innerHTML = stats.genres.map(genre => 
+                `<span class="genre-tag">${genre}</span>`
+            ).join('');
+        } else {
+            genreBreakdown.innerHTML = '<p class="no-genres">No genres found. Scan a music folder to populate this section.</p>';
+        }
+    }
+
+    // Initial stats load
+    refreshStats();
+    
+    // Enable/disable buttons based on initial state
+    const initialPath = musicFolderInput.value.trim();
+    scanFolderBtn.disabled = !initialPath;
+    saveFolderBtn.disabled = !initialPath;
+});
 </script>
 {% endblock %}
