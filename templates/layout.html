@@ -80,29 +80,72 @@
     
     <!-- Global Status Management Script -->
     <script>
-    // Global status management
+    // Global status management with robust persistence
     window.globalStatusManager = {
         activeScans: new Map(),
         progressPanel: null,
         progressContent: null,
+        pollIntervals: new Map(),
         
         init() {
             this.progressPanel = document.getElementById('floating-progress');
             this.progressContent = document.getElementById('progress-content');
             
+            // Restore state from localStorage
+            this.restoreState();
+            
             // Start background polling
             this.startBackgroundPolling();
+            
+            // Ensure progress panel is visible if there are active tasks
+            this.ensureVisibility();
+            
+            // Set up page visibility and focus handlers
+            this.setupEventHandlers();
+        },
+        
+        // Persistent state management
+        saveState() {
+            const state = {
+                activeScans: Array.from(this.activeScans.entries()),
+                timestamp: Date.now()
+            };
+            localStorage.setItem('globalStatusManagerState', JSON.stringify(state));
+        },
+        
+        restoreState() {
+            try {
+                const savedState = localStorage.getItem('globalStatusManagerState');
+                if (savedState) {
+                    const state = JSON.parse(savedState);
+                    const now = Date.now();
+                    
+                    // Only restore if state is less than 1 hour old
+                    if (now - state.timestamp < 3600000) {
+                        this.activeScans = new Map(state.activeScans);
+                        console.log(`Restored ${this.activeScans.size} active scans from localStorage`);
+                    } else {
+                        console.log('Saved state too old, starting fresh');
+                        localStorage.removeItem('globalStatusManagerState');
+                    }
+                }
+            } catch (error) {
+                console.error('Error restoring state:', error);
+                localStorage.removeItem('globalStatusManagerState');
+            }
         },
         
         showPanel() {
             if (this.progressPanel) {
                 this.progressPanel.style.display = 'block';
+                this.saveState();
             }
         },
         
         hidePanel() {
             if (this.progressPanel) {
                 this.progressPanel.style.display = 'none';
+                this.saveState();
             }
         },
         
@@ -121,6 +164,7 @@
             this.showPanel();
             this.updateDisplay();
             this.startPolling(scanId);
+            this.saveState();
         },
         
         updateScan(scanId, data) {
@@ -128,12 +172,15 @@
             if (scan) {
                 Object.assign(scan, data);
                 this.updateDisplay();
+                this.saveState();
             }
         },
         
         removeScan(scanId) {
             this.activeScans.delete(scanId);
+            this.pollIntervals.delete(scanId);
             this.updateDisplay();
+            this.saveState();
             
             if (this.activeScans.size === 0) {
                 this.hidePanel();
@@ -153,18 +200,35 @@
                 const elapsed = Math.round((Date.now() - scan.startTime) / 1000);
                 const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.round(elapsed/60)}m ${elapsed%60}s`;
                 
+                // Handle counting phase differently
+                let progressBar, progressInfo, progressText;
+                
+                if (scan.status === 'counting') {
+                    // Show counting progress with a different style
+                    progressBar = `<div class="progress-bar counting">
+                        <div class="progress-fill counting" style="width: ${scan.totalFiles > 0 ? Math.round((scan.processedFiles / scan.totalFiles) * 100) : 0}%"></div>
+                    </div>`;
+                    progressInfo = `<span class="progress-counts">${scan.processedFiles} found</span>`;
+                    progressText = scan.totalFiles > 0 ? `${Math.round((scan.processedFiles / scan.totalFiles) * 100)}%` : 'Counting...';
+                } else {
+                    // Normal scanning progress
+                    progressBar = `<div class="progress-bar">
+                        <div class="progress-fill" style="width: ${scan.progress}%"></div>
+                    </div>`;
+                    progressInfo = `<span class="progress-counts">${scan.processedFiles}/${scan.totalFiles}</span>`;
+                    progressText = `${scan.progress}%`;
+                }
+                
                 html += `
                     <div class="progress-indicator">
                         <div class="progress-header">
-                            <span class="progress-icon">🔄</span>
+                            <span class="progress-icon">${scan.status === 'counting' ? '🔍' : '🔄'}</span>
                             <span class="progress-folder">${scan.folder.split('/').pop()}</span>
                         </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: ${scan.progress}%"></div>
-                        </div>
+                        ${progressBar}
                         <div class="progress-info">
-                            <span class="progress-text">${scan.progress}%</span>
-                            <span class="progress-counts">${scan.processedFiles}/${scan.totalFiles}</span>
+                            <span class="progress-text">${progressText}</span>
+                            ${progressInfo}
                         </div>
                         <div class="progress-current">${scan.currentFile || 'Starting...'}</div>
                     </div>
@@ -176,6 +240,11 @@
         },
         
         startPolling(scanId) {
+            // Clear any existing interval
+            if (this.pollIntervals.has(scanId)) {
+                clearInterval(this.pollIntervals.get(scanId));
+            }
+            
             const pollInterval = setInterval(async () => {
                 try {
                     const response = await fetch(`/api/scan-progress/${scanId}`);
@@ -184,6 +253,7 @@
                     if (progress.error) {
                         this.updateScan(scanId, { status: 'error', currentFile: `Error: ${progress.error}` });
                         clearInterval(pollInterval);
+                        this.pollIntervals.delete(scanId);
                         setTimeout(() => this.removeScan(scanId), 5000);
                         return;
                     }
@@ -195,6 +265,7 @@
                             currentFile: 'Completed!'
                         });
                         clearInterval(pollInterval);
+                        this.pollIntervals.delete(scanId);
                         setTimeout(() => this.removeScan(scanId), 5000);
                     } else if (progress.status === 'error') {
                         this.updateScan(scanId, { 
@@ -202,6 +273,7 @@
                             currentFile: `Failed: ${progress.error}` 
                         });
                         clearInterval(pollInterval);
+                        this.pollIntervals.delete(scanId);
                         setTimeout(() => this.removeScan(scanId), 5000);
                     } else {
                         // Update progress
@@ -222,27 +294,56 @@
                     console.error('Error polling scan progress:', error);
                 }
             }, 2000); // Poll every 2 seconds
+            
+            this.pollIntervals.set(scanId, pollInterval);
+        },
+        
+        ensureVisibility() {
+            if (this.activeScans.size > 0) {
+                this.showPanel();
+                this.updateDisplay();
+            }
+        },
+        
+        setupEventHandlers() {
+            // Page visibility change
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) {
+                    this.ensureVisibility();
+                }
+            });
+            
+            // Page focus
+            window.addEventListener('focus', () => {
+                this.ensureVisibility();
+            });
+            
+            // Page load
+            window.addEventListener('load', () => {
+                this.ensureVisibility();
+            });
+            
+            // DOM ready
+            document.addEventListener('DOMContentLoaded', () => {
+                this.ensureVisibility();
+            });
         },
         
         startBackgroundPolling() {
-            // Keep the status panel alive and check for any orphaned scans
+            // Persistent background monitoring
             setInterval(() => {
-                if (this.activeScans.size > 0) {
-                    this.showPanel();
-                }
-            }, 5000); // Check every 5 seconds
+                this.ensureVisibility();
+            }, 3000); // Check every 3 seconds
             
-            // Also restore panel state when page becomes visible
-            document.addEventListener('visibilitychange', () => {
-                if (!document.hidden) {
-                    this.restorePanelState();
+            // Restart polling for any scans that might have lost their intervals
+            setInterval(() => {
+                for (const [scanId, scan] of this.activeScans) {
+                    if (!this.pollIntervals.has(scanId) && scan.status !== 'completed' && scan.status !== 'error') {
+                        console.log(`Restarting polling for scan ${scanId}`);
+                        this.startPolling(scanId);
+                    }
                 }
-            });
-            
-            // Restore panel state when returning to the page
-            window.addEventListener('focus', () => {
-                this.restorePanelState();
-            });
+            }, 10000); // Check every 10 seconds
         }
     };
 

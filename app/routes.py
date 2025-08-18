@@ -1430,22 +1430,46 @@ def scan_music_folder_with_progress(folder_path, scan_id):
     stats = {'total_files': 0, 'indexed': 0, 'errors': 0, 'skipped': 0}
     
     try:
-        # First pass: count total files
+        # First pass: count total files with live progress updates
         progress_tracker['status'] = 'counting'
-        progress_tracker['current_file'] = 'Counting files...'
+        progress_tracker['current_file'] = 'Counting all files...'
+        progress_tracker['files_processed'] = 0
+        progress_tracker['total_files'] = 0
         
-        total_files = 0
+        # Count all files first to get total with live updates
+        all_files = 0
+        music_files = 0
+        files_checked = 0
+        
         for root, dirs, files in os.walk(folder_path):
+            all_files += len(files)
             for file in files:
+                files_checked += 1
                 file_ext = os.path.splitext(file)[1].lower()
                 if file_ext in supported_extensions:
-                    total_files += 1
+                    music_files += 1
+                
+                # Update counting progress every 1000 files or every file if < 1000
+                if files_checked % max(1, min(1000, max(1, files_checked // 20))) == 0:
+                    progress_tracker['files_processed'] = files_checked
+                    progress_tracker['current_file'] = f'Counting... {files_checked} files checked, {music_files} music files found'
         
-        progress_tracker['total_files'] = total_files
+        # Update stats and progress tracker
+        stats['total_files'] = music_files
+        progress_tracker['total_files'] = music_files
+        progress_tracker['current_file'] = f'Found {music_files} music files out of {all_files} total files'
+        progress_tracker['files_processed'] = 0  # Reset for scanning phase
         progress_tracker['status'] = 'scanning'
         
+        debug_log(f"Starting scanning phase: {music_files} music files to process", "INFO")
+        
         # Second pass: process files with progress updates
+        processed_count = 0
+        progress_tracker['current_file'] = 'Starting to process music files...'
+        debug_log(f"Entering scanning loop for {music_files} music files", "INFO")
+        
         for root, dirs, files in os.walk(folder_path):
+            debug_log(f"Processing directory: {root} with {len(files)} files", "INFO")
             for file in files:
                 file_path = os.path.join(root, file)
                 file_ext = os.path.splitext(file)[1].lower()
@@ -1454,9 +1478,14 @@ def scan_music_folder_with_progress(folder_path, scan_id):
                     stats['skipped'] += 1
                     continue
                 
-                stats['total_files'] += 1
-                progress_tracker['files_processed'] = stats['total_files']
-                progress_tracker['current_file'] = os.path.basename(file_path)
+                processed_count += 1
+                progress_tracker['files_processed'] = processed_count
+                progress_tracker['current_file'] = f'Processing {processed_count}/{music_files}: {os.path.basename(file_path)}'
+                
+                # Update progress every 100 files for good balance
+                if processed_count % 100 == 0:
+                    debug_log(f"Processed {processed_count}/{music_files} files", "INFO")
+                    progress_tracker['files_processed'] = processed_count
                 
                 try:
                     # Extract metadata using mutagen
@@ -1502,6 +1531,15 @@ def scan_music_folder_with_progress(folder_path, scan_id):
                     debug_log(f"Error indexing {file_path}: {str(e)}", "ERROR")
                     stats['errors'] += 1
                     progress_tracker['errors'] = stats['errors']
+                
+                # Update progress every 100 files for good balance
+                if processed_count % 100 == 0:
+                    progress_tracker['files_processed'] = processed_count
+        
+        # Final progress update
+        progress_tracker['files_processed'] = processed_count
+        progress_tracker['current_file'] = f'Completed! Processed {processed_count} music files'
+        debug_log(f"Scanning completed: {processed_count} files processed, {stats['indexed']} indexed, {stats['errors']} errors", "INFO")
         
         conn.commit()
         conn.close()
