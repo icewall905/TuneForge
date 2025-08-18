@@ -16,6 +16,7 @@ from pathlib import Path
 import mutagen
 from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC
+from collections import OrderedDict
 
 # --- Logger Setup ---
 LOG_DIR = 'logs'  # This will be relative to the project root (TuneForge/)
@@ -54,6 +55,14 @@ if not handler_exists:
 # --- Global Debug Flags ---
 DEBUG_ENABLED = True  # Master debug switch
 DEBUG_OLLAMA_RESPONSE = False  # Specific for Ollama response logging, can also be set in config.ini
+
+# --- Navidrome search caching and HTTP session ---
+NAVIDROME_SEARCH_CACHE = OrderedDict()
+NAVIDROME_CACHE_MAX_SIZE = 300
+try:
+    NAVIDROME_SESSION = requests.Session()
+except Exception:
+    NAVIDROME_SESSION = requests
 
 main_bp = Blueprint('main', __name__)
 
@@ -367,9 +376,15 @@ def search_track_in_navidrome(query, navidrome_url, username, password):
         'u': username, 'p': password, 'v': '1.16.1', 'c': 'TuneForge', 'f': 'json',
         'query': query, 'songCount': 100, 'artistCount': 0, 'albumCount': 0
     }
-    # debug_log(f"Navidrome: Searching for query: '{query}'", "DEBUG")
+    # Build a cache key
+    cache_key = (url, tuple(sorted(params.items())))
+    if cache_key in NAVIDROME_SEARCH_CACHE:
+        cached = NAVIDROME_SEARCH_CACHE.pop(cache_key)
+        NAVIDROME_SEARCH_CACHE[cache_key] = cached  # move to end (LRU)
+        return cached
     try:
-        response = requests.get(url, params=params, timeout=15)
+        # Use shared session and a short timeout to avoid long stalls
+        response = NAVIDROME_SESSION.get(url, params=params, timeout=4)
         response.raise_for_status()
         data = response.json()
         
@@ -383,6 +398,10 @@ def search_track_in_navidrome(query, navidrome_url, username, password):
                     'artist': song.get('artist', 'Unknown Artist'), 'album': song.get('album', 'Unknown Album'),
                     'source': 'navidrome'
                 })
+            # Update LRU cache
+            NAVIDROME_SEARCH_CACHE[cache_key] = tracks
+            if len(NAVIDROME_SEARCH_CACHE) > NAVIDROME_CACHE_MAX_SIZE:
+                NAVIDROME_SEARCH_CACHE.popitem(last=False)
             return tracks
         else:
             # error_message = data.get('subsonic-response', {}).get('error', {}).get('message')
@@ -513,100 +532,109 @@ def search_tracks_in_navidrome(navidrome_url, username, password, ollama_suggest
         return []
     
     newly_matched_for_batch = []
-    
+
+    # Build pending list skipping already matched
+    pending = []
     for suggested_track in ollama_suggested_tracks:
         title, artist = suggested_track.get("title"), suggested_track.get("artist")
-        if not title or not artist: continue
-
+        if not title or not artist:
+            continue
         track_key = (title.lower(), artist.lower())
-        if track_key in final_unique_matched_tracks_map: continue # Already found
+        if track_key in final_unique_matched_tracks_map:
+            continue
+        pending.append((track_key, suggested_track, title, artist))
 
-        debug_log(f"Navidrome: Searching for '{title}' by '{artist}'", "INFO")
-        
-        # Use more targeted search strategies (quoted first to bias exact phrase matches)
-        safe_title = title.replace('"', '\\"')
-        safe_artist = artist.replace('"', '\\"')
-        search_strategies = [
-            f'"{safe_title}" "{safe_artist}"',  # Exact phrases
-            f'"{safe_artist}" "{safe_title}"',
-            f"{artist} {title}",                   # Unquoted
-            f"{title} {artist}",
-            title,                                  # Title only fallback
-        ]
-        
-        best_match = None
-        best_similarity = 0.0
-        
-        for search_query in search_strategies:
-            found_navidrome_tracks = search_track_in_navidrome(search_query, navidrome_url, username, password)
+    if not pending:
+        return newly_matched_for_batch
+
+    # Concurrency control from config
+    try:
+        max_workers = int(get_config_value('APP', 'NavidromeMaxConcurrency', '10'))
+    except Exception:
+        max_workers = 10
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def build_query(t, a):
+        st = t.replace('"', '\\"')
+        sa = a.replace('"', '\\"')
+        return f'"{st}" "{sa}"'
+
+    def evaluate_results(title, artist, results):
+        best = None
+        best_score = 0.0
+        for nt in results[:20]:
+            if is_unwanted_version(nt.get('title'), nt.get('album')):
+                continue
+            ts = calculate_similarity(title, nt['title'])
+            ars = calculate_similarity(artist, nt['artist'])
+            combined = (ts * 0.7) + (ars * 0.3)
+            if combined > best_score and combined >= 0.82 and ts >= 0.88 and ars >= 0.70:
+                best = nt
+                best_score = combined
+                if combined >= 0.92 and ts >= 0.92:
+                    break
+        return best
+
+    # Submit primary searches concurrently
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_item = {}
+        for track_key, suggested_track, title, artist in pending:
+            q = build_query(title, artist)
+            future = executor.submit(search_track_in_navidrome, q, navidrome_url, username, password)
+            future_to_item[future] = (track_key, suggested_track, title, artist)
+
+        # Process as results arrive
+        # Optional: determine target to allow early stop
+        target_songs = None
+        if hasattr(api_generate_playlist, 'playlist_progress'):
+            for _pid, _p in api_generate_playlist.playlist_progress.items():
+                if _p.get('status') in ['starting', 'progress']:
+                    target_songs = _p.get('target_songs')
+                    break
+
+        for future in as_completed(future_to_item):
+            track_key, suggested_track, title, artist = future_to_item[future]
+            try:
+                found_navidrome_tracks = future.result() or []
+            except Exception:
+                found_navidrome_tracks = []
+
             if found_navidrome_tracks:
-                debug_log(f"Navidrome: Strategy '{search_query}' found {len(found_navidrome_tracks)} tracks", "DEBUG")
-                
-                # Evaluate each track for similarity
-                for nt in found_navidrome_tracks:
-                    # Avoid obviously unwanted versions (live/remaster/etc.)
-                    if is_unwanted_version(nt.get('title'), nt.get('album')):
-                        debug_log(f"Navidrome: Skipping unwanted version: '{nt.get('title')}' ({nt.get('album')})", "DEBUG")
-                        continue
-                    # Calculate similarity scores
-                    title_similarity = calculate_similarity(title, nt['title'])
-                    artist_similarity = calculate_similarity(artist, nt['artist'])
-                    
-                    # Combined similarity (weighted; prioritize title slightly more)
-                    combined_similarity = (title_similarity * 0.7) + (artist_similarity * 0.3)
-                    
-                    debug_log(f"Navidrome: Evaluating '{nt['title']}' by '{nt['artist']}' (title: {title_similarity:.1%}, artist: {artist_similarity:.1%}, combined: {combined_similarity:.1%})", "DEBUG")
-                    
-                    # Accept if combined similarity and per-field thresholds are high enough
-                    # - Title should be very close
-                    # - Artist allows minor typos (blink-121 vs blink-182)
-                    if combined_similarity >= 0.82 and title_similarity >= 0.88 and artist_similarity >= 0.70:
-                        if combined_similarity > best_similarity:
-                            best_match = nt
-                            best_similarity = combined_similarity
-                            debug_log(f"Navidrome: 🎯 New best match: '{nt['title']}' by '{nt['artist']}' (similarity: {combined_similarity:.1%})", "DEBUG")
-                
-                # If we found a good match with this strategy, break
-                if best_match and best_similarity >= 0.9:
+                best_match = evaluate_results(title, artist, found_navidrome_tracks)
+            else:
+                best_match = None
+
+            if best_match:
+                match_details = {
+                    'id': best_match['id'], 'title': best_match['title'], 'artist': best_match['artist'],
+                    'album': best_match['album'], 'source': 'navidrome',
+                    'original_suggestion': {'title': title, 'artist': artist, 'album': suggested_track.get('album')}
+                }
+                final_unique_matched_tracks_map[track_key] = match_details
+                newly_matched_for_batch.append(match_details)
+
+                # Update progress for individual track match
+                if hasattr(api_generate_playlist, 'playlist_progress'):
+                    for playlist_id, progress in api_generate_playlist.playlist_progress.items():
+                        if progress['status'] in ['starting', 'progress']:
+                            progress.update({
+                                'current_status': f'Matched: {best_match["artist"]} - {best_match["title"]}. Currently at tracks {len(final_unique_matched_tracks_map)}/{progress.get("target_songs", "?")}.',
+                                'current_track': f'{best_match["artist"]} - {best_match["title"]}',
+                                'tracks_found': len(final_unique_matched_tracks_map)
+                            })
+                            break
+
+                # Early stop if we reached target
+                if target_songs and len(final_unique_matched_tracks_map) >= int(target_songs):
+                    try:
+                        executor.shutdown(wait=False, cancel_futures=True)
+                    except Exception:
+                        pass
                     break
             else:
-                debug_log(f"Navidrome: Strategy '{search_query}' found no tracks", "DEBUG")
-        
-        if best_match:
-            match_details = {
-                'id': best_match['id'], 'title': best_match['title'], 'artist': best_match['artist'],
-                'album': best_match['album'], 'source': 'navidrome', 
-                'original_suggestion': {'title': title, 'artist': artist, 'album': suggested_track.get("album")}
-            }
-            final_unique_matched_tracks_map[track_key] = match_details
-            newly_matched_for_batch.append(match_details)
-            
-            # Log the match with similarity details
-            title_sim = calculate_similarity(title, best_match['title'])
-            artist_sim = calculate_similarity(artist, best_match['artist'])
-            combined_sim = (title_sim * 0.6) + (artist_sim * 0.4)
-            
-            if combined_sim >= 0.95:
-                debug_log(f"Navidrome: ✅ EXCELLENT MATCH: '{best_match['title']}' by '{best_match['artist']}' for suggestion '{title}' by '{artist}' (similarity: {combined_sim:.1%})", "INFO")
-            elif combined_sim >= 0.9:
-                debug_log(f"Navidrome: ✅ GOOD MATCH: '{best_match['title']}' by '{best_match['artist']}' for suggestion '{title}' by '{artist}' (similarity: {combined_sim:.1%})", "INFO")
-            else:
-                debug_log(f"Navidrome: ⚠️ ACCEPTABLE MATCH: '{best_match['title']}' by '{best_match['artist']}' for suggestion '{title}' by '{artist}' (similarity: {combined_sim:.1%})", "WARN")
-            
-            # Update progress for individual track match
-            if hasattr(api_generate_playlist, 'playlist_progress'):
-                # Find the current playlist ID from the progress tracking
-                for playlist_id, progress in api_generate_playlist.playlist_progress.items():
-                    if progress['status'] in ['starting', 'progress']:
-                        progress.update({
-                            'current_status': f'Matched: {best_match["artist"]} - {best_match["title"]}. Currently at tracks {len(final_unique_matched_tracks_map)}/{progress.get("target_songs", "?")}.',
-                            'current_track': f'{best_match["artist"]} - {best_match["title"]}',
-                            'tracks_found': len(final_unique_matched_tracks_map)
-                        })
-                        break
-        else:
-            debug_log(f"Navidrome: ❌ No suitable match found for '{title}' by '{artist}' after trying all search strategies", "WARN")
-            
+                debug_log(f"Navidrome: ❌ No suitable match found for '{title}' by '{artist}'", "DEBUG")
+
     return newly_matched_for_batch
 
 # --- Plex Functions ---
