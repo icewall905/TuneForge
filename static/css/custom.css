@@ -205,3 +205,124 @@
 .shared-playlist-details {
     margin-bottom: 20px;
 }
+
+/* Sidebar toggle button */
+.sidebar-toggle {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    background: none;
+    border: none;
+    color: #e0e0e0;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+    z-index: 1001;
+}
+
+.sidebar-toggle:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Sidebar header positioning */
+.sidebar-header {
+    position: relative !important;
+    padding: 20px !important;
+    text-align: left !important;
+    border-bottom: 1px solid #444 !important;
+    display: block !important;
+}
+
+.sidebar-header h2 {
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    padding: 0 !important;
+    margin: 0 0 10px 0 !important;
+    overflow: visible !important;
+    clip: auto !important;
+    border: none !important;
+    font-size: 18px !important;
+    color: #e0e0e0 !important;
+}
+
+.sidebar-header .tagline {
+    margin: 5px 0 15px 0 !important;
+    font-size: 12px !important;
+    color: #aaa !important;
+    font-style: italic !important;
+}
+
+.sidebar-logo {
+    width: 240px !important;
+    height: auto !important;
+    margin-bottom: 10px !important;
+    display: block !important;
+}
+
+/* Collapsed sidebar state */
+.sidebar.collapsed {
+    width: 60px !important;
+    overflow: hidden !important;
+    grid-template-rows: auto !important;
+}
+
+.sidebar.collapsed .sidebar-logo,
+.sidebar.collapsed .sidebar-header h2,
+.sidebar.collapsed .sidebar-header .tagline,
+.sidebar.collapsed .sidebar-nav,
+.sidebar.collapsed .sidebar-footer {
+    display: none !important;
+}
+
+.sidebar.collapsed .sidebar-toggle {
+    /* Button stays in the same left position */
+}
+
+.sidebar.collapsed .toggle-icon {
+    transform: rotate(90deg) !important;
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+    .sidebar {
+        width: 100%;
+        height: auto;
+        position: relative;
+        z-index: 1000;
+    }
+    
+    .sidebar.collapsed {
+        width: 100%;
+        height: 60px;
+    }
+    
+    .sidebar.collapsed .sidebar-toggle {
+        top: 15px;
+        right: 20px;
+    }
+    
+    .main-content {
+        margin-left: 0;
+        width: 100%;
+    }
+}
+
+/* Ensure main content adjusts when sidebar is collapsed */
+.main-content {
+    margin-left: 250px !important;
+    transition: margin-left 0.3s ease !important;
+}
+
+.main-content.sidebar-collapsed {
+    margin-left: 60px !important;
+}
+
+@media (max-width: 768px) {
+    .main-content,
+    .main-content.sidebar-collapsed {
+        margin-left: 0;
+    }
+}

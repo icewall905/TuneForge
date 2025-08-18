@@ -6,16 +6,19 @@
     <title>{% block title %}TuneForge{% endblock %}</title>
     <link rel="icon" href="{{ url_for('static', filename='images/logo_small.jpeg') }}" type="image/jpeg">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css') }}">
     <!-- If you plan to use Bootstrap JS components, uncomment the line below -->
     <!-- <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script> -->
 </head>
 <body>
     <div class="sidebar">
         <div class="sidebar-header">
-            <img src="{{ url_for('static', filename='images/logo_big.jpeg') }}" alt="Logo" class="sidebar-logo" style="width:240px; height:auto; margin-bottom:10px;"> 
-            <!-- Hidden h2 for accessibility if logo is the main title, or replace with actual text -->
-            <h2>TuneForge</h2> 
+            <img src="{{ url_for('static', filename='images/logo_big.jpeg') }}" alt="Logo" class="sidebar-logo" style="width:240px; height:auto; margin-bottom:10px;">
+            <h2>TuneForge</h2>
             <p class="tagline">TuneForge<br>AI Powered Playlists</p>
+            <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar">
+                <span class="toggle-icon">☰</span>
+            </button>
         </div>
         <nav class="sidebar-nav">
             <div class="sidebar-section">
@@ -35,7 +38,7 @@
             </div>
         
         <div class="sidebar-footer">
-            <p class="version-info">v0.1.2</p>
+            <p class="version-info">v0.1.3</p>
         </div>
     </div>
 
@@ -441,12 +444,12 @@
             this.pollIntervals.set(scanId, pollInterval);
         },
         
-                        ensureVisibility() {
-                    if (this.activeScans.size > 0 || this.activePlaylists.size > 0) {
-                        this.showPanel();
-                        this.updateDisplay();
-                    }
-                },
+        ensureVisibility() {
+            if (this.activeScans.size > 0 || this.activePlaylists.size > 0) {
+                this.showPanel();
+                this.updateDisplay();
+            }
+        },
         
         setupEventHandlers() {
             // Page visibility change
@@ -547,10 +550,71 @@
             this.playlistPollIntervals.set(playlistId, pollInterval);
         }
     };
-
+    
+    // Sidebar toggle functionality
+    function initSidebar() {
+        console.log('🔧 Initializing sidebar...');
+        const sidebar = document.querySelector('.sidebar');
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+        const mainContent = document.querySelector('.main-content');
+        
+        console.log('🔧 Sidebar element:', sidebar);
+        console.log('🔧 Toggle button:', sidebarToggle);
+        console.log('🔧 Main content:', mainContent);
+        
+        if (!sidebar || !sidebarToggle) {
+            console.error('❌ Sidebar or toggle button not found!');
+            return;
+        }
+        
+        // Check localStorage for saved state
+        const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+        console.log('🔧 Saved state - collapsed:', isCollapsed);
+        
+        if (isCollapsed) {
+            sidebar.classList.add('collapsed');
+            if (mainContent) mainContent.classList.add('sidebar-collapsed');
+        }
+        
+        // Handle toggle click
+        sidebarToggle.addEventListener('click', function() {
+            console.log('🔧 Toggle button clicked!');
+            sidebar.classList.toggle('collapsed');
+            if (mainContent) mainContent.classList.toggle('sidebar-collapsed');
+            
+            const isNowCollapsed = sidebar.classList.contains('collapsed');
+            console.log('🔧 Sidebar now collapsed:', isNowCollapsed);
+            
+            // Save state to localStorage
+            localStorage.setItem('sidebarCollapsed', isNowCollapsed);
+        });
+        
+        // Auto-collapse on mobile
+        function checkMobile() {
+            if (window.innerWidth <= 768) {
+                if (!sidebar.classList.contains('collapsed')) {
+                    sidebar.classList.add('collapsed');
+                    if (mainContent) mainContent.classList.add('sidebar-collapsed');
+                    localStorage.setItem('sidebarCollapsed', 'true');
+                }
+            }
+        }
+        
+        // Check on load and resize
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        console.log('✅ Sidebar toggle functionality initialized');
+    }
+    
     // Initialize when DOM is ready
     document.addEventListener('DOMContentLoaded', () => {
-        window.globalStatusManager.init();
+        // Initialize sidebar state
+        initSidebar();
+        
+        // Initialize global status manager
+        if (typeof window.globalStatusManager !== 'undefined') {
+            window.globalStatusManager.init();
+        }
     });
     </script>
     
