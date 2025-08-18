@@ -788,6 +788,43 @@ body:has(.global-status[style*="display: block"]) .sidebar {
     50% { opacity: 0.7; }
 }
 
+/* Playlist progress styling */
+.progress-indicator.playlist {
+    border-left: 3px solid #ff6b6b;
+}
+
+.progress-indicator.playlist .progress-fill {
+    background: linear-gradient(90deg, #ff6b6b, #ff8e8e);
+}
+
+.cancel-btn {
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 8px;
+    transition: background-color 0.2s;
+}
+
+.cancel-btn:hover {
+    background: #c82333;
+}
+
+.cancel-btn:active {
+    background: #bd2130;
+}
+
+.progress-details {
+    color: #888;
+    font-size: 10px;
+    font-family: monospace;
+    margin-top: 2px;
+    text-align: right;
+}
+
 .progress-info {
     display: flex;
     justify-content: space-between;

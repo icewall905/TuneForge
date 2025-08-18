@@ -61,7 +61,7 @@
                 </div>
                 
                 <div class="form-group">
-                    <button type="submit" name="action" value="generate" class="primary-button">Generate Playlist</button>
+                    <button type="submit" class="primary-button">Generate Playlist</button>
                 </div>
             </div>
         </form>
@@ -80,7 +80,41 @@
 
 {% block extra_js %}
 <script>
+    // Prevent double-handling of submissions
+    window.__playlistSubmitInProgress = false;
+
+    // Global error handler to log JavaScript errors
+    window.addEventListener('error', function(e) {
+        console.error('JavaScript error:', e.error);
+        console.error('Error location:', e.filename, e.lineno, e.colno);
+        console.error('Error message:', e.message);
+        
+        // Try to send error to backend for logging
+        fetch('/api/log-error', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: e.message,
+                filename: e.filename,
+                lineno: e.lineno,
+                colno: e.colno,
+                error: e.error ? e.error.toString() : 'Unknown error'
+            })
+        }).catch(err => console.error('Failed to log error to backend:', err));
+    });
+    
+    // Comprehensive JavaScript execution tracking
+    console.log('=== TUNEFORGE JAVASCRIPT LOADING STARTED ===');
+    console.log('Timestamp:', new Date().toISOString());
+    console.log('User Agent:', navigator.userAgent);
+    console.log('Document ready state:', document.readyState);
+    
     document.addEventListener('DOMContentLoaded', function() {
+        console.log('=== DOM CONTENT LOADED EVENT FIRED ===');
+        console.log('Document ready state:', document.readyState);
+        console.log('Form element exists:', !!document.getElementById('playlistForm'));
+        console.log('Submit button exists:', !!document.querySelector('button[type="submit"]'));
+        
         function updateHiddenInput() {
             const listItems = document.querySelectorAll('#artist_list li');
             const artists = Array.from(listItems).map(item => item.querySelector('.artist-name').textContent);
@@ -101,7 +135,7 @@
             li.appendChild(artistSpan);
             
             const removeBtn = document.createElement('button');
-            removeBtn.type = 'button';
+            removeBtn.type = "button";
             removeBtn.className = "text-button";
             removeBtn.textContent = 'Remove';
             removeBtn.onclick = function() { 
@@ -117,6 +151,49 @@
         
         document.getElementById('add_artist').addEventListener('click', addArtist);
         
+        // Test button to verify JavaScript is working
+        const submitButton = document.querySelector('button[type="submit"]');
+        if (submitButton) {
+            submitButton.addEventListener('click', function(e) {
+                console.log('=== SUBMIT BUTTON CLICKED ===');
+                console.log('Event type:', e.type);
+                console.log('Event target:', e.target);
+                console.log('Form element:', this.form);
+                console.log('Form action:', this.form.action);
+                console.log('Form method:', this.form.method);
+            });
+            console.log('✅ Submit button click handler attached');
+        } else {
+            console.error('❌ Submit button not found!');
+        }
+        
+        // Add manual test button for debugging
+        const testButton = document.createElement('button');
+        testButton.type = 'button';
+        testButton.textContent = 'Test JavaScript';
+        testButton.className = 'secondary-button';
+        testButton.style.marginTop = '10px';
+        testButton.onclick = function() {
+            console.log('=== MANUAL TEST BUTTON CLICKED ===');
+            console.log('JavaScript is working!');
+            console.log('Form element:', document.getElementById('playlistForm'));
+            console.log('Global status manager:', window.globalStatusManager);
+            
+            // Test form submission manually
+            const form = document.getElementById('playlistForm');
+            if (form) {
+                console.log('Testing form submission manually...');
+                const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+                form.dispatchEvent(submitEvent);
+            }
+        };
+        
+        // Insert test button after the submit button
+        if (submitButton && submitButton.parentNode) {
+            submitButton.parentNode.insertBefore(testButton, submitButton.nextSibling);
+            console.log('✅ Test button added to page');
+        }
+        
         // Initialize favorite artists from hidden input
         window.onload = function() {
             const hiddenInput = document.getElementById('favorite_artists');
@@ -130,22 +207,80 @@
                     }
                 });
             }
+            
+            // Check if global status manager is ready
+            if (window.globalStatusManager) {
+                console.log('Global status manager is ready!');
+            } else {
+                console.log('Global status manager not ready yet, waiting...');
+                // Wait a bit more for it to initialize
+                setTimeout(() => {
+                    if (window.globalStatusManager) {
+                        console.log('Global status manager is now ready!');
+                    } else {
+                        console.error('Global status manager still not available after delay!');
+                    }
+                }, 1000);
+            }
         };
         
         // Handle form submission for playlist generation
-        document.getElementById('playlistForm').addEventListener('submit', function(e) {
+        console.log('=== SETTING UP FORM SUBMISSION HANDLER ===');
+        const form = document.getElementById('playlistForm');
+        console.log('Form element found:', !!form);
+        console.log('Form element:', form);
+        
+        if (!form) {
+            console.error('CRITICAL ERROR: Form not found!');
+            return;
+        }
+        
+        // Single guard for both handlers
+        function handleSubmit(e) {
+            console.log('=== FORM SUBMIT EVENT ===');
+            if (window.__playlistSubmitInProgress) {
+                console.log('Submission already in progress; ignoring duplicate submit');
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+            window.__playlistSubmitInProgress = true;
+
             e.preventDefault();
-            
+            e.stopPropagation();
+
+            // Proceed
+            processFormSubmission(e);
+        }
+        
+        try {
+            form.addEventListener('submit', handleSubmit);
+            console.log('✅ addEventListener submit handler attached successfully');
+        } catch (error) {
+            console.error('❌ Failed to attach addEventListener submit handler:', error);
+        }
+        
+        try {
+            form.onsubmit = handleSubmit;
+            console.log('✅ onsubmit handler attached successfully');
+        } catch (error) {
+            console.error('❌ Failed to attach onsubmit handler:', error);
+        }
+        
+        // Function to process form submission
+        function processFormSubmission(e) {
             document.getElementById('loading').style.display = 'block';
             const outputElement = document.getElementById('console_output');
             outputElement.innerHTML = '<div class="console-line">🚀 Starting playlist generation...</div>';
             
             // Collect form data
-            const formData = new FormData(this);
+            const formData = new FormData(e.target);
             const formDataObj = {};
             formData.forEach((value, key) => {
                 formDataObj[key] = value;
             });
+            
+            console.log('Form data collected:', formDataObj);
             
             // Create the payload in the format expected by the API
             const payload = {
@@ -158,6 +293,22 @@
                 playlist_name: formDataObj.playlist_name || "TuneForge Playlist"
             };
             
+            console.log('API payload created:', payload);
+
+            // Generate a client-side playlist ID and register in sidebar immediately
+            const clientPlaylistId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            payload.client_playlist_id = clientPlaylistId;
+            
+            if (window.globalStatusManager) {
+                window.globalStatusManager.addPlaylist(
+                    clientPlaylistId,
+                    payload.playlist_name,
+                    payload.num_songs
+                );
+            } else {
+                console.warn('Global status manager not available to add playlist immediately');
+            }
+            
             // Start log streaming IMMEDIATELY to capture logs as they happen
             startLogStreaming(outputElement);
             
@@ -169,17 +320,42 @@
                 },
                 body: JSON.stringify(payload)
             })
-            .then(response => response.json())
+            .then(response => {
+                console.log('API response received:', response);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
             .then(data => {
+                console.log('API data received:', data);
+                console.log('Playlist ID found:', data.playlist_id);
+                console.log('Global status manager available:', !!window.globalStatusManager);
+                
+                // If server returned a different playlist_id (shouldn't), reconcile by updating map key
+                if (data.playlist_id && data.playlist_id !== clientPlaylistId && window.globalStatusManager) {
+                    const existing = window.globalStatusManager.activePlaylists.get(clientPlaylistId);
+                    if (existing) {
+                        window.globalStatusManager.activePlaylists.delete(clientPlaylistId);
+                        window.globalStatusManager.activePlaylists.set(data.playlist_id, Object.assign(existing, { id: data.playlist_id }));
+                        window.globalStatusManager.updateDisplay();
+                        window.globalStatusManager.saveState();
+                    }
+                }
+                
                 // Show the final result immediately
                 displayFinalResult(outputElement, data);
+                
+                // Allow new submissions after this completes
+                window.__playlistSubmitInProgress = false;
             })
             .catch(error => {
                 console.error('Error:', error);
                 document.getElementById('loading').style.display = 'none';
                 outputElement.innerHTML += `<div class="console-line error">❌ Error: ${error}</div>`;
+                window.__playlistSubmitInProgress = false;
             });
-        });
+        }
         
         function startLogStreaming(outputElement) {
             console.log('Starting log streaming...');
@@ -191,9 +367,27 @@
             // Store reference to close later
             window.currentEventSource = eventSource;
             
+            // Function to add log line with line limit management
+            function addLogLine(html) {
+                outputElement.innerHTML += html;
+                
+                // Limit console output to 100 lines to prevent browser hanging
+                const lines = outputElement.querySelectorAll('.console-line');
+                if (lines.length > 100) {
+                    // Remove oldest lines (keep the last 100)
+                    const linesToRemove = lines.length - 100;
+                    for (let i = 0; i < linesToRemove; i++) {
+                        lines[i].remove();
+                    }
+                }
+                
+                // Auto-scroll to bottom
+                outputElement.scrollTop = outputElement.scrollHeight;
+            }
+            
             eventSource.onopen = function(event) {
                 console.log('EventSource opened');
-                outputElement.innerHTML += `<div class="console-line success">🔗 Log stream connected!</div>`;
+                addLogLine(`<div class="console-line success">🔗 Log stream connected!</div>`);
             };
             
             eventSource.onmessage = function(event) {
@@ -203,33 +397,30 @@
                     
                     switch(data.type) {
                         case 'info':
-                            outputElement.innerHTML += `<div class="console-line info">ℹ️ ${data.message}</div>`;
+                            addLogLine(`<div class="console-line info">ℹ️ ${data.message}</div>`);
                             break;
                         case 'log':
                             // Parse the log message and display it nicely
                             const logMessage = parseLogMessage(data.message);
-                            outputElement.innerHTML += `<div class="console-line log">${logMessage}</div>`;
+                            addLogLine(`<div class="console-line log">${logMessage}</div>`);
                             break;
                         case 'error':
-                            outputElement.innerHTML += `<div class="console-line error">❌ ${data.message}</div>`;
+                            addLogLine(`<div class="console-line error">❌ ${data.message}</div>`);
                             break;
                         case 'complete':
-                            outputElement.innerHTML += `<div class="console-line success">✅ ${data.message}</div>`;
+                            addLogLine(`<div class="console-line success">✅ ${data.message}</div>`);
                             // Don't close here - let it keep running to capture more logs
                             break;
                     }
-                    
-                    // Auto-scroll to bottom
-                    outputElement.scrollTop = outputElement.scrollHeight;
                 } catch (e) {
                     console.error('Error parsing log message:', e);
-                    outputElement.innerHTML += `<div class="console-line error">❌ Parse error: ${e.message}</div>`;
+                    addLogLine(`<div class="console-line error">❌ Parse error: ${e.message}</div>`);
                 }
             };
             
             eventSource.onerror = function(event) {
                 console.error('EventSource error:', event);
-                outputElement.innerHTML += `<div class="console-line error">❌ Connection error - check browser console</div>`;
+                addLogLine(`<div class="console-line error">❌ Connection error - check browser console</div>`);
                 // Don't close on error - let it retry
             };
         }
@@ -276,25 +467,8 @@
             outputElement.innerHTML += `<div class="${className}">${icon} ${data.message}</div>`;
             outputElement.scrollTop = outputElement.scrollHeight;
         }
-        
-        function displayFinalResult(outputElement, data) {
-            outputElement.innerHTML += '<div class="console-line">📊 Final Result:</div>';
-            outputElement.innerHTML += '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
-            
-            if (data.status === 'success') {
-                outputElement.innerHTML += '<div class="console-line success">✅ Playlist generation complete!</div>';
-            } else if (data.error) {
-                outputElement.innerHTML += `<div class="console-line error">❌ Error: ${data.error}</div>`;
-            }
-            
-            // Close the event source when we're done
-            if (window.currentEventSource) {
-                window.currentEventSource.close();
-                window.currentEventSource = null;
-            }
-            
-            document.getElementById('loading').style.display = 'none';
-        }
+
+        // Note: Removed local startPlaylistProgressPolling; sidebar now handles polling
     });
 </script>
 {% endblock %}

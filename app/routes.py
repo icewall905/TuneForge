@@ -562,6 +562,18 @@ def search_tracks_in_navidrome(navidrome_url, username, password, ollama_suggest
                 debug_log(f"Navidrome: ✅ GOOD MATCH: '{best_match['title']}' by '{best_match['artist']}' for suggestion '{title}' by '{artist}' (similarity: {combined_sim:.1%})", "INFO")
             else:
                 debug_log(f"Navidrome: ⚠️ ACCEPTABLE MATCH: '{best_match['title']}' by '{best_match['artist']}' for suggestion '{title}' by '{artist}' (similarity: {combined_sim:.1%})", "WARN")
+            
+            # Update progress for individual track match
+            if hasattr(api_generate_playlist, 'playlist_progress'):
+                # Find the current playlist ID from the progress tracking
+                for playlist_id, progress in api_generate_playlist.playlist_progress.items():
+                    if progress['status'] in ['starting', 'progress']:
+                        progress.update({
+                            'current_status': f'Matched: {best_match["artist"]} - {best_match["title"]}. Currently at tracks {len(final_unique_matched_tracks_map)}/{progress.get("target_songs", "?")}.',
+                            'current_track': f'{best_match["artist"]} - {best_match["title"]}',
+                            'tracks_found': len(final_unique_matched_tracks_map)
+                        })
+                        break
         else:
             debug_log(f"Navidrome: ❌ No suitable match found for '{title}' by '{artist}' after trying all search strategies", "WARN")
             
@@ -853,6 +865,23 @@ def test_plex_connection(plex_url, plex_token):
 # --- Flask Routes ---
 @main_bp.route('/')
 def index():
+    debug_log("Index page requested", "INFO")
+    return render_template('index.html')
+
+@main_bp.route('/', methods=['POST'])
+def index_post():
+    """Handle form submissions that somehow bypass JavaScript"""
+    debug_log(f"Form submitted to index route via POST: {request.form}", "WARN")
+    debug_log(f"Request headers: {dict(request.headers)}", "DEBUG")
+    return jsonify({"error": "Form submission should be handled by JavaScript API"}), 400
+
+@main_bp.route('/', methods=['GET'])
+def index_get():
+    """Handle GET requests to index page"""
+    if request.args:
+        debug_log(f"GET request to index with query parameters: {dict(request.args)}", "WARN")
+        debug_log(f"User-Agent: {request.headers.get('User-Agent', 'Unknown')}", "DEBUG")
+        debug_log(f"Referer: {request.headers.get('Referer', 'None')}", "DEBUG")
     return render_template('index.html')
 
 @main_bp.route('/history')
@@ -979,8 +1008,12 @@ def api_test_plex_connection():
 
 @main_bp.route('/api/generate-playlist', methods=['POST'])
 def api_generate_playlist():
+    debug_log("Playlist generation API called", "INFO")
+    debug_log(f"Request headers: {dict(request.headers)}", "DEBUG")
+    
     data = request.get_json() # Use get_json() for better error handling
     if not data:
+        debug_log("Invalid or missing JSON payload in playlist generation", "ERROR")
         return jsonify({"error": "Invalid or missing JSON payload"}), 400
         
     prompt = data.get('prompt')
@@ -990,6 +1023,27 @@ def api_generate_playlist():
     services_to_use = [s.lower() for s in services_to_use_req] if services_to_use_req else ['navidrome', 'plex']
     
     max_ollama_attempts = int(get_config_value('OLLAMA', 'MaxAttempts', '3'))
+    
+    # Generate or accept provided playlist ID for progress tracking
+    import uuid
+    client_playlist_id = data.get('client_playlist_id')
+    playlist_id = client_playlist_id if client_playlist_id else str(uuid.uuid4())
+    
+    debug_log(f"Generated playlist ID: {playlist_id}", "DEBUG")
+    debug_log(f"Playlist generation parameters: prompt='{prompt}', num_songs={num_songs}, playlist_name='{playlist_name}'", "INFO")
+    
+    # Initialize progress tracking
+    if not hasattr(api_generate_playlist, 'playlist_progress'):
+        api_generate_playlist.playlist_progress = {}
+    
+    api_generate_playlist.playlist_progress[playlist_id] = {
+        'status': 'starting',
+        'current_status': 'Initializing playlist generation...',
+        'ollama_calls': 0,
+        'tracks_found': 0,
+        'target_songs': num_songs,
+        'start_time': time.time()
+    }
 
     if not prompt: return jsonify({"error": "Prompt is required"}), 400
 
@@ -1030,6 +1084,14 @@ def api_generate_playlist():
         tracks_still_needed = num_songs - len(final_unique_matched_tracks_map)
         debug_log(f"Playlist Gen: Attempt {ollama_api_calls_made + 1}/{max_ollama_attempts}. Tracks found: {len(final_unique_matched_tracks_map)}/{num_songs}.", "INFO", True)
         debug_log(f"Playlist Gen: Starting Ollama call {ollama_api_calls_made + 1} to find {tracks_still_needed} more tracks...", "INFO", True)
+        
+        # Update progress tracking
+        api_generate_playlist.playlist_progress[playlist_id].update({
+            'ollama_calls': ollama_api_calls_made + 1,
+            'tracks_found': len(final_unique_matched_tracks_map),
+            'current_status': f'Ollama call {ollama_api_calls_made + 1}: Requesting {tracks_still_needed} more tracks...',
+            'current_phase': 'ollama'
+        })
 
         songs_to_request_this_ollama_call = tracks_still_needed * 3 # Request more to account for filtering/matching
         if tracks_still_needed <= 3: songs_to_request_this_ollama_call = tracks_still_needed + 10
@@ -1083,10 +1145,25 @@ def api_generate_playlist():
             debug_log(f"Navidrome: Starting search for {len(eligible_tracks_for_search)} eligible tracks", "INFO")
             newly_matched = search_tracks_in_navidrome(navidrome_url, navidrome_user, navidrome_pass, eligible_tracks_for_search, final_unique_matched_tracks_map)
             debug_log(f"Navidrome: Search completed. Found {len(newly_matched)} new matches", "INFO")
+            
+            # Update progress after Navidrome search
+            api_generate_playlist.playlist_progress[playlist_id].update({
+                'tracks_found': len(final_unique_matched_tracks_map),
+                'current_status': f'Found {len(newly_matched)} new tracks via Navidrome',
+                'current_phase': 'navidrome'
+            })
+            
             if len(final_unique_matched_tracks_map) >= num_songs: break
         
         if enable_plex:
             search_tracks_in_plex(plex_server_url, plex_token, eligible_tracks_for_search, final_unique_matched_tracks_map, plex_section_id)
+            
+            # Update progress after Plex search
+            api_generate_playlist.playlist_progress[playlist_id].update({
+                'tracks_found': len(final_unique_matched_tracks_map),
+                'current_status': f'Found tracks via Plex'
+            })
+            
             if len(final_unique_matched_tracks_map) >= num_songs: break
         
         if ollama_api_calls_made < max_ollama_attempts and len(final_unique_matched_tracks_map) < num_songs:
@@ -1097,10 +1174,17 @@ def api_generate_playlist():
     # --- End of main generation loop ---
     final_tracklist_details = list(final_unique_matched_tracks_map.values())
 
+    # Final progress update
+    api_generate_playlist.playlist_progress[playlist_id].update({
+        'status': 'completed',
+        'tracks_found': len(final_tracklist_details),
+        'current_status': f'Generation complete! Found {len(final_tracklist_details)}/{num_songs} tracks'
+    })
+
     if not final_tracklist_details:
         msg = f"Could not find any tracks for prompt '{prompt}' after {ollama_api_calls_made} Ollama attempts."
         debug_log(msg, "ERROR", True)
-        return jsonify({"message": msg, "playlist_name": playlist_name, "tracks_found": 0}), 500
+        return jsonify({"message": msg, "playlist_name": playlist_name, "tracks_found": 0, "playlist_id": playlist_id}), 500
 
     debug_log(f"Playlist Gen: Total {len(final_tracklist_details)} unique tracks found for playlist '{playlist_name}'.", "INFO", True)
 
@@ -1133,7 +1217,7 @@ def api_generate_playlist():
         "message": f"Playlist '{playlist_name}' generation complete. Found {len(final_tracklist_details)}/{num_songs} tracks.",
         "playlist_name": playlist_name, "tracks_added_count": len(final_tracklist_details),
         "target_song_count": num_songs, "created_in_services": created_playlists_summary,
-        "ollama_api_calls": ollama_api_calls_made
+        "ollama_api_calls": ollama_api_calls_made, "playlist_id": playlist_id
     }), 200
 
 @main_bp.route('/api/config', methods=['GET', 'POST'])
@@ -1772,6 +1856,64 @@ def api_scan_progress(scan_id):
             })
     
     return jsonify(progress)
+
+@main_bp.route('/api/playlist-progress/<playlist_id>')
+def api_playlist_progress(playlist_id):
+    """API endpoint to get playlist generation progress"""
+    if not hasattr(api_generate_playlist, 'playlist_progress'):
+        return jsonify({'error': 'No playlist progress available'})
+    
+    progress = api_generate_playlist.playlist_progress.get(playlist_id)
+    if not progress:
+        return jsonify({'error': 'Playlist ID not found'})
+    
+    if progress['status'] == 'completed':
+        # Clean up completed playlist after a delay
+        import threading
+        def cleanup():
+            time.sleep(10)  # Keep progress visible for 10 seconds
+            if playlist_id in api_generate_playlist.playlist_progress:
+                del api_generate_playlist.playlist_progress[playlist_id]
+        
+        thread = threading.Thread(target=cleanup)
+        thread.daemon = True
+        thread.start()
+    
+    return jsonify(progress)
+
+@main_bp.route('/api/cancel-playlist/<playlist_id>', methods=['POST'])
+def api_cancel_playlist(playlist_id):
+    """API endpoint to cancel a playlist generation"""
+    if not hasattr(api_generate_playlist, 'playlist_progress'):
+        return jsonify({'error': 'No playlist progress available'})
+    
+    progress = api_generate_playlist.playlist_progress.get(playlist_id)
+    if not progress:
+        return jsonify({'error': 'Playlist ID not found'})
+    
+    if progress['status'] in ['completed', 'cancelled']:
+        return jsonify({'error': 'Playlist cannot be cancelled'})
+    
+    # Mark as cancelled
+    progress.update({
+        'status': 'cancelled',
+        'current_status': 'Playlist generation cancelled by user'
+    })
+    
+    return jsonify({'status': 'cancelled'})
+
+@main_bp.route('/api/log-error', methods=['POST'])
+def api_log_error():
+    """API endpoint to log JavaScript errors"""
+    try:
+        data = request.get_json()
+        if data:
+            debug_log(f"JavaScript error: {data.get('message', 'Unknown')} in {data.get('filename', 'Unknown')}:{data.get('lineno', 'Unknown')}:{data.get('colno', 'Unknown')}", "ERROR")
+            debug_log(f"Error details: {data.get('error', 'Unknown')}", "DEBUG")
+        return jsonify({"status": "logged"}), 200
+    except Exception as e:
+        debug_log(f"Failed to log JavaScript error: {str(e)}", "ERROR")
+        return jsonify({"error": "Failed to log error"}), 500
 
 @main_bp.route('/api/search-local-tracks', methods=['POST'])
 def api_search_local_tracks():
