@@ -365,7 +365,7 @@ def search_track_in_navidrome(query, navidrome_url, username, password):
     url = f"{base_url}/search3.view"
     params = {
         'u': username, 'p': password, 'v': '1.16.1', 'c': 'TuneForge', 'f': 'json',
-        'query': query, 'songCount': 50, 'artistCount': 0, 'albumCount': 0
+        'query': query, 'songCount': 100, 'artistCount': 0, 'albumCount': 0
     }
     # debug_log(f"Navidrome: Searching for query: '{query}'", "DEBUG")
     try:
@@ -486,6 +486,26 @@ def calculate_similarity(str1, str2):
     # Return the higher of the two similarities
     return max(word_similarity, char_similarity)
 
+def is_unwanted_version(title, album=None):
+    """Return True if the track looks like a live/remaster/demo/acoustic/etc. version we should avoid."""
+    def has_any_keyword(text):
+        if not text:
+            return False
+        t = text.lower()
+        keywords = [
+            ' live ', ' live-', ' live_', '(live', '[live',
+            ' remaster', '(remaster', '[remaster', ' remastered',
+            ' acoustic', '(acoustic', '[acoustic',
+            ' demo', '(demo', '[demo',
+            ' edit', '(edit', '[edit',
+            ' karaoke', ' instrumental'
+        ]
+        # Add boundary spaces to catch plain suffix/prefix
+        t_spaced = f" {t} "
+        return any(k in t_spaced for k in keywords)
+
+    return has_any_keyword(title) or has_any_keyword(album)
+
 def search_tracks_in_navidrome(navidrome_url, username, password, ollama_suggested_tracks, final_unique_matched_tracks_map):
     """Search for tracks in Navidrome and add them to the final matched tracks map"""
     if not all([navidrome_url, username, password]):
@@ -503,11 +523,15 @@ def search_tracks_in_navidrome(navidrome_url, username, password, ollama_suggest
 
         debug_log(f"Navidrome: Searching for '{title}' by '{artist}'", "INFO")
         
-        # Use more targeted search strategies
+        # Use more targeted search strategies (quoted first to bias exact phrase matches)
+        safe_title = title.replace('"', '\\"')
+        safe_artist = artist.replace('"', '\\"')
         search_strategies = [
-            f"{artist} {title}",  # Artist Title (most specific)
-            f"{title} {artist}",  # Title Artist
-            title,                 # Just title (fallback)
+            f'"{safe_title}" "{safe_artist}"',  # Exact phrases
+            f'"{safe_artist}" "{safe_title}"',
+            f"{artist} {title}",                   # Unquoted
+            f"{title} {artist}",
+            title,                                  # Title only fallback
         ]
         
         best_match = None
@@ -520,17 +544,23 @@ def search_tracks_in_navidrome(navidrome_url, username, password, ollama_suggest
                 
                 # Evaluate each track for similarity
                 for nt in found_navidrome_tracks:
+                    # Avoid obviously unwanted versions (live/remaster/etc.)
+                    if is_unwanted_version(nt.get('title'), nt.get('album')):
+                        debug_log(f"Navidrome: Skipping unwanted version: '{nt.get('title')}' ({nt.get('album')})", "DEBUG")
+                        continue
                     # Calculate similarity scores
                     title_similarity = calculate_similarity(title, nt['title'])
                     artist_similarity = calculate_similarity(artist, nt['artist'])
                     
-                    # Combined similarity (weighted average)
-                    combined_similarity = (title_similarity * 0.6) + (artist_similarity * 0.4)
+                    # Combined similarity (weighted; prioritize title slightly more)
+                    combined_similarity = (title_similarity * 0.7) + (artist_similarity * 0.3)
                     
                     debug_log(f"Navidrome: Evaluating '{nt['title']}' by '{nt['artist']}' (title: {title_similarity:.1%}, artist: {artist_similarity:.1%}, combined: {combined_similarity:.1%})", "DEBUG")
                     
-                    # Accept if combined similarity is high enough
-                    if combined_similarity >= 0.8:  # More forgiving threshold
+                    # Accept if combined similarity and per-field thresholds are high enough
+                    # - Title should be very close
+                    # - Artist allows minor typos (blink-121 vs blink-182)
+                    if combined_similarity >= 0.82 and title_similarity >= 0.88 and artist_similarity >= 0.70:
                         if combined_similarity > best_similarity:
                             best_match = nt
                             best_similarity = combined_similarity
