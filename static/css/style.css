@@ -19,6 +19,8 @@ body {
     left: 0;
     top: 0;
     padding-bottom: 110px; /* Also adjust the sidebar to account for the player bar */
+    display: grid;
+    grid-template-rows: auto 1fr auto;
 }
 
 .sidebar-header {

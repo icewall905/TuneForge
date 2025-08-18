@@ -113,14 +113,31 @@
     margin-bottom: 10px;
 }
 
-/* Version info in sidebar footer */
+/* Sidebar footer positioning and version info */
 .sidebar-footer {
-    margin-top: auto;
+    grid-row: 3;
     padding: 20px;
     text-align: center;
     color: #777;
     font-size: 12px;
-    border-top: 1px solid #333;
+    border-top: 1px solid #444;
+    background-color: #252525;
+}
+
+/* Ensure the nav area takes the middle row */
+.sidebar-nav {
+    grid-row: 2;
+}
+
+/* Ensure the floating progress doesn't interfere with layout */
+#floating-progress {
+    grid-row: 2;
+}
+
+.version-info {
+    margin: 0;
+    font-weight: 500;
+    letter-spacing: 0.5px;
 }
 
 /* Add styles for playlist sharing */
