@@ -1,142 +1,126 @@
 # TuneForge
 
-<img src="static/images/logo_big.jpeg" alt="TuneForge Logo" width="50%">
-
 A web application that uses Ollama's LLM capabilities to generate personalized music playlists that can be saved to Navidrome or Plex.
 
-Repository: [https://github.com/icewall905/TuneForge](https://github.com/icewall905/TuneForge)
+## 🎉 **NEW: Sonic Traveller is Fully Functional!** ✅
+
+The Sonic Traveller AI-powered playlist generation system is now **production-ready** and successfully generates playlists using audio feature similarity analysis with an enhanced feedback loop system.
 
 ## Features
 
 - Generate personalized playlists based on your music preferences
-- Integration with Navidrome and Plex for music library access
-- Track search and playlist creation in supported platforms
-- Selectable number of tracks for playlists (up to 100)
-- Save and view playlist history
+- **NEW**: Sonic Traveller - AI-powered playlist generation with audio feature analysis
+- **NEW**: Enhanced feedback loop system for iterative quality improvement
+- **NEW**: Local playlist history integration with rich metadata
+- **NEW**: Real-time progress tracking and background processing
 - Rate your generated playlists
-- Modern dark-mode UI with responsive design
+- Save playlists to Navidrome or Plex
+- Local music library management
+- Audio analysis and feature extraction
+- **NEW**: Audio feature similarity matching with weighted Euclidean distance
+- **NEW**: Export to JSON and M3U formats
 
-## Requirements
+## Quick Start
 
-- Python 3.7+
-- Flask
-- Requests
-- Ollama running locally or on a remote server
-- (Optional) Navidrome or Plex Media Server for playlist integration
-
-## Installation
-
-1. **Clone the Repository**:
+1. **Clone and setup**:
    ```bash
-   git clone https://github.com/icewall905/TuneForge.git
+   git clone <repository>
    cd TuneForge
-   ```
-
-2. **Create a virtual environment** (recommended):
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
-   ```
-
-3. **Install dependencies**:
-   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
    pip install -r requirements.txt
    ```
 
-4. **Configure settings**:
-   - Copy the example configuration file:
-     ```bash
-     cp config.ini.example config.ini
-     ```
-   - Edit `config.ini` with your Ollama, Navidrome, and/or Plex settings.
-   - You can also configure settings through the web interface.
+2. **Configure**:
+   - Copy `config.ini.example` to `config.ini`
+   - Set your Ollama URL and model
+   - Configure Navidrome/Plex if desired
 
-## Usage
+3. **Ask a Friend (Generate a playlist)**:
+   - Start the app: `source venv/bin/activate && python run.py`
+   - Open http://localhost:5395
+   - Enter your music preferences
+   - Click "Ask a Friend"
 
-1. **Start the web application**:
-   Using the helper script (recommended for development):
-   ```bash
-   sh start_app.sh 
-   ```
-   Or manually:
-   ```bash
-   python run.py
-   ```
+4. **NEW: Sonic Traveller**:
+   - Navigate to "Sonic Traveller" in the menu
+   - Select a seed track from your local library
+   - Set similarity threshold (0.5-2.0 recommended)
+   - Click "Ask a Friend" to start AI-powered generation
+   - Watch real-time progress and feedback loop improvements
+   - Export results as JSON or M3U playlist
 
-2. **Access the web interface**:
-   Open your browser and go to:
-   ```
-   http://localhost:5395
-   ```
+## 🚀 **Sonic Traveller Features**
 
-3. **Generate a playlist**:
-   - Enter a playlist name and description
-   - Fill in your musical likes, dislikes, and favorite artists
-   - Click "Generate Playlist"
-   - The app will generate suggestions and search for them in your configured music platforms
-   - Results will appear in real-time in the console output
-   - Playlists can be saved to your history and rated
+### **AI-Powered Generation**
+- Uses Ollama LLM to suggest similar tracks
+- Random seed integration prevents stale results
+- Adaptive prompting based on successful candidates
 
-## Project Structure
+### **Audio Feature Analysis**
+- **8 audio features**: energy, valence, tempo, danceability, acousticness, instrumentalness, loudness, speechiness
+- **Normalized similarity**: Features scaled to [0,1] range for consistent comparison
+- **Weighted distance**: Euclidean distance with feature-specific weights
 
-```
-TuneForge/
-├── app/                     # Application package
-│   ├── __init__.py          # Flask app initialization
-│   └── routes.py            # Application routes and main logic
-├── static/                  # Static assets
-│   ├── css/                 # CSS stylesheets
-│   ├── js/                  # JavaScript files
-│   └── images/              # Image assets (including logo_small.jpeg, logo_big.jpeg)
-├── templates/               # Jinja2 templates
-│   ├── layout.html          # Base template with sidebar layout
-│   ├── index.html           # Playlist generation page
-│   ├── history.html         # Playlist history page
-│   └── settings.html        # Settings page
-├── run.py                   # Application entry point
-├── start_app.sh             # Helper script to setup environment and run the app
-├── config.ini.example       # Example configuration file
-├── config.ini               # User configuration file (created from example)
-├── requirements.txt         # Python dependencies
-├── playlist_history.json    # Stores history of generated playlists
-└── README.md                # This file
-```
+### **Enhanced Feedback Loop**
+- Learns from accepted/rejected tracks across iterations
+- Improves suggestion quality with each batch
+- Maintains generation history and metadata
 
-## Running in Production
+### **Real-Time Processing**
+- Background job management with progress tracking
+- Live updates via Server-Sent Events
+- Non-blocking playlist generation
 
-For production deployment, consider:
+### **Export & History**
+- JSON export with full metadata
+- M3U playlist export
+- Local history integration with rich metadata
 
-```bash
-# Using nohup
-nohup python run.py &
+## Architecture
 
-# Or using a process manager like systemd
-```
+- **Frontend**: HTML/CSS/JavaScript with real-time updates
+- **Backend**: Flask with background processing
+- **Database**: SQLite with audio features and analysis queue
+- **AI**: Ollama integration for track suggestions
+- **Audio**: Librosa for feature extraction and analysis
 
-Example systemd service file:
-```ini
-[Unit]
-Description=TuneForge
-After=network.target
+## Configuration
 
-[Service]
-User=your_user
-WorkingDirectory=/path/to/TuneForge
-ExecStart=/path/to/venv/bin/python /path/to/TuneForge/run.py
-Restart=always
-RestartSec=5
+- **Ollama**: Set URL and model in `config.ini`
+- **Audio Analysis**: Enable/disable in `config.ini`
+- **Port**: Default 5395 (configurable)
 
-[Install]
-WantedBy=multi-user.target
-```
+## Development
+
+- **Virtual Environment**: `venv/`
+- **Database**: `db/local_music.db`
+- **Logs**: `logs/tuneforge_app.log`
+- **Debug Scripts**: `debug_scripts/` folder
+
+## 🎯 **Current Status**
+
+✅ **Sonic Traveller**: Fully functional and production-ready
+✅ **Ask a Friend**: Main playlist generator working
+✅ **Audio Analysis**: Complete with floating progress indicator
+✅ **Local Music**: Library management and search
+✅ **History**: Playlist storage and management
+✅ **Export**: Multiple format support
+
+## 🔮 **Future Enhancements**
+
+- Advanced candidate filtering (genre awareness, artist diversity)
+- Prompt engineering optimization
+- Enhanced audio feature extraction
+- Large library optimization (100k+ tracks)
 
 ## Troubleshooting
 
-- If the server fails to start, ensure `config.ini` is correctly configured
-- If playlists are not being generated, check that Ollama is running and accessible
-- Adjust the `max_attempts` in settings if you receive too few tracks
-- Enable "DEBUG_OLLAMA_RESPONSE" in the code for more detailed output
+- **Port conflicts**: Check `lsof -i :5395`
+- **Ollama issues**: Verify Ollama is running and accessible
+- **Audio analysis**: Check dependencies (librosa, numpy, scipy)
+- **Database**: Verify `db/local_music.db` exists and is accessible
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+[License information]

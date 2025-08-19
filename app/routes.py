@@ -3072,14 +3072,20 @@ def _save_sonic_traveller_to_history(job, seed_track):
     """Save Sonic Traveller playlist to the existing history system"""
     try:
         # Load existing history
-        history_file = os.path.join(DB_DIR, HISTORY_FILE)
+        history_file = HISTORY_FILE  # Use the same file as the main history system
         playlist_history = []
         
         if os.path.exists(history_file):
             try:
                 with open(history_file, 'r', encoding='utf-8') as f:
-                    playlist_history = json.load(f)
-            except Exception:
+                    content = f.read().strip()
+                    if content and content.endswith(']'):
+                        playlist_history = json.loads(content)
+                    else:
+                        debug_log(f"History file {history_file} appears corrupted, starting fresh", 'WARN')
+                        playlist_history = []
+            except Exception as e:
+                debug_log(f"Error loading history file {history_file}: {e}, starting fresh", 'WARN')
                 playlist_history = []
         
         # Create Sonic Traveller history entry
@@ -3124,14 +3130,24 @@ def _save_sonic_traveller_to_history(job, seed_track):
         if len(playlist_history) > 100:
             playlist_history = playlist_history[:100]
         
+        # Validate JSON before saving
+        try:
+            json.dumps(playlist_history, indent=2, ensure_ascii=False)
+        except Exception as e:
+            debug_log(f"JSON validation failed before saving: {e}", 'ERROR')
+            return
+        
         # Save updated history
         with open(history_file, 'w', encoding='utf-8') as f:
             json.dump(playlist_history, f, indent=2, ensure_ascii=False)
         
         debug_log(f"Saved Sonic Traveller playlist to history: {history_entry['name']}", 'INFO')
+        debug_log(f"History file: {history_file}, Entries: {len(playlist_history)}", 'INFO')
         
     except Exception as e:
         debug_log(f"Failed to save Sonic Traveller playlist to history: {e}", 'ERROR')
+        import traceback
+        debug_log(f"Traceback: {traceback.format_exc()}", 'ERROR')
 
 def _build_adaptive_prompt(job, seed_text, candidates_needed, excludes):
     """Build adaptive prompt based on iteration and feedback"""

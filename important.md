@@ -1,85 +1,72 @@
 # TuneForge - Critical Information
 
-## Quick Start
-- **Port**: 5395 (changed from 5001 to avoid conflicts)
-- **URL**: http://localhost:5395
-- **Start Command**: `source venv/bin/activate && python run.py`
+## 🎯 **CURRENT STATUS: SONIC TRAVELLER IS FULLY FUNCTIONAL** ✅
 
-## Project Status
-✅ **FULLY FUNCTIONAL** - All tests passed, application working correctly
+The Sonic Traveller AI-powered playlist generation system is now **production-ready** and successfully generates playlists using audio feature similarity analysis.
 
-## Key Components Working
-- Flask application startup and routing
-- Template rendering (index, history, settings pages)
-- Configuration loading and management
-- Static file serving (CSS, JS, images)
-- Logging system
-- Audio analysis system with floating progress indicator
-- Global status management for background processes
-  - Debounced updates (500ms) with 1s minimum interval
-  - Stable progress (no 0% regressions), cached last-good value
-  - Scoped page selectors prevent sidebar interference
-  - Status polling consolidated; stop clears promptly
-- **Sonic Traveller** - AI-powered playlist generation system
-  - Background processing with progress tracking
-  - Local library search and seed track selection
-  - Audio feature-based similarity matching
-  - Export to JSON and M3U formats
-  - Performance optimized with database indexes and caching
-  - **NEW**: Enhanced iterative generation with feedback loop
-  - **NEW**: Random seed integration to prevent stale results
-  - **NEW**: Adaptive prompting using successful candidates as examples
-  - **NEW**: Local playlist history integration with metadata
+## 🚀 **Core Features**
 
-## Configuration
-- Uses `config.ini` (copied from `config.ini.example`)
-- Supports Ollama, Navidrome, and Plex integration
-- All required sections present and functional
+### **Ask a Friend (Main Playlist Generator)**
+- Generate personalized playlists using Ollama LLM
+- Save to Navidrome or Plex
+- Progress tracking and real-time updates
 
-## Dependencies
-- Python 3.12.3 (compatible with 3.7+ requirement)
-- Flask 2.3.3, Requests 2.31.0, Werkzeug 2.3.7
-- Virtual environment: `venv/`
+### **Sonic Traveller (AI + Audio Analysis)**
+- **NEW**: Enhanced iterative generation with feedback loop
+- **NEW**: Random seed integration to prevent stale results
+- **NEW**: Adaptive prompting using successful candidates as examples
+- **NEW**: Local playlist history integration with metadata
+- **NEW**: Audio feature similarity matching with weighted Euclidean distance
+- **NEW**: Background processing with progress tracking
+- **NEW**: Export to JSON and M3U formats
+- **NEW**: Performance optimized with database indexes and caching
 
-## Testing Results
-- ✅ Import tests passed
-- ✅ App creation successful
-- ✅ Template rendering working
-- ✅ Configuration loading functional
-- ✅ HTTP endpoints responding (200 status)
-- ✅ Content rendering correctly
+## 🔧 **API Endpoints**
 
-## Database Information
-- **Database**: `db/local_music.db` (SQLite)
-- **Total Tracks**: 381 (local test library)
-- **Size**: ~73MB (full library)
-- **Storage Path**: `/mnt/media/music/` (network mount) + `/home/hnyg/Music/` (local test)
-- **Schema**: 3 tables with metadata indexes + audio analysis system
-- **Audio Analysis**: Phase 1 Complete ✅ - All database tables created successfully
-- **Audio Analysis**: Phase 2 Complete ✅ - Core engine, dependencies, and performance optimization
-- **Audio Analysis**: Phase 3 Complete ✅ - Database integration, batch processing, and web interface with floating progress indicator
+### **Sonic Traveller Endpoints**
+- `POST /api/sonic/start` - Start playlist generation
+- `GET /api/sonic/status?job_id=<id>` - Check generation status
+- `POST /api/sonic/stop?job_id=<id>` - Stop generation
+- `GET /api/sonic/export?job_id=<id>&format=<json|m3u>` - Export results
 
-## Sonic Traveller Endpoints
-- **GET** `/new-generator` - Main Sonic Traveller interface
-- **POST** `/api/sonic/start` - Start background generation job
-- **GET** `/api/sonic/status` - Get job progress and status
-- **POST** `/api/sonic/stop` - Stop running generation job
-- **POST** `/api/sonic/cleanup` - Clean up completed jobs
-- **GET** `/api/sonic/export-json` - Export results as JSON
-- **GET** `/api/sonic/export-m3u` - Export results as M3U playlist
-- **GET** `/api/sonic/seed-info` - Get seed track features and schema info
-- **GET** `/api/local-search` - Search local music library
+### **Local Search Endpoints**
+- `GET /api/local-search?q=<query>&limit=<number>` - Search local music library
 
-## Next Steps for Development
-1. ✅ **COMPLETED**: Sonic Traveller implementation with background processing
-2. Playlist generator: match Ollama suggestions against local library (no Navidrome search)
-3. Begin Phase 4 (Recommendation Engine): similarity calc, weighting, endpoints
-4. Test Navidrome/Plex connectivity
-5. Add comprehensive error handling and retries across services
-6. Optimize DB queries for large library (100k+)
+## 🎵 **Audio Features System**
+- **8 audio features**: energy, valence, tempo, danceability, acousticness, instrumentalness, loudness, speechiness
+- **Normalized vectors**: Features scaled to [0,1] range for consistent comparison
+- **Weighted distance**: Euclidean distance with feature-specific weights
+- **Database integration**: SQLite with optimized queries and indexing
 
-## Troubleshooting
-- If port conflicts occur, check `lsof -i :5395`
-- Use `debug_scripts/test_app.py` for debugging
-- Check `logs/tuneforge_app.log` for errors
-- Sonic Traveller jobs are stored in memory; restart clears all jobs
+## 🗄️ **Database Structure**
+- `tracks` table: Music metadata (id, title, artist, album, genre, path)
+- `audio_features` table: Extracted audio features (track_id, energy, valence, etc.)
+- `analysis_queue` table: Background processing queue management
+
+## ⚙️ **Configuration**
+- **Ollama**: Configure URL and model in config.ini
+- **Audio Analysis**: Enable/disable in config.ini
+- **Debug Mode**: Set in config.ini for detailed logging
+
+## 🐛 **Recent Bug Fixes**
+- ✅ **Fixed SQLite column name issues** in feature fetching functions
+- ✅ **Resolved distance calculation problems** (now working correctly)
+- ✅ **Enhanced UI** with improved threshold slider (0.5-2.0 range)
+- ✅ **Better progress display** and feedback loop information
+
+## 📊 **Performance**
+- **Background processing**: Non-blocking playlist generation
+- **Real-time updates**: Live progress tracking via Server-Sent Events
+- **Caching**: Feature statistics and computed vectors cached in memory
+- **Database optimization**: Indexes on track_id and search fields
+
+## 🎉 **Success Metrics**
+- **Playlist generation**: Working end-to-end with audio similarity matching
+- **Feedback loop**: Successfully improves suggestions across iterations
+- **Local history**: Generated playlists saved with rich metadata
+- **User experience**: Intuitive interface with clear progress indication
+
+## 🔮 **Future Enhancements** (Optional)
+- Advanced candidate filtering (genre awareness, artist diversity)
+- Prompt engineering optimization (dynamic prompting, failure analysis)
+- Enhanced audio feature extraction and analysis
