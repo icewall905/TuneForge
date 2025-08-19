@@ -3145,6 +3145,14 @@ def _build_adaptive_prompt(job, seed_text, candidates_needed, excludes):
     # Add random seed for variety
     base_prompt += f"\n\nUse random seed {current_seed} to ensure variety and avoid repetitive suggestions."
     
+    # Add specific musical style guidance
+    base_prompt += "\n\nIMPORTANT: Focus on songs with similar musical characteristics:"
+    base_prompt += "\n- Similar genre (rock, alternative rock, post-grunge)"
+    base_prompt += "\n- Similar energy level and mood"
+    base_prompt += "\n- Similar era and style"
+    base_prompt += "\n- Avoid completely different genres from the source track."
+
+    
     # Add feedback from previous iterations
     if job.accepted_examples:
         accepted_text = ", ".join([f"{ex['artist']} - {ex['title']}" for ex in job.accepted_examples[-5:]])  # Last 5 examples

@@ -39,12 +39,16 @@ def fetch_track_features(db_path: str, track_id: int) -> Optional[Dict[str, floa
     conn = sqlite3.connect(db_path)
     try:
         cur = conn.cursor()
-        cur.execute('SELECT * FROM audio_features WHERE track_id = ?', (track_id,))
-        col_names = [d[1] for d in cur.description] if cur.description else []
+        
+        # Explicitly specify columns to avoid SQLite column name issues
+        columns = ['track_id', 'energy', 'valence', 'tempo', 'danceability', 'acousticness', 'instrumentalness', 'loudness', 'speechiness']
+        columns_str = ', '.join(columns)
+        
+        cur.execute(f'SELECT {columns_str} FROM audio_features WHERE track_id = ?', (track_id,))
         row = cur.fetchone()
         if not row:
             return None
-        data = {col_names[i]: row[i] for i in range(len(row))}
+        data = {columns[i]: row[i] for i in range(len(row))}
         return data
     finally:
         conn.close()
