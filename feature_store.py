@@ -58,11 +58,15 @@ def fetch_batch_features(db_path: str, track_ids: List[int]) -> Dict[int, Dict[s
     try:
         cur = conn.cursor()
         q_marks = ','.join('?' for _ in track_ids)
-        cur.execute(f'SELECT * FROM audio_features WHERE track_id IN ({q_marks})', track_ids)
-        col_names = [d[1] for d in cur.description] if cur.description else []
+        
+        # Explicitly specify columns to avoid SQLite column name issues with IN clause
+        columns = ['track_id', 'energy', 'valence', 'tempo', 'danceability', 'acousticness', 'instrumentalness', 'loudness', 'speechiness']
+        columns_str = ', '.join(columns)
+        
+        cur.execute(f'SELECT {columns_str} FROM audio_features WHERE track_id IN ({q_marks})', track_ids)
         result: Dict[int, Dict[str, float]] = {}
         for row in cur.fetchall() or []:
-            data = {col_names[i]: row[i] for i in range(len(row))}
+            data = {columns[i]: row[i] for i in range(len(row))}
             tid = int(data.get('track_id')) if data.get('track_id') is not None else None
             if tid is not None:
                 result[tid] = data

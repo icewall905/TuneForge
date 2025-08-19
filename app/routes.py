@@ -22,6 +22,7 @@ import threading
 import queue
 import uuid
 from datetime import datetime
+import string
 
 # --- Logger Setup ---
 LOG_DIR = 'logs'  # This will be relative to the project root (TuneForge/)
@@ -2868,6 +2869,12 @@ class SonicTravellerJob:
         self.attempts = 0
         self.max_attempts = 10
         self.candidate_multiplier = 3
+        
+        # NEW: Random seed for variety and feedback loop
+        self.random_seed = str(uuid.uuid4())[:8]  # Short seed for prompts
+        self.accepted_examples = []  # Track successful candidates for feedback
+        self.rejected_examples = []  # Track rejected candidates for feedback
+        self.iteration_history = []  # Track each iteration's results
 
     def update_progress(self, progress, step):
         self.progress = progress
@@ -2887,7 +2894,7 @@ class SonicTravellerJob:
         self.end_time = datetime.now()
 
 def _run_sonic_traveller_job(job):
-    """Background thread function for Sonic Traveller generation"""
+    """Background thread function for Sonic Traveller generation with enhanced feedback loop"""
     try:
         job.update_progress(5.0, 'Fetching seed track features...')
         
@@ -2924,9 +2931,9 @@ def _run_sonic_traveller_job(job):
             job.complete(False)
             return
 
-        job.update_progress(25.0, 'Generating candidates with Ollama...')
+        job.update_progress(25.0, 'Starting iterative generation with feedback loop...')
         
-        # Generate candidates iteratively
+        # Generate candidates iteratively with feedback
         ollama_url = get_config_value('OLLAMA', 'URL')
         if not ollama_url:
             job.error = 'Ollama URL not configured'
@@ -2941,11 +2948,10 @@ def _run_sonic_traveller_job(job):
             remaining = job.num_songs - len(job.results)
             candidates_needed = min(remaining * job.candidate_multiplier, 50)  # Cap at 50
             
-            job.update_progress(25.0 + (job.attempts * 5.0), f'Attempt {job.attempts}: Generating {candidates_needed} candidates...')
+            job.update_progress(25.0 + (job.attempts * 5.0), f'Iteration {job.attempts}: Generating {candidates_needed} candidates with feedback...')
             
-            # Generate candidates excluding already accepted
-            exclude_text = f" Exclude: {', '.join(list(excludes)[:10])}" if excludes else ""
-            prompt = f"List {candidates_needed} songs similar in vibe to: {seed_text}.{exclude_text} Return Title and Artist only."
+            # Build adaptive prompt based on iteration and feedback
+            prompt = _build_adaptive_prompt(job, seed_text, candidates_needed, excludes)
             
             candidates = generate_tracks_with_ollama(ollama_url, job.ollama_model, prompt, candidates_needed, 0, []) or []
             if not candidates:
@@ -2983,20 +2989,62 @@ def _run_sonic_traveller_job(job):
                 
                 scored.sort(key=lambda x: x[0])
                 
-                # Accept tracks within threshold
+                # Track this iteration's results for feedback
+                iteration_results = {
+                    'iteration': job.attempts,
+                    'candidates_generated': len(candidates),
+                    'candidates_mapped': len(mapped),
+                    'candidates_with_features': len(features_map),
+                    'accepted': [],
+                    'rejected': []
+                }
+                
+                # Accept tracks within threshold and collect feedback
                 for dist, track in scored:
                     if dist <= job.threshold and len(job.results) < job.num_songs:
                         track_with_dist = dict(track, distance=round(dist, 3))
                         job.add_result(track_with_dist)
+                        
+                        # Add to accepted examples for feedback
+                        job.accepted_examples.append({
+                            'title': track['title'],
+                            'artist': track['artist'],
+                            'distance': dist,
+                            'iteration': job.attempts
+                        })
+                        
+                        iteration_results['accepted'].append({
+                            'title': track['title'],
+                            'artist': track['artist'],
+                            'distance': dist
+                        })
+                        
                         excludes.add(f"{track['title']} - {track['artist']}")
                         if len(job.results) >= job.num_songs:
                             break
+                    else:
+                        # Track rejected candidates for feedback
+                        if dist > job.threshold:
+                            job.rejected_examples.append({
+                                'title': track['title'],
+                                'artist': track['artist'],
+                                'distance': dist,
+                                'iteration': job.attempts
+                            })
+                            iteration_results['rejected'].append({
+                                'title': track['title'],
+                                'artist': track['artist'],
+                                'distance': dist
+                            })
+                
+                # Store iteration history
+                job.iteration_history.append(iteration_results)
                             
             except Exception as e:
                 debug_log(f"Distance computation error in job {job.job_id}: {e}", 'ERROR')
                 continue
                 
-            job.update_progress(25.0 + (job.attempts * 5.0) + 30.0, f'Accepted {len(job.results)}/{job.num_songs} tracks...')
+            job.update_progress(25.0 + (job.attempts * 5.0) + 30.0, f'Iteration {job.attempts}: Accepted {len([r for r in iteration_results["accepted"]])}/{remaining} tracks...')
             
             # If we got enough tracks, we're done
             if len(job.results) >= job.num_songs:
@@ -3007,15 +3055,115 @@ def _run_sonic_traveller_job(job):
         
         if job.results:
             job.complete(True)
-            job.update_progress(100.0, f'Completed! Generated {len(job.results)} tracks from {job.total_candidates} candidates in {job.attempts} attempts.')
+            job.update_progress(100.0, f'Completed! Generated {len(job.results)} tracks from {job.total_candidates} candidates in {job.attempts} iterations with feedback loop.')
+            
+            # NEW: Save to playlist history
+            _save_sonic_traveller_to_history(job, seed_track)
         else:
-            job.error = f'Failed to generate enough tracks after {job.attempts} attempts'
+            job.error = f'Failed to generate enough tracks after {job.attempts} iterations'
             job.complete(False)
             
     except Exception as e:
         job.error = f'Unexpected error: {str(e)}'
         job.complete(False)
         debug_log(f"Sonic Traveller job {job.job_id} failed: {e}", 'ERROR')
+
+def _save_sonic_traveller_to_history(job, seed_track):
+    """Save Sonic Traveller playlist to the existing history system"""
+    try:
+        # Load existing history
+        history_file = os.path.join(DB_DIR, HISTORY_FILE)
+        playlist_history = []
+        
+        if os.path.exists(history_file):
+            try:
+                with open(history_file, 'r', encoding='utf-8') as f:
+                    playlist_history = json.load(f)
+            except Exception:
+                playlist_history = []
+        
+        # Create Sonic Traveller history entry
+        history_entry = {
+            'id': f"sonic_{job.job_id}",
+            'name': f"Sonic Traveller: {seed_track.get('artist', 'Unknown')} - {seed_track.get('title', 'Unknown')}",
+            'description': f"AI-generated playlist using Sonic Traveller with feedback loop",
+            'tracks': job.results,
+            'track_count': len(job.results),
+            'timestamp': datetime.now().isoformat(),
+            'generator_type': 'sonic_traveller',
+            'metadata': {
+                'seed_track': {
+                    'id': seed_track.get('id'),
+                    'title': seed_track.get('title'),
+                    'artist': seed_track.get('artist'),
+                    'album': seed_track.get('album')
+                },
+                'generation_params': {
+                    'threshold': job.threshold,
+                    'target_size': job.num_songs,
+                    'ollama_model': job.ollama_model,
+                    'random_seed': job.random_seed
+                },
+                'generation_stats': {
+                    'iterations': job.attempts,
+                    'total_candidates': job.total_candidates,
+                    'acceptance_rate': len(job.results) / job.total_candidates if job.total_candidates > 0 else 0
+                },
+                'feedback_loop': {
+                    'accepted_examples': job.accepted_examples,
+                    'rejected_examples': job.rejected_examples,
+                    'iteration_history': job.iteration_history
+                }
+            }
+        }
+        
+        # Add to history (at the beginning for recent playlists)
+        playlist_history.insert(0, history_entry)
+        
+        # Keep only last 100 entries to prevent history from growing too large
+        if len(playlist_history) > 100:
+            playlist_history = playlist_history[:100]
+        
+        # Save updated history
+        with open(history_file, 'w', encoding='utf-8') as f:
+            json.dump(playlist_history, f, indent=2, ensure_ascii=False)
+        
+        debug_log(f"Saved Sonic Traveller playlist to history: {history_entry['name']}", 'INFO')
+        
+    except Exception as e:
+        debug_log(f"Failed to save Sonic Traveller playlist to history: {e}", 'ERROR')
+
+def _build_adaptive_prompt(job, seed_text, candidates_needed, excludes):
+    """Build adaptive prompt based on iteration and feedback"""
+    # Generate a new random seed for each LLM call to ensure variety
+    import random
+    import string
+    current_seed = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    
+    base_prompt = f"Suggest {candidates_needed} songs similar to: {seed_text}"
+    
+    # Add random seed for variety
+    base_prompt += f"\n\nUse random seed {current_seed} to ensure variety and avoid repetitive suggestions."
+    
+    # Add feedback from previous iterations
+    if job.accepted_examples:
+        accepted_text = ", ".join([f"{ex['artist']} - {ex['title']}" for ex in job.accepted_examples[-5:]])  # Last 5 examples
+        base_prompt += f"\n\nThese tracks were good matches: {accepted_text}"
+        base_prompt += "\nPlease suggest more songs in a similar style and energy level."
+    
+    if job.rejected_examples:
+        rejected_text = ", ".join([f"{ex['artist']} - {ex['title']}" for ex in job.rejected_examples[-3:]])  # Last 3 examples
+        base_prompt += f"\n\nAvoid these styles: {rejected_text}"
+    
+    # Add exclusions
+    if excludes:
+        exclude_list = list(excludes)[:10]  # Limit to 10 exclusions
+        exclude_text = ", ".join(exclude_list)
+        base_prompt += f"\n\nExclude these tracks: {exclude_text}"
+    
+    base_prompt += "\n\nReturn only Title and Artist, one per line."
+    
+    return base_prompt
 
 @main_bp.route('/api/sonic/start', methods=['POST'])
 def api_sonic_start():
@@ -3084,7 +3232,12 @@ def api_sonic_status():
                     'total_candidates': job.total_candidates,
                     'accepted_tracks': job.accepted_tracks,
                     'attempts': job.attempts,
-                    'max_attempts': job.max_attempts
+                    'max_attempts': job.max_attempts,
+                    # NEW: Enhanced feedback loop information
+                    'random_seed': job.random_seed,
+                    'accepted_examples': job.accepted_examples,
+                    'rejected_examples': job.rejected_examples,
+                    'iteration_history': job.iteration_history
                 }
             }), 200
             

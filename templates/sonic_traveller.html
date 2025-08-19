@@ -56,9 +56,14 @@
             </div>
             <div id="progress_step" class="progress-step">Initializing...</div>
             <div id="progress_stats" class="progress-stats">
-                <span id="attempts_text">Attempts: 0/10</span>
+                <span id="attempts_text">Iterations: 0/10</span>
                 <span id="candidates_text">Candidates: 0</span>
                 <span id="accepted_text">Accepted: 0</span>
+                <span id="random_seed_text" style="display:none;">Seed: <span id="seed_value"></span></span>
+            </div>
+            <div id="feedback_info" class="feedback-info" style="display:none;">
+                <h4>Feedback Loop Status</h4>
+                <div id="feedback_details">Building feedback from iterations...</div>
             </div>
         </div>
 
@@ -133,6 +138,26 @@
     padding: 5px 10px;
     border-radius: 15px;
     border: 1px solid #dee2e6;
+}
+
+.feedback-info {
+    background: #e8f4fd;
+    border: 1px solid #bee5eb;
+    border-radius: 8px;
+    padding: 15px;
+    margin-top: 15px;
+}
+
+.feedback-info h4 {
+    margin: 0 0 10px 0;
+    color: #0c5460;
+    font-size: 14px;
+}
+
+.feedback-details {
+    font-size: 12px;
+    color: #0c5460;
+    line-height: 1.4;
 }
 
 .secondary-button {
@@ -275,21 +300,54 @@ document.addEventListener('DOMContentLoaded', function() {
         progressFill.style.width = `${job.progress}%`;
         progressText.textContent = `${Math.round(job.progress)}%`;
         progressStep.textContent = job.current_step;
-        attemptsText.textContent = `Attempts: ${job.attempts}/${job.max_attempts}`;
+        attemptsText.textContent = `Iterations: ${job.attempts}/${job.max_attempts}`;
         candidatesText.textContent = `Candidates: ${job.total_candidates}`;
         acceptedText.textContent = `Accepted: ${job.accepted_tracks}`;
+        
+        // Show random seed if available
+        if (job.random_seed) {
+            document.getElementById('random_seed_text').style.display = 'inline-block';
+            document.getElementById('seed_value').textContent = job.random_seed;
+        }
+        
+        // Show feedback loop information
+        if (job.accepted_examples && job.accepted_examples.length > 0) {
+            document.getElementById('feedback_info').style.display = 'block';
+            const feedbackDetails = document.getElementById('feedback_details');
+            
+            const lastExamples = job.accepted_examples.slice(-3);
+            const exampleText = lastExamples.map(ex => `${ex.artist} - ${ex.title}`).join(', ');
+            
+            feedbackDetails.innerHTML = `
+                <div class="feedback-details">
+                    <strong>Learning from successful tracks:</strong><br>
+                    ${exampleText}<br>
+                    <strong>Total examples collected:</strong> ${job.accepted_examples.length}<br>
+                    <strong>Iteration history:</strong> ${job.iteration_history ? job.iteration_history.length : 0} iterations completed
+                </div>
+            `;
+        }
     }
 
     function showResults(job) {
         const meta = document.getElementById('result_meta');
         if (job.status === 'completed') {
-            meta.textContent = `Generated ${job.accepted_tracks} tracks from ${job.total_candidates} candidates in ${job.attempts} attempts.`;
+            const acceptanceRate = job.total_candidates > 0 ? ((job.accepted_tracks / job.total_candidates) * 100).toFixed(1) : 0;
+            meta.innerHTML = `
+                Generated <strong>${job.accepted_tracks}</strong> tracks from <strong>${job.total_candidates}</strong> candidates in <strong>${job.attempts}</strong> iterations.<br>
+                <strong>Acceptance rate:</strong> ${acceptanceRate}% | <strong>Random seed:</strong> ${job.random_seed || 'N/A'}<br>
+                <strong>Feedback loop:</strong> Used ${job.accepted_examples ? job.accepted_examples.length : 0} successful examples to improve suggestions
+            `;
             exportSection.style.display = 'block';
         } else if (job.status === 'failed') {
             meta.textContent = `Generation failed: ${job.error}`;
             exportSection.style.display = 'none';
         } else if (job.status === 'stopped') {
-            meta.textContent = `Generation stopped. Generated ${job.accepted_tracks} tracks.`;
+            const acceptanceRate = job.total_candidates > 0 ? ((job.accepted_tracks / job.total_candidates) * 100).toFixed(1) : 0;
+            meta.innerHTML = `
+                Generation stopped. Generated <strong>${job.accepted_tracks}</strong> tracks from <strong>${job.total_candidates}</strong> candidates.<br>
+                <strong>Acceptance rate:</strong> ${acceptanceRate}% | <strong>Random seed:</strong> ${job.random_seed || 'N/A'}
+            `;
             exportSection.style.display = 'block';
         }
 

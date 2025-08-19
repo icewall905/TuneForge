@@ -26,6 +26,10 @@
   - Audio feature-based similarity matching
   - Export to JSON and M3U formats
   - Performance optimized with database indexes and caching
+  - **NEW**: Enhanced iterative generation with feedback loop
+  - **NEW**: Random seed integration to prevent stale results
+  - **NEW**: Adaptive prompting using successful candidates as examples
+  - **NEW**: Local playlist history integration with metadata
 
 ## Configuration
 - Uses `config.ini` (copied from `config.ini.example`)
