@@ -1,0 +1,10 @@
+{
+  "timestamp": "2025-08-19T09:11:53.910329",
+  "stats": {
+    "total_jobs": 10,
+    "completed_jobs": 10,
+    "failed_jobs": 0,
+    "start_time": "2025-08-19T09:11:43.909160"
+  },
+  "last_checkpoint": 10
+}
