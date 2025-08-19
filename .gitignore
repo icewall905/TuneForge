@@ -15,12 +15,8 @@ logs/
 .cache/
 .cache/*
 
-# Documentation (sensitive instructions)
-notes/instructions.md
-notes/private/
-notes/sensitive/
-# Allow public documentation files
-!notes/*.md
-!notes/*.txt
+# Documentation and notes (keep private)
+notes/
+notes/*
 
 db/*
