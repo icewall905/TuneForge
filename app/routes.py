@@ -172,8 +172,22 @@ _debug_flags_printed = False # Module-level flag to print debug status only once
 
 def debug_log(message, level="INFO", force=False):
     global DEBUG_ENABLED, _debug_flags_printed
-    # Check if debug is enabled in config
-    debug_from_config_str = get_config_value('APP', 'Debug', 'yes') 
+    # Check if debug is enabled in config - avoid circular dependency
+    try:
+        # Try to get config value directly without going through the full config loading cycle
+        if os.path.exists(CONFIG_FILE):
+            temp_config = configparser.ConfigParser()
+            temp_config.optionxform = lambda optionstr: optionstr
+            temp_config.read(CONFIG_FILE)
+            if temp_config.has_section('APP') and 'Debug' in temp_config['APP']:
+                debug_from_config_str = temp_config['APP']['Debug']
+            else:
+                debug_from_config_str = 'yes'  # Default fallback
+        else:
+            debug_from_config_str = 'yes'  # Default fallback
+    except Exception:
+        debug_from_config_str = 'yes'  # Default fallback on any error
+    
     debug_from_config = debug_from_config_str.lower() in ('yes', 'true', '1') if isinstance(debug_from_config_str, str) else False
 
     # Print status once
