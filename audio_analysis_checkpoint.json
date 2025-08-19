@@ -1,10 +1,10 @@
 {
-  "timestamp": "2025-08-19T10:12:31.479669",
+  "timestamp": "2025-08-19T10:41:21.195314",
   "stats": {
-    "total_jobs": 236,
-    "completed_jobs": 31,
+    "total_jobs": 220,
+    "completed_jobs": 9,
     "failed_jobs": 0,
-    "start_time": "2025-08-19T10:12:02.408791"
+    "start_time": "2025-08-19T10:41:09.227633"
   },
-  "last_checkpoint": 31
+  "last_checkpoint": 9
 }

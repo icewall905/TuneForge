@@ -33,9 +33,9 @@
             </div>
             <div class="progress-bar-container">
                 <div class="progress-bar">
-                    <div class="progress-fill" style="width: {{ progress.progress_percentage }}%"></div>
+                    <div id="page-progress-fill" class="progress-fill" style="width: {{ progress.progress_percentage }}%"></div>
                 </div>
-                <span class="progress-text">{{ progress.progress_percentage }}% Complete</span>
+                <span id="page-progress-text" class="progress-text">{{ progress.progress_percentage }}% Complete</span>
             </div>
         </div>
     </div>
@@ -204,6 +204,9 @@ class AudioAnalysisManager {
         this.isRunning = false;
         this.statusInterval = null;
         this.progressInterval = null;
+        this.lastKnownProgress = null;
+        this.lastStatusCheck = 0;
+        this.cachedProgress = null;  // Cache the last good progress value
         this.init();
     }
 
@@ -229,7 +232,28 @@ class AudioAnalysisManager {
 
             // Add to global status manager immediately (same pattern as playlist generator)
             if (window.globalStatusManager) {
+                // Check if we should allow adding audio analysis
+                if (!this.shouldAllowAudioAnalysis()) {
+                    console.log('[AudioAnalysis] Preventing audio analysis from being added (recently stopped)');
+                    return;
+                }
+                
+                // Clear cache when starting new analysis
+                this.cachedProgress = null;
+                
                 window.globalStatusManager.addAudioAnalysis();
+                
+                // Initialize with cached progress if available
+                if (this.cachedProgress && this.cachedProgress.progress_percentage > 0) {
+                    window.globalStatusManager.updateAudioAnalysis({
+                        progress: this.cachedProgress.progress_percentage,
+                        processedTracks: this.cachedProgress.analyzed_tracks || 0,
+                        totalTracks: this.cachedProgress.total_tracks || 0,
+                        currentStatus: 'Resuming...',
+                        queueSize: this.cachedProgress.pending_tracks || 0,
+                        failedTracks: this.cachedProgress.error_tracks || 0
+                    });
+                }
             } else {
                 console.warn('Global status manager not available to add audio analysis immediately');
             }
@@ -290,6 +314,12 @@ class AudioAnalysisManager {
                 // Stop ALL polling immediately
                 this.stopProgressPolling();
                 this.stopStatusPolling();
+                
+                // Set timestamp to prevent re-adding
+                this.lastStatusCheck = Date.now();
+                
+                // Reset cached progress when stopping
+                this.cachedProgress = null;
                 
                 // Remove from global status manager immediately
                 if (window.globalStatusManager) {
@@ -410,29 +440,36 @@ class AudioAnalysisManager {
                 document.getElementById('retrying-jobs').textContent = '0'; // Not available in DB progress
                 document.getElementById('success-rate').textContent = `${progress.progress_percentage || 0}%`;
                 
-                // Update main progress bar
-                const progressFill = document.querySelector('.progress-fill');
+                // Update main progress bar (scoped to this page only)
+                const progressFill = document.getElementById('page-progress-fill');
                 if (progressFill) {
                     progressFill.style.width = `${progress.progress_percentage || 0}%`;
                 }
                 
-                // Update progress text
-                const progressText = document.querySelector('.progress-text');
+                // Update progress text (scoped to this page only)
+                const progressText = document.getElementById('page-progress-text');
                 if (progressText) {
                     progressText.textContent = `${progress.progress_percentage || 0}% Complete`;
                 }
                 
-                // Update global status manager if this is the first progress update
-                if (window.globalStatusManager && window.globalStatusManager.activeAudioAnalysis && 
-                    window.globalStatusManager.activeAudioAnalysis.progress === 0) {
-                    window.globalStatusManager.updateAudioAnalysis({
-                        progress: progress.progress_percentage || 0,
-                        processedTracks: progress.analyzed_tracks || 0,
-                        totalTracks: progress.total_tracks || 0,
-                        currentStatus: 'Processing...',
-                        queueSize: progress.pending_tracks || 0,
-                        failedTracks: progress.error_tracks || 0
-                    });
+                // Only update global status manager on the first progress update or if we have valid data
+                if (window.globalStatusManager && window.globalStatusManager.activeAudioAnalysis) {
+                    const currentProgress = window.globalStatusManager.activeAudioAnalysis.progress;
+                    
+                    // Use cached progress if available, otherwise use current progress
+                    const progressToUse = this.cachedProgress || progress;
+                    
+                    // Only update if this is the first update (progress === 0) or if we have valid progress data
+                    if (currentProgress === 0 || (progressToUse.progress_percentage !== undefined && progressToUse.progress_percentage > 0)) {
+                        window.globalStatusManager.updateAudioAnalysis({
+                            progress: progressToUse.progress_percentage || currentProgress, // Use current progress if new data is invalid
+                            processedTracks: progressToUse.analyzed_tracks || 0,
+                            totalTracks: progressToUse.total_tracks || 0,
+                            currentStatus: 'Processing...',
+                            queueSize: progressToUse.pending_tracks || 0,
+                            failedTracks: progressToUse.error_tracks || 0
+                        });
+                    }
                 }
             }
         } catch (error) {
@@ -454,7 +491,7 @@ class AudioAnalysisManager {
                 const status = await response.json();
                 
                 if (status.status === 'stopped' || status.status === 'completed') {
-                    console.log(`[AudioAnalysis] Analysis status is ${status.status}, stopping polling and removing indicator`);
+                    console.log(`[AudioAnalysis] Analysis status is ${status.status}, stopping all polling and removing indicator`);
                     this.isRunning = false;
                     this.stopStatusPolling();
                     this.stopProgressPolling();
@@ -467,6 +504,9 @@ class AudioAnalysisManager {
                     // Update UI
                     this.updateControlButtons();
                     this.showMessage(`Analysis ${status.status}`, 'info');
+                    
+                    // Prevent any further status checks for a short time
+                    this.lastStatusCheck = Date.now();
                 } else {
                     this.updateStatus();
                 }
@@ -485,44 +525,23 @@ class AudioAnalysisManager {
                 return;
             }
             
-            await this.updateProgress();
+            // Get progress data first before updating anything
+            const progressData = await this.getProgressData();
             
-            // Check if analysis has actually stopped on the server
-            try {
-                const response = await fetch('/api/audio-analysis/status');
-                const status = await response.json();
+            // Use safe update to prevent flashing
+            if (this.safeUpdateProgress(progressData)) {
+                // Update the page progress display
+                await this.updateProgress();
                 
-                if (status.status === 'stopped' || status.status === 'completed') {
-                    console.log(`[AudioAnalysis] Progress polling detected analysis ${status.status}, stopping and removing indicator`);
-                    this.isRunning = false;
-                    this.stopProgressPolling();
-                    this.stopStatusPolling();
-                    
-                    // Remove from global status manager
-                    if (window.globalStatusManager && window.globalStatusManager.activeAudioAnalysis) {
-                        window.globalStatusManager.removeAudioAnalysis();
-                    }
-                    
-                    // Update UI
-                    this.updateControlButtons();
-                    this.showMessage(`Analysis ${status.status}`, 'info');
-                    return;
-                }
-            } catch (error) {
-                console.error('Error checking analysis status in progress polling:', error);
-            }
-            
-            // Update global status manager with progress
-            if (window.globalStatusManager && window.globalStatusManager.activeAudioAnalysis) {
-                const progressData = await this.getProgressData();
-                if (progressData) {
+                // Update global status manager with the cached progress data
+                if (window.globalStatusManager && window.globalStatusManager.activeAudioAnalysis) {
                     window.globalStatusManager.updateAudioAnalysis({
-                        progress: progressData.progress_percentage || 0,
-                        processedTracks: progressData.analyzed_tracks || 0,
-                        totalTracks: progressData.total_tracks || 0,
+                        progress: this.cachedProgress.progress_percentage,
+                        processedTracks: this.cachedProgress.analyzed_tracks || 0,
+                        totalTracks: this.cachedProgress.total_tracks || 0,
                         currentStatus: 'Processing...',
-                        queueSize: progressData.pending_tracks || 0,
-                        failedTracks: progressData.error_tracks || 0
+                        queueSize: this.cachedProgress.pending_tracks || 0,
+                        failedTracks: this.cachedProgress.error_tracks || 0
                     });
                 }
             }
@@ -533,11 +552,51 @@ class AudioAnalysisManager {
         try {
             const response = await fetch('/api/audio-analysis/progress');
             const result = await response.json();
-            return result.success ? result.progress : null;
+            
+            if (result.success && result.progress) {
+                // Store the last known good progress
+                this.lastKnownProgress = result.progress;
+                return result.progress;
+            }
+            return null;
         } catch (error) {
             console.error('Error getting progress data:', error);
             return null;
         }
+    }
+    
+    getLastKnownProgress() {
+        return this.lastKnownProgress || null;
+    }
+    
+    shouldAllowAudioAnalysis() {
+        // Prevent re-adding audio analysis if it was recently stopped (within 10 seconds)
+        const timeSinceLastCheck = Date.now() - this.lastStatusCheck;
+        return timeSinceLastCheck > 10000; // 10 seconds
+    }
+    
+    safeUpdateProgress(progressData) {
+        // Only update if we have valid progress data
+        if (!progressData || progressData.progress_percentage === undefined) {
+            return false;
+        }
+        
+        const newProgress = progressData.progress_percentage;
+        
+        // If this pie is the first update, cache it
+        if (this.cachedProgress === null) {
+            this.cachedProgress = progressData;
+            return true;
+        }
+        
+        // Only update if the new progress is better (higher) than cached
+        if (newProgress > this.cachedProgress.progress_percentage) {
+            this.cachedProgress = progressData;
+            return true;
+        }
+        
+        // If new progress is lower, don't update (prevents flashing to 0%)
+        return false;
     }
 
     stopProgressPolling() {
