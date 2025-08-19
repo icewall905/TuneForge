@@ -40,6 +40,7 @@
 - **Storage Path**: `/mnt/media/music/` (network mount)
 - **Schema**: 3 tables with metadata indexes + audio analysis system
 - **Audio Analysis**: Phase 1 Complete ✅ - All database tables created successfully
+- **Audio Analysis**: Phase 2 In Progress ✅ - Core engine and dependencies installed
 
 ## Next Steps for Development
 1. Test Ollama integration for playlist generation
