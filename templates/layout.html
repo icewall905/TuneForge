@@ -102,7 +102,8 @@
             
             // Restore state from localStorage
             this.restoreState();
-            // Validate any restored playlists with the server before polling
+            // Validate any restored scans and playlists with the server before polling
+            this.validateRestoredScans();
             this.validateRestoredPlaylists();
             
             // Start background polling
@@ -113,6 +114,50 @@
             
             // Set up page visibility and focus handlers
             this.setupEventHandlers();
+        },
+        
+        async validateRestoredScans() {
+            try {
+                const toRemove = [];
+                for (const [scanId, scan] of this.activeScans) {
+                    try {
+                        // Add timeout to prevent hanging
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+                        
+                        const resp = await fetch(`/api/scan-progress/${scanId}`, {
+                            signal: controller.signal
+                        });
+                        clearTimeout(timeoutId);
+                        
+                        const progress = await resp.json();
+                        if (progress.error) {
+                            // Server has no progress for this ID; remove immediately
+                            console.log(`[Sidebar] Removing stale scan ${scanId}: ${progress.error}`);
+                            toRemove.push(scanId);
+                            continue;
+                        }
+                        if (['completed','cancelled','error'].includes(progress.status)) {
+                            // Terminal on server; remove soon for UX
+                            console.log(`[Sidebar] Scan ${scanId} is ${progress.status}, removing soon`);
+                            setTimeout(() => this.removeScan(scanId), 3000);
+                            continue;
+                        }
+                        // Active on server; ensure polling is running
+                        console.log(`[Sidebar] Scan ${scanId} is active, starting polling`);
+                        this.startPolling(scanId);
+                    } catch (e) {
+                        // Network or parse error: remove to avoid stale UI
+                        console.log(`[Sidebar] Removing scan ${scanId} due to error:`, e);
+                        toRemove.push(scanId);
+                    }
+                }
+                // Bulk remove any stale entries
+                toRemove.forEach(id => this.removeScan(id));
+                console.log(`[Sidebar] Validated scans: removed ${toRemove.length} stale entries`);
+            } catch (e) {
+                console.error('Failed to validate restored scans:', e);
+            }
         },
         
         async validateRestoredPlaylists() {
@@ -167,14 +212,21 @@
                             if (now - state.timestamp < 3600000) {
                                 this.activeScans = new Map(state.activeScans || []);
                                 this.activePlaylists = new Map(state.activePlaylists || []);
-                                console.log(`Restored ${this.activeScans.size} active scans and ${this.activePlaylists.size} active playlists from localStorage`);
+                                console.log(`[Sidebar] Restored ${this.activeScans.size} active scans and ${this.activePlaylists.size} active playlists from localStorage`);
+                                
+                                // If we have stale scans, they'll be cleaned up by validateRestoredScans
+                                if (this.activeScans.size > 0) {
+                                    console.log(`[Sidebar] Will validate ${this.activeScans.size} restored scans with server`);
+                                }
                             } else {
-                                console.log('Saved state too old, starting fresh');
+                                console.log('[Sidebar] Saved state too old, starting fresh');
                                 localStorage.removeItem('globalStatusManagerState');
                             }
+                        } else {
+                            console.log('[Sidebar] No saved state found, starting fresh');
                         }
                     } catch (error) {
-                        console.error('Error restoring state:', error);
+                        console.error('[Sidebar] Error restoring state:', error);
                         localStorage.removeItem('globalStatusManagerState');
                     }
                 },
