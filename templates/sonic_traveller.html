@@ -36,10 +36,7 @@
                 <p class="help-text">Lower is stricter (normalized distance). Suggested: 0.30–1.00 depending on desired similarity.</p>
             </div>
 
-            <div class="form-group">
-                <label for="ollama_model">Ollama Model:</label>
-                <input type="text" id="ollama_model" class="form-control" value="{{ ollama_model }}">
-            </div>
+
 
             <div class="form-group">
                 <button id="start_btn" class="primary-button" disabled>Generate</button>
@@ -419,8 +416,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const payload = {
             seed_track_id: seedTrack.id,
             num_songs: parseInt(document.getElementById('num_songs').value) || 20,
-            threshold: parseFloat(tSlider.value) || 0.5,
-            ollama_model: document.getElementById('ollama_model').value.trim()
+            threshold: parseFloat(tSlider.value) || 0.5
         };
         
         try {

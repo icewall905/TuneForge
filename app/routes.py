@@ -1023,7 +1023,7 @@ def new_generator():
         except Exception as e:
             debug_log(f"Failed to ensure database indexes: {e}", 'WARN')
         
-        return render_template('sonic_traveller.html', ollama_model=get_config_value('OLLAMA', 'Model', 'llama3'))
+        return render_template('sonic_traveller.html')
 
     data = request.get_json() or {}
     seed_track = (data.get('seed_track') or '').strip()
@@ -1033,7 +1033,7 @@ def new_generator():
         threshold = float(data.get('threshold', 0.35))
     except Exception:
         threshold = 0.35
-    ollama_model = data.get('ollama_model') or get_config_value('OLLAMA', 'Model', 'llama3')
+    ollama_model = get_config_value('OLLAMA', 'Model', 'llama3')
 
     if not (seed_track or seed_track_id):
         return jsonify({'error': 'Seed track or seed_track_id is required'}), 400
@@ -3234,7 +3234,7 @@ def api_sonic_start():
         seed_track_id = data.get('seed_track_id')
         num_songs = int(data.get('num_songs', 20))
         threshold = float(data.get('threshold', 0.35))
-        ollama_model = data.get('ollama_model', get_config_value('OLLAMA', 'Model', 'llama3'))
+        ollama_model = get_config_value('OLLAMA', 'Model', 'llama3')
         
         if not seed_track_id:
             return jsonify({'success': False, 'error': 'seed_track_id is required'}), 400
