@@ -78,6 +78,14 @@
                         </select>
                         <p class="help-text">Show detailed matching info in live logs (basic mode shows only playlist additions).</p>
                     </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="use_local_matching" name="use_local_matching" {% if use_local_matching in ['yes','true','1'] %}checked{% endif %}>
+                            Use local library instead of remote server for matching (Plex/Navidrome)
+                        </label>
+                        <p class="help-text">When enabled, matches Ollama suggestions against your indexed local library. Remote services can remain enabled for other tasks.</p>
+                    </div>
                 </div>
             </div>
             

@@ -18,6 +18,10 @@ from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC
 from collections import OrderedDict
 import hashlib
+import threading
+import queue
+import uuid
+from datetime import datetime
 
 # --- Logger Setup ---
 LOG_DIR = 'logs'  # This will be relative to the project root (TuneForge/)
@@ -964,11 +968,181 @@ def history():
     def _parse_ts(item):
         try:
             ts = item.get('timestamp')
-            return datetime.datetime.fromisoformat(ts) if ts else datetime.datetime.min
+            return datetime.fromisoformat(ts) if ts else datetime.min
         except Exception:
-            return datetime.datetime.min
+            return datetime.min
     playlist_history.sort(key=_parse_ts, reverse=True)
     return render_template('history.html', history=playlist_history)
+
+@main_bp.route('/new-generator', methods=['GET', 'POST'])
+def new_generator():
+    if request.method == 'GET':
+        # Ensure database indexes exist for optimal performance
+        try:
+            from sonic_similarity import ensure_database_indexes
+            db_path = os.path.join(DB_DIR, 'local_music.db')
+            ensure_database_indexes(db_path)
+        except Exception as e:
+            debug_log(f"Failed to ensure database indexes: {e}", 'WARN')
+        
+        return render_template('sonic_traveller.html', ollama_model=get_config_value('OLLAMA', 'Model', 'llama3'))
+
+    data = request.get_json() or {}
+    seed_track = (data.get('seed_track') or '').strip()
+    seed_track_id = data.get('seed_track_id')
+    num_songs = int(data.get('num_songs', 20))
+    try:
+        threshold = float(data.get('threshold', 0.35))
+    except Exception:
+        threshold = 0.35
+    ollama_model = data.get('ollama_model') or get_config_value('OLLAMA', 'Model', 'llama3')
+
+    if not (seed_track or seed_track_id):
+        return jsonify({'error': 'Seed track or seed_track_id is required'}), 400
+
+    # If an id is provided, try to resolve title/artist from local DB for better prompting
+    if seed_track_id and not seed_track:
+        resolved = _get_track_by_id(seed_track_id)
+        if resolved:
+            seed_track = f"{(resolved.get('title') or '').strip()} - {(resolved.get('artist') or '').strip()}".strip(' -')
+
+    ollama_url = get_config_value('OLLAMA', 'URL')
+    if not ollama_url:
+        return jsonify({'error': 'Ollama URL not configured in settings'}), 400
+
+    # Request candidates from Ollama (2x desired for filtering)
+    prompt = f"List {num_songs * 2} songs similar in vibe to: {seed_track}. Return Title and Artist."
+    candidates = generate_tracks_with_ollama(ollama_url, ollama_model, prompt, num_songs * 2, 0, []) or []
+
+    # Map candidates to local tracks and keep only those with features (Phase 2)
+    mapped_with_features = _map_candidates_to_local_with_features(candidates)
+
+    # Distance scoring (normalized) against seed (if seed features available); otherwise, return mapped as-is
+    db_path = os.path.join(DB_DIR, 'local_music.db')
+    try:
+        from feature_store import fetch_track_features, fetch_batch_features
+        from sonic_similarity import get_feature_stats, build_vector, compute_distance
+        seed_features = None
+        if seed_track_id:
+            seed_features = fetch_track_features(db_path, int(seed_track_id))
+        # If no seed id, try to find the seed via exact title-artist in DB
+        if not seed_features and seed_track:
+            # resolve seed to id
+            conn = sqlite3.connect(db_path)
+            try:
+                parts = seed_track.split('-')
+                stitle = (parts[0] if parts else '').strip()
+                sartist = (parts[1] if len(parts) > 1 else '').strip()
+                if stitle and sartist:
+                    cur = conn.cursor()
+                    cur.execute('SELECT id FROM tracks WHERE lower(title)=? AND lower(artist)=? LIMIT 1', (stitle.lower(), sartist.lower()))
+                    r = cur.fetchone()
+                    if r:
+                        seed_features = fetch_track_features(db_path, int(r[0]))
+            finally:
+                conn.close()
+
+        if seed_features:
+            stats = get_feature_stats(db_path)
+            seed_vec = build_vector(seed_features, stats)
+            # fetch candidate features in batch
+            track_ids = [r['id'] for r in mapped_with_features]
+            feat_map = fetch_batch_features(db_path, track_ids)
+            # compute distances
+            scored = []
+            for r in mapped_with_features:
+                f = feat_map.get(r['id'])
+                if not f:
+                    continue
+                cand_vec = build_vector(f, stats)
+                dist = compute_distance(seed_vec, cand_vec)
+                scored.append((dist, r))
+            scored.sort(key=lambda x: x[0])
+            picked = [dict(id=r['id'], title=r['title'], artist=r['artist'], album=r['album'], distance=round(d, 3)) for d, r in scored[:num_songs]]
+        else:
+            picked = [dict(id=r['id'], title=r['title'], artist=r['artist'], album=r['album']) for r in mapped_with_features[:num_songs]]
+
+        return jsonify({
+            'message': 'Sonic Traveller results',
+            'tracks': picked,
+            'count': len(picked),
+            'total_candidates': len(candidates),
+            'used_distance': bool(seed_features)
+        }), 200
+    except Exception as e:
+        debug_log(f"Sonic Traveller distance scoring error: {e}", 'ERROR')
+        # Fallback to mapped list
+        results = [dict(id=r['id'], title=r['title'], artist=r['artist'], album=r['album']) for r in mapped_with_features[:num_songs]]
+        return jsonify({'message': 'Sonic Traveller (fallback)', 'tracks': results, 'count': len(results)}), 200
+
+def _map_candidates_to_local_with_features(candidates):
+    """Return a list of local track dicts (id,title,artist,album) that match candidates and have features."""
+    db_path = os.path.join(DB_DIR, 'local_music.db')
+    if not os.path.exists(db_path):
+        return []
+
+    # Build normalized candidate keys
+    def _norm(s):
+        return (s or '').strip()
+
+    unique_pairs = []
+    seen = set()
+    for tr in candidates:
+        title = _norm(tr.get('title'))
+        artist = _norm(tr.get('artist'))
+        if not title or not artist:
+            continue
+        key = (title.lower(), artist.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_pairs.append((title, artist))
+
+    if not unique_pairs:
+        return []
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    matched_rows = []  # list of dicts with id,title,artist,album
+
+    try:
+        # First pass: exact lower(title,artist)
+        for title, artist in unique_pairs:
+            cursor.execute(
+                "SELECT id, title, artist, album FROM tracks WHERE lower(title)=? AND lower(artist)=? LIMIT 1",
+                (title.lower(), artist.lower())
+            )
+            row = cursor.fetchone()
+            if row:
+                matched_rows.append({'id': row[0], 'title': row[1] or '', 'artist': row[2] or '', 'album': row[3] or ''})
+
+        # Second pass: LIKE for those not matched
+        remaining = [(t, a) for (t, a) in unique_pairs if not any((r['title'].lower(), r['artist'].lower()) == (t.lower(), a.lower()) for r in matched_rows)]
+        for title, artist in remaining:
+            like_title = f"%{title}%"
+            like_artist = f"%{artist}%"
+            cursor.execute(
+                "SELECT id, title, artist, album FROM tracks WHERE title LIKE ? AND artist LIKE ? LIMIT 10",
+                (like_title, like_artist)
+            )
+            candidate_rows = [{'id': r[0], 'title': r[1] or '', 'artist': r[2] or '', 'album': r[3] or ''} for r in cursor.fetchall() or []]
+            # crude best: pick first for now; later we could reuse evaluate logic
+            if candidate_rows:
+                matched_rows.append(candidate_rows[0])
+
+    finally:
+        conn.close()
+
+    # Filter by having features
+    try:
+        from feature_store import fetch_batch_features
+        track_ids = [r['id'] for r in matched_rows]
+        features_map = fetch_batch_features(db_path, track_ids)
+        filtered = [r for r in matched_rows if r['id'] in features_map]
+        return filtered
+    except Exception:
+        # If feature fetch fails, return matched rows without filtering to avoid hard failure
+        return matched_rows
 
 @main_bp.route('/settings', methods=['GET', 'POST'])
 def settings():
@@ -996,6 +1170,7 @@ def settings():
         current_config.set('APP', 'EnablePlex', request.form.get('enable_plex', get_config_value('APP', 'EnablePlex', 'no')))
         current_config.set('APP', 'Debug', request.form.get('app_debug_mode', get_config_value('APP', 'Debug', 'yes'))) # Ensure this matches the form field name
         current_config.set('APP', 'VerboseLogging', request.form.get('verbose_logging', get_config_value('APP', 'VerboseLogging', 'no')))
+        current_config.set('APP', 'UseLocalMatching', 'yes' if request.form.get('use_local_matching') else 'no')
         current_config.set('APP', 'LocalMusicFolder', request.form.get('local_music_folder', get_config_value('APP', 'LocalMusicFolder', '')))
 
 
@@ -1036,6 +1211,7 @@ def settings():
         'enable_plex': get_config_value('APP', 'EnablePlex', 'no'),
         'app_debug_mode': get_config_value('APP', 'Debug', 'yes'), # Ensure this matches the form field name and context variable
         'verbose_logging': get_config_value('APP', 'VerboseLogging', 'no'),
+        'use_local_matching': get_config_value('APP', 'UseLocalMatching', 'no'),
         'local_music_folder': get_config_value('APP', 'LocalMusicFolder', ''),
 
         'navidrome_url': get_config_value('NAVIDROME', 'URL', ''),
@@ -1144,8 +1320,9 @@ def api_generate_playlist():
     if not ollama_url or not ollama_model:
         return jsonify({"error": "Ollama URL or Model not configured in settings."}), 400
     
-    enable_navidrome = 'navidrome' in services_to_use and get_config_value('APP', 'EnableNavidrome', 'no').lower() in ('yes', 'true', '1')
-    enable_plex = 'plex' in services_to_use and get_config_value('APP', 'EnablePlex', 'no').lower() in ('yes', 'true', '1')
+    use_local_matching = get_config_value('APP', 'UseLocalMatching', 'no').lower() in ('yes', 'true', '1')
+    enable_navidrome = (not use_local_matching) and ('navidrome' in services_to_use) and get_config_value('APP', 'EnableNavidrome', 'no').lower() in ('yes', 'true', '1')
+    enable_plex = (not use_local_matching) and ('plex' in services_to_use) and get_config_value('APP', 'EnablePlex', 'no').lower() in ('yes', 'true', '1')
 
     navidrome_url, navidrome_user, navidrome_pass = (None,)*3
     if enable_navidrome:
@@ -1164,8 +1341,8 @@ def api_generate_playlist():
         if not all([plex_server_url, plex_token, plex_section_id, plex_machine_id]):
             debug_log("Plex enabled but critical details missing. Disabling for this run.", "WARN", True); enable_plex = False
     
-    if not enable_navidrome and not enable_plex:
-        return jsonify({"error": "No services (Navidrome/Plex) are enabled or properly configured."}), 400
+    if not use_local_matching and not enable_navidrome and not enable_plex:
+        return jsonify({"error": "No services (Local/ Navidrome/ Plex) are enabled or properly configured."}), 400
 
     final_unique_matched_tracks_map = {} # Stores {(title.lower(), artist.lower()): track_details_dict}
     all_ollama_suggestions_raw = [] # Stores all raw track dicts from Ollama for context
@@ -1230,9 +1407,18 @@ def api_generate_playlist():
             eligible_tracks_for_search.append(track)
         
         debug_log(f"Ollama: {len(eligible_tracks_for_search)} tracks eligible for searching after filtering batch of {len(current_ollama_batch)}.", "INFO")
-        debug_log(f"Ollama: Processing {len(eligible_tracks_for_search)} tracks for Navidrome search...", "INFO")
+        debug_log(f"Ollama: Processing {len(eligible_tracks_for_search)} tracks for matching...", "INFO")
         if not eligible_tracks_for_search: continue
 
+        if use_local_matching:
+            newly_matched = search_tracks_in_local_library(eligible_tracks_for_search, final_unique_matched_tracks_map)
+            api_generate_playlist.playlist_progress[playlist_id].update({
+                'tracks_found': len(final_unique_matched_tracks_map),
+                'current_status': f'Found {len(newly_matched)} new tracks via Local Library',
+                'current_phase': 'local'
+            })
+            if len(final_unique_matched_tracks_map) >= num_songs: break
+        
         if enable_navidrome:
             debug_log(f"Navidrome: Starting search for {len(eligible_tracks_for_search)} eligible tracks", "INFO")
             newly_matched = search_tracks_in_navidrome(navidrome_url, navidrome_user, navidrome_pass, eligible_tracks_for_search, final_unique_matched_tracks_map)
@@ -1287,6 +1473,7 @@ def api_generate_playlist():
     created_playlists_summary = {}
     navidrome_ids = [t['id'] for t in selected_tracks_for_creation if t['source'] == 'navidrome']
     plex_ids = [t['id'] for t in selected_tracks_for_creation if t['source'] == 'plex']
+    local_ids = [t['id'] for t in selected_tracks_for_creation if t['source'] == 'local']
 
     if enable_navidrome:
         if navidrome_ids:
@@ -1300,12 +1487,15 @@ def api_generate_playlist():
             created_playlists_summary['plex'] = {'id': pid, 'track_count': plex_count if pid else 0, 'status': 'success' if pid else 'failed'}
         else: created_playlists_summary['plex'] = {'id': None, 'track_count': 0, 'status': 'no_tracks'}
 
+    if use_local_matching:
+        created_playlists_summary['local'] = {'id': None, 'track_count': len(local_ids), 'status': 'matched_only'}
+
     history = load_playlist_history()
     history.append({
         "name": playlist_name, "prompt": prompt, "num_songs_requested": num_songs,
         "num_songs_added_total": len(selected_tracks_for_creation),
         "services_targeted": services_to_use, "creation_results": created_playlists_summary,
-        "tracks_details": selected_tracks_for_creation, "timestamp": datetime.datetime.now().isoformat()
+        "tracks_details": selected_tracks_for_creation, "timestamp": datetime.now().isoformat()
     })
     save_playlist_history(history)
 
@@ -1889,6 +2079,173 @@ def search_local_tracks(query, limit=50, genre=None, year=None, sort_by='title',
     
     conn.close()
     return results
+
+@main_bp.route('/api/local-search')
+def api_local_search():
+    q = (request.args.get('q') or '').strip()
+    if not q:
+        return jsonify([])
+    rows = search_local_tracks(q, limit=25)
+    return jsonify(rows)
+
+def _get_db_path():
+    return os.path.join(DB_DIR, 'local_music.db')
+
+def _get_track_by_id(track_id):
+    db_path = _get_db_path()
+    if not os.path.exists(db_path):
+        return None
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, title, artist, album, genre, year, duration, file_path FROM tracks WHERE id = ?', (track_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {
+        'id': row[0], 'title': row[1], 'artist': row[2], 'album': row[3],
+        'genre': row[4], 'year': row[5], 'duration': row[6], 'file_path': row[7]
+    }
+
+def _get_features_by_track_id(track_id):
+    db_path = _get_db_path()
+    if not os.path.exists(db_path):
+        return None
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('PRAGMA table_info(audio_features)')
+        if not cursor.fetchall():
+            conn.close()
+            return None
+        cursor.execute('SELECT * FROM audio_features WHERE track_id = ?', (track_id,))
+        col_names = [d[1] for d in cursor.description] if cursor.description else []
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {col_names[i]: row[i] for i in range(len(row))}
+    except Exception:
+        conn.close()
+        return None
+
+@main_bp.route('/api/sonic/seed-info')
+def api_sonic_seed_info():
+    try:
+        track_id = request.args.get('track_id', type=int)
+        if not track_id:
+            return jsonify({'success': False, 'error': 'track_id required'}), 400
+        track = _get_track_by_id(track_id)
+        if not track:
+            return jsonify({'success': False, 'error': 'Track not found'}), 404
+        db_path = os.path.join(DB_DIR, 'local_music.db')
+        # Schema check (best-effort; if import missing, fall back to legacy)
+        try:
+            from feature_store import check_audio_feature_schema, fetch_track_features
+            schema_ok, missing = check_audio_feature_schema(db_path)
+            features = fetch_track_features(db_path, track_id) if schema_ok else None
+            return jsonify({'success': True, 'track': track, 'features': features, 'schema_ok': schema_ok, 'missing': missing})
+        except Exception:
+            features = _get_features_by_track_id(track_id)
+            return jsonify({'success': True, 'track': track, 'features': features, 'schema_ok': True, 'missing': []})
+    except Exception as e:
+        debug_log(f"Seed info error: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': 'Internal error'}), 500
+
+def search_tracks_in_local_library(ollama_suggested_tracks, final_unique_matched_tracks_map):
+    """Match Ollama-suggested tracks against the local `tracks` table and add best matches."""
+    db_path = os.path.join(DB_DIR, 'local_music.db')
+    if not os.path.exists(db_path):
+        debug_log("Local DB not found for local matching.", "WARN")
+        return []
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    newly_matched_for_batch = []
+
+    def evaluate_local_candidates(title, artist, candidates):
+        best = None
+        best_score = 0.0
+        for c in candidates:
+            if is_unwanted_version(c.get('title'), c.get('album')):
+                continue
+            title_score = calculate_similarity(title, c.get('title'))
+            artist_score = calculate_similarity(artist, c.get('artist'))
+            combined = (title_score * 0.7) + (artist_score * 0.3)
+            if combined > best_score and combined >= 0.82 and title_score >= 0.88 and artist_score >= 0.70:
+                best = c
+                best_score = combined
+                if combined >= 0.92 and title_score >= 0.92:
+                    break
+        return best
+
+    try:
+        for suggested_track in ollama_suggested_tracks:
+            title = suggested_track.get('title') or ''
+            artist = suggested_track.get('artist') or ''
+            if not title or not artist:
+                continue
+            track_key = (title.lower(), artist.lower())
+            if track_key in final_unique_matched_tracks_map:
+                continue
+
+            # Exact lower-case match first
+            cursor.execute(
+                "SELECT id, title, artist, album FROM tracks WHERE lower(title)=? AND lower(artist)=? LIMIT 1",
+                (title.lower(), artist.lower())
+            )
+            row = cursor.fetchone()
+            candidates = []
+            if row:
+                candidates.append({'id': row[0], 'title': row[1] or '', 'artist': row[2] or '', 'album': row[3] or ''})
+            else:
+                # Fuzzy LIKE search
+                like_title = f"%{title}%"
+                like_artist = f"%{artist}%"
+                cursor.execute(
+                    "SELECT id, title, artist, album FROM tracks WHERE title LIKE ? AND artist LIKE ? LIMIT 50",
+                    (like_title, like_artist)
+                )
+                for r in cursor.fetchall():
+                    candidates.append({'id': r[0], 'title': r[1] or '', 'artist': r[2] or '', 'album': r[3] or ''})
+
+                # If still nothing, broaden to either title or artist match
+                if not candidates:
+                    cursor.execute(
+                        "SELECT id, title, artist, album FROM tracks WHERE title LIKE ? OR artist LIKE ? LIMIT 50",
+                        (like_title, like_artist)
+                    )
+                    for r in cursor.fetchall():
+                        candidates.append({'id': r[0], 'title': r[1] or '', 'artist': r[2] or '', 'album': r[3] or ''})
+
+            if not candidates:
+                continue
+
+            best_match = evaluate_local_candidates(title, artist, candidates)
+
+            if best_match:
+                match_details = {
+                    'id': best_match['id'], 'title': best_match['title'], 'artist': best_match['artist'],
+                    'album': best_match['album'], 'source': 'local',
+                    'original_suggestion': {'title': title, 'artist': artist, 'album': suggested_track.get('album')}
+                }
+                final_unique_matched_tracks_map[track_key] = match_details
+                newly_matched_for_batch.append(match_details)
+
+                # Update progress for individual track match
+                if hasattr(api_generate_playlist, 'playlist_progress'):
+                    for playlist_id, progress in api_generate_playlist.playlist_progress.items():
+                        if progress.get('status') in ['starting', 'progress']:
+                            progress.update({
+                                'current_status': f"Matched (local): {best_match['artist']} - {best_match['title']}. Currently at tracks {len(final_unique_matched_tracks_map)}/{progress.get('target_songs', '?')}.",
+                                'current_track': f"{best_match['artist']} - {best_match['title']}",
+                                'tracks_found': len(final_unique_matched_tracks_map)
+                            })
+                            break
+        return newly_matched_for_batch
+    finally:
+        conn.close()
 
 def get_local_track_stats():
     """Get statistics about the local music database"""
@@ -2487,3 +2844,444 @@ def art_image():
         return send_file(path, mimetype='image/jpeg', conditional=True)
     # No art, return 204 to let frontend handle placeholder
     return ('', 204)
+
+# Sonic Traveller Background Processing
+_sonic_jobs = {}
+_sonic_job_lock = threading.Lock()
+
+class SonicTravellerJob:
+    def __init__(self, job_id, seed_track_id, num_songs, threshold, ollama_model):
+        self.job_id = job_id
+        self.seed_track_id = seed_track_id
+        self.num_songs = num_songs
+        self.threshold = threshold
+        self.ollama_model = ollama_model
+        self.status = 'running'  # running, completed, failed, stopped
+        self.progress = 0.0
+        self.current_step = 'Initializing...'
+        self.results = []
+        self.error = None
+        self.start_time = datetime.now()
+        self.end_time = None
+        self.total_candidates = 0
+        self.accepted_tracks = 0
+        self.attempts = 0
+        self.max_attempts = 10
+        self.candidate_multiplier = 3
+
+    def update_progress(self, progress, step):
+        self.progress = progress
+        self.current_step = step
+
+    def add_result(self, track):
+        self.results.append(track)
+        self.accepted_tracks = len(self.results)
+
+    def complete(self, success=True):
+        self.status = 'completed' if success else 'failed'
+        self.progress = 100.0 if success else self.progress
+        self.end_time = datetime.now()
+
+    def stop(self):
+        self.status = 'stopped'
+        self.end_time = datetime.now()
+
+def _run_sonic_traveller_job(job):
+    """Background thread function for Sonic Traveller generation"""
+    try:
+        job.update_progress(5.0, 'Fetching seed track features...')
+        
+        # Get seed track info
+        db_path = os.path.join(DB_DIR, 'local_music.db')
+        seed_track = _get_track_by_id(job.seed_track_id)
+        if not seed_track:
+            job.error = 'Seed track not found'
+            job.complete(False)
+            return
+
+        # Check if seed has features
+        try:
+            from feature_store import fetch_track_features
+            seed_features = fetch_track_features(db_path, job.seed_track_id)
+            if not seed_features:
+                job.error = 'Seed track has no audio features'
+                job.complete(False)
+                return
+        except Exception as e:
+            job.error = f'Failed to fetch seed features: {str(e)}'
+            job.complete(False)
+            return
+
+        job.update_progress(15.0, 'Computing feature statistics...')
+        
+        # Get feature stats for normalization
+        try:
+            from sonic_similarity import get_feature_stats, build_vector, compute_distance
+            stats = get_feature_stats(db_path)
+            seed_vec = build_vector(seed_features, stats)
+        except Exception as e:
+            job.error = f'Failed to compute feature statistics: {str(e)}'
+            job.complete(False)
+            return
+
+        job.update_progress(25.0, 'Generating candidates with Ollama...')
+        
+        # Generate candidates iteratively
+        ollama_url = get_config_value('OLLAMA', 'URL')
+        if not ollama_url:
+            job.error = 'Ollama URL not configured'
+            job.complete(False)
+            return
+
+        seed_text = f"{seed_track.get('title', '')} - {seed_track.get('artist', '')}"
+        excludes = set()
+        
+        while len(job.results) < job.num_songs and job.attempts < job.max_attempts:
+            job.attempts += 1
+            remaining = job.num_songs - len(job.results)
+            candidates_needed = min(remaining * job.candidate_multiplier, 50)  # Cap at 50
+            
+            job.update_progress(25.0 + (job.attempts * 5.0), f'Attempt {job.attempts}: Generating {candidates_needed} candidates...')
+            
+            # Generate candidates excluding already accepted
+            exclude_text = f" Exclude: {', '.join(list(excludes)[:10])}" if excludes else ""
+            prompt = f"List {candidates_needed} songs similar in vibe to: {seed_text}.{exclude_text} Return Title and Artist only."
+            
+            candidates = generate_tracks_with_ollama(ollama_url, job.ollama_model, prompt, candidates_needed, 0, []) or []
+            if not candidates:
+                continue
+                
+            job.total_candidates += len(candidates)
+            
+            job.update_progress(25.0 + (job.attempts * 5.0) + 10.0, f'Mapping {len(candidates)} candidates to local library...')
+            
+            # Map candidates to local tracks with features
+            mapped = _map_candidates_to_local_with_features(candidates)
+            if not mapped:
+                continue
+                
+            # Filter out already accepted tracks
+            mapped = [m for m in mapped if m['id'] not in {r['id'] for r in job.results}]
+            if not mapped:
+                continue
+                
+            job.update_progress(25.0 + (job.attempts * 5.0) + 20.0, f'Computing distances for {len(mapped)} candidates...')
+            
+            # Compute distances and accept tracks within threshold
+            track_ids = [m['id'] for m in mapped]
+            try:
+                from feature_store import fetch_batch_features
+                features_map = fetch_batch_features(db_path, track_ids)
+                
+                scored = []
+                for m in mapped:
+                    if m['id'] not in features_map:
+                        continue
+                    cand_vec = build_vector(features_map[m['id']], stats)
+                    dist = compute_distance(seed_vec, cand_vec)
+                    scored.append((dist, m))
+                
+                scored.sort(key=lambda x: x[0])
+                
+                # Accept tracks within threshold
+                for dist, track in scored:
+                    if dist <= job.threshold and len(job.results) < job.num_songs:
+                        track_with_dist = dict(track, distance=round(dist, 3))
+                        job.add_result(track_with_dist)
+                        excludes.add(f"{track['title']} - {track['artist']}")
+                        if len(job.results) >= job.num_songs:
+                            break
+                            
+            except Exception as e:
+                debug_log(f"Distance computation error in job {job.job_id}: {e}", 'ERROR')
+                continue
+                
+            job.update_progress(25.0 + (job.attempts * 5.0) + 30.0, f'Accepted {len(job.results)}/{job.num_songs} tracks...')
+            
+            # If we got enough tracks, we're done
+            if len(job.results) >= job.num_songs:
+                break
+                
+            # Small delay to prevent overwhelming Ollama
+            time.sleep(0.5)
+        
+        if job.results:
+            job.complete(True)
+            job.update_progress(100.0, f'Completed! Generated {len(job.results)} tracks from {job.total_candidates} candidates in {job.attempts} attempts.')
+        else:
+            job.error = f'Failed to generate enough tracks after {job.attempts} attempts'
+            job.complete(False)
+            
+    except Exception as e:
+        job.error = f'Unexpected error: {str(e)}'
+        job.complete(False)
+        debug_log(f"Sonic Traveller job {job.job_id} failed: {e}", 'ERROR')
+
+@main_bp.route('/api/sonic/start', methods=['POST'])
+def api_sonic_start():
+    """Start a new Sonic Traveller generation job"""
+    try:
+        data = request.get_json() or {}
+        seed_track_id = data.get('seed_track_id')
+        num_songs = int(data.get('num_songs', 20))
+        threshold = float(data.get('threshold', 0.35))
+        ollama_model = data.get('ollama_model', get_config_value('OLLAMA', 'Model', 'llama3'))
+        
+        if not seed_track_id:
+            return jsonify({'success': False, 'error': 'seed_track_id is required'}), 400
+            
+        # Check if there's already a running job
+        with _sonic_job_lock:
+            running_jobs = [j for j in _sonic_jobs.values() if j.status == 'running']
+            if running_jobs:
+                return jsonify({'success': False, 'error': 'Another Sonic Traveller job is already running'}), 409
+        
+        # Create new job
+        job_id = str(uuid.uuid4())
+        job = SonicTravellerJob(job_id, seed_track_id, num_songs, threshold, ollama_model)
+        
+        with _sonic_job_lock:
+            _sonic_jobs[job_id] = job
+        
+        # Start background thread
+        thread = threading.Thread(target=_run_sonic_traveller_job, args=(job,), daemon=True)
+        thread.start()
+        
+        return jsonify({
+            'success': True, 
+            'job_id': job_id,
+            'message': 'Sonic Traveller generation started'
+        }), 200
+        
+    except Exception as e:
+        debug_log(f"Sonic start error: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': 'Internal error'}), 500
+
+@main_bp.route('/api/sonic/status')
+def api_sonic_status():
+    """Get status of Sonic Traveller jobs"""
+    try:
+        job_id = request.args.get('job_id')
+        if not job_id:
+            return jsonify({'success': False, 'error': 'job_id required'}), 400
+            
+        with _sonic_job_lock:
+            job = _sonic_jobs.get(job_id)
+            if not job:
+                return jsonify({'success': False, 'error': 'Job not found'}), 404
+                
+            return jsonify({
+                'success': True,
+                'job': {
+                    'id': job.job_id,
+                    'status': job.status,
+                    'progress': job.progress,
+                    'current_step': job.current_step,
+                    'results': job.results,
+                    'error': job.error,
+                    'start_time': job.start_time.isoformat() if job.start_time else None,
+                    'end_time': job.end_time.isoformat() if job.end_time else None,
+                    'total_candidates': job.total_candidates,
+                    'accepted_tracks': job.accepted_tracks,
+                    'attempts': job.attempts,
+                    'max_attempts': job.max_attempts
+                }
+            }), 200
+            
+    except Exception as e:
+        debug_log(f"Sonic status error: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': 'Internal error'}), 500
+
+@main_bp.route('/api/sonic/stop', methods=['POST'])
+def api_sonic_stop():
+    """Stop a running Sonic Traveller job"""
+    try:
+        data = request.get_json() or {}
+        job_id = data.get('job_id')
+        
+        if not job_id:
+            return jsonify({'success': False, 'error': 'job_id required'}), 400
+            
+        with _sonic_job_lock:
+            job = _sonic_jobs.get(job_id)
+            if not job:
+                return jsonify({'success': False, 'error': 'Job not found'}), 404
+                
+            if job.status != 'running':
+                return jsonify({'success': False, 'error': 'Job is not running'}), 400
+                
+            job.stop()
+            
+            return jsonify({
+                'success': True,
+                'message': 'Sonic Traveller generation stopped'
+            }), 200
+            
+    except Exception as e:
+        debug_log(f"Sonic stop error: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': 'Internal error'}), 500
+
+@main_bp.route('/api/sonic/cleanup', methods=['POST'])
+def api_sonic_cleanup():
+    """Clean up completed/failed Sonic Traveller jobs"""
+    try:
+        data = request.get_json() or {}
+        job_id = data.get('job_id')
+        
+        with _sonic_job_lock:
+            if job_id:
+                # Clean up specific job
+                if job_id in _sonic_jobs:
+                    del _sonic_jobs[job_id]
+            else:
+                # Clean up all completed/failed jobs older than 1 hour
+                cutoff = datetime.now().timestamp() - 3600
+                to_remove = []
+                for jid, job in _sonic_jobs.items():
+                    if job.status in ['completed', 'failed', 'stopped']:
+                        if job.end_time and job.end_time.timestamp() < cutoff:
+                            to_remove.append(jid)
+                
+                for jid in to_remove:
+                    del _sonic_jobs[jid]
+                    
+            return jsonify({
+                'success': True,
+                'message': 'Cleanup completed'
+            }), 200
+            
+    except Exception as e:
+        debug_log(f"Sonic cleanup error: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': 'Internal error'}), 500
+
+@main_bp.route('/api/sonic/export-json')
+def api_sonic_export_json():
+    """Export Sonic Traveller results as JSON"""
+    try:
+        job_id = request.args.get('job_id')
+        if not job_id:
+            return jsonify({'success': False, 'error': 'job_id required'}), 400
+            
+        with _sonic_job_lock:
+            job = _sonic_jobs.get(job_id)
+            if not job:
+                return jsonify({'success': False, 'error': 'Job not found'}), 404
+                
+            if job.status not in ['completed', 'stopped']:
+                return jsonify({'success': False, 'error': 'Job not completed'}), 400
+                
+            # Create export data
+            export_data = {
+                'export_info': {
+                    'exported_at': datetime.now().isoformat(),
+                    'job_id': job.job_id,
+                    'status': job.status,
+                    'start_time': job.start_time.isoformat() if job.start_time else None,
+                    'end_time': job.end_time.isoformat() if job.end_time else None,
+                    'total_candidates': job.total_candidates,
+                    'attempts': job.attempts,
+                    'threshold': getattr(job, 'threshold', None),
+                },
+                'seed_track': {
+                    'id': job.seed_track_id,
+                    'info': _get_track_by_id(job.seed_track_id)
+                },
+                'results': job.results
+            }
+            
+            # Create filename
+            seed_track = _get_track_by_id(job.seed_track_id)
+            if seed_track:
+                artist = seed_track.get('artist', 'Unknown').replace('/', '_').replace('\\', '_')
+                title = seed_track.get('title', 'Unknown').replace('/', '_').replace('\\', '_')
+                filename = f"sonic_traveller_{artist}_{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            else:
+                filename = f"sonic_traveller_job_{job_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            
+            # Return JSON response with download headers
+            response = jsonify(export_data)
+            response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+            response.headers['Content-Type'] = 'application/json'
+            return response
+            
+    except Exception as e:
+        debug_log(f"Sonic export JSON error: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': 'Internal error'}), 500
+
+@main_bp.route('/api/sonic/export-m3u')
+def api_sonic_export_m3u():
+    """Export Sonic Traveller results as M3U playlist"""
+    try:
+        job_id = request.args.get('job_id')
+        if not job_id:
+            return jsonify({'success': False, 'error': 'job_id required'}), 400
+            
+        with _sonic_job_lock:
+            job = _sonic_jobs.get(job_id)
+            if not job:
+                return jsonify({'success': False, 'error': 'Job not found'}), 404
+                
+            if job.status not in ['completed', 'stopped']:
+                return jsonify({'success': False, 'error': 'Job not completed'}), 400
+                
+            # Get seed track info for header
+            seed_track = _get_track_by_id(job.seed_track_id)
+            seed_text = f"{seed_track.get('artist', 'Unknown')} - {seed_track.get('title', 'Unknown')}" if seed_track else f"Job {job_id}"
+            
+            # Build M3U content
+            m3u_lines = [
+                '#EXTM3U',
+                f'# Sonic Traveller Playlist',
+                f'# Generated from seed: {seed_text}',
+                f'# Exported: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
+                f'# Total tracks: {len(job.results)}',
+                f'# Threshold: {getattr(job, "threshold", "N/A")}',
+                f'# Attempts: {job.attempts}',
+                f'# Candidates processed: {job.total_candidates}',
+                ''
+            ]
+            
+            # Add tracks
+            for i, track in enumerate(job.results, 1):
+                # Get file path for local tracks
+                db_path = os.path.join(DB_DIR, 'local_music.db')
+                file_path = None
+                if os.path.exists(db_path):
+                    conn = sqlite3.connect(db_path)
+                    try:
+                        cur = conn.cursor()
+                        cur.execute('SELECT file_path FROM tracks WHERE id = ?', (track['id'],))
+                        row = cur.fetchone()
+                        if row:
+                            file_path = row[0]
+                    finally:
+                        conn.close()
+                
+                # Add track info
+                distance_info = f" (distance: {track.get('distance', 'N/A')})" if track.get('distance') is not None else ""
+                m3u_lines.append(f'#EXTINF:-1,{track["artist"]} - {track["title"]}{distance_info}')
+                
+                if file_path and os.path.exists(file_path):
+                    # Use absolute file path for local files
+                    m3u_lines.append(file_path)
+                else:
+                    # Fallback to track info if file not found
+                    m3u_lines.append(f'# {track["artist"]} - {track["title"]} (file not found)')
+            
+            # Create filename
+            if seed_track:
+                artist = seed_track.get('artist', 'Unknown').replace('/', '_').replace('\\', '_')
+                title = seed_track.get('title', 'Unknown').replace('/', '_').replace('\\', '_')
+                filename = f"sonic_traveller_{artist}_{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.m3u"
+            else:
+                filename = f"sonic_traveller_job_{job_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.m3u"
+            
+            # Return M3U response with download headers
+            m3u_content = '\n'.join(m3u_lines)
+            response = Response(m3u_content, mimetype='audio/x-mpegurl')
+            response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+            
+    except Exception as e:
+        debug_log(f"Sonic export M3U error: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': 'Internal error'}), 500

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minimal Search Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #1e1e1e; color: #e0e0e0; }
+        .form-group { margin-bottom: 15px; }
+        .form-control { width: 300px; padding: 8px; border: 1px solid #444; background: #333; color: #fff; border-radius: 4px; }
+        .list-group { border: 1px solid #444; border-radius: 4px; background: #2d2d2d; overflow: hidden; margin-top: 8px; }
+        .list-group-item { padding: 10px; border-bottom: 1px solid #444; cursor: pointer; background: #333; color: #e0e0e0; }
+        .list-group-item:hover { background: #444; }
+        .list-group-item:last-child { border-bottom: none; }
+        .help-text { color: #aaa; font-size: 14px; }
+        .debug { background: #333; padding: 10px; margin: 10px 0; border-radius: 4px; font-family: monospace; border: 1px solid #444; }
+    </style>
+</head>
+<body>
+    <h1>Minimal Search Test</h1>
+    
+    <div class="form-group">
+        <label for="search_input">Search:</label>
+        <input type="text" id="search_input" class="form-control" placeholder="Type to search...">
+        <div id="search_results" class="list-group" style="max-height: 300px; overflow: auto;"></div>
+    </div>
+
+    <div class="debug" id="debug_output">
+        <strong>Debug:</strong> <span id="debug_text">Ready</span>
+    </div>
+
+    <script>
+        const searchInput = document.getElementById('search_input');
+        const searchResults = document.getElementById('search_results');
+        const debugText = document.getElementById('debug_text');
+        
+        let searchTimer = null;
+        
+        function log(message) {
+            debugText.textContent = message;
+            console.log(message);
+        }
+        
+        searchInput.addEventListener('input', () => {
+            const query = searchInput.value.trim();
+            log(`Input: "${query}" (length: ${query.length})`);
+            
+            if (searchTimer) clearTimeout(searchTimer);
+            if (query.length < 2) {
+                searchResults.innerHTML = '';
+                log('Query too short, cleared results');
+                return;
+            }
+            
+            searchTimer = setTimeout(async () => {
+                try {
+                    log(`Searching for: "${query}"`);
+                    const response = await fetch(`/api/local-search?q=${encodeURIComponent(query)}`);
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    log(`Got ${data ? data.length : 0} results`);
+                    
+                    searchResults.innerHTML = '';
+                    
+                    if (data && data.length > 0) {
+                        data.forEach((item, index) => {
+                            const div = document.createElement('div');
+                            div.className = 'list-group-item';
+                            div.innerHTML = `
+                                <strong>${item.artist || 'Unknown'}</strong> - ${item.title || 'Unknown'}<br>
+                                <span class="help-text">${item.album || 'Unknown'}</span>
+                            `;
+                            div.onclick = () => log(`Clicked: ${item.artist} - ${item.title}`);
+                            searchResults.appendChild(div);
+                        });
+                        log(`Displayed ${data.length} results`);
+                    } else {
+                        searchResults.innerHTML = '<div class="list-group-item">No results found</div>';
+                        log('No results found');
+                    }
+                } catch (error) {
+                    log(`Error: ${error.message}`);
+                    console.error('Search error:', error);
+                }
+            }, 300);
+        });
+        
+        // Test on load
+        log('Page loaded, ready to search');
+    </script>
+</body>
+</html>

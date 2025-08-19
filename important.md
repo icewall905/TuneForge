@@ -20,6 +20,12 @@
   - Stable progress (no 0% regressions), cached last-good value
   - Scoped page selectors prevent sidebar interference
   - Status polling consolidated; stop clears promptly
+- **Sonic Traveller** - AI-powered playlist generation system
+  - Background processing with progress tracking
+  - Local library search and seed track selection
+  - Audio feature-based similarity matching
+  - Export to JSON and M3U formats
+  - Performance optimized with database indexes and caching
 
 ## Configuration
 - Uses `config.ini` (copied from `config.ini.example`)
@@ -49,14 +55,27 @@
 - **Audio Analysis**: Phase 2 Complete ✅ - Core engine, dependencies, and performance optimization
 - **Audio Analysis**: Phase 3 Complete ✅ - Database integration, batch processing, and web interface with floating progress indicator
 
+## Sonic Traveller Endpoints
+- **GET** `/new-generator` - Main Sonic Traveller interface
+- **POST** `/api/sonic/start` - Start background generation job
+- **GET** `/api/sonic/status` - Get job progress and status
+- **POST** `/api/sonic/stop` - Stop running generation job
+- **POST** `/api/sonic/cleanup` - Clean up completed jobs
+- **GET** `/api/sonic/export-json` - Export results as JSON
+- **GET** `/api/sonic/export-m3u` - Export results as M3U playlist
+- **GET** `/api/sonic/seed-info` - Get seed track features and schema info
+- **GET** `/api/local-search` - Search local music library
+
 ## Next Steps for Development
-1. Playlist generator: match Ollama suggestions against local library (no Navidrome search)
-2. Begin Phase 4 (Recommendation Engine): similarity calc, weighting, endpoints
-3. Test Navidrome/Plex connectivity
-4. Add comprehensive error handling and retries across services
-5. Optimize DB queries for large library (100k+)
+1. ✅ **COMPLETED**: Sonic Traveller implementation with background processing
+2. Playlist generator: match Ollama suggestions against local library (no Navidrome search)
+3. Begin Phase 4 (Recommendation Engine): similarity calc, weighting, endpoints
+4. Test Navidrome/Plex connectivity
+5. Add comprehensive error handling and retries across services
+6. Optimize DB queries for large library (100k+)
 
 ## Troubleshooting
 - If port conflicts occur, check `lsof -i :5395`
 - Use `debug_scripts/test_app.py` for debugging
 - Check `logs/tuneforge_app.log` for errors
+- Sonic Traveller jobs are stored in memory; restart clears all jobs

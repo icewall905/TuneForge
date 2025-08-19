@@ -1,0 +1,443 @@
+{% extends 'layout.html' %}
+
+{% block title %}Sonic Traveller - TuneForge{% endblock %}
+
+{% block content %}
+<div class="content-container">
+    <h1>Sonic Traveller</h1>
+
+    <div class="playlist-container">
+        <div class="settings-section">
+            <div class="form-group">
+                <label for="seed_search">Search Local Library for Seed:</label>
+                <input type="text" id="seed_search" class="form-control" placeholder="Type title or artist...">
+                <div id="seed_results" class="list-group" style="max-height: 220px; overflow:auto; margin-top:8px;"></div>
+                <div id="seed_selected" class="help-text" style="margin-top:6px; display:none;"></div>
+                <div id="seed_feature_box" class="list-group" style="display:none; margin-top:8px;">
+                    <div class="list-group-item" id="seed_feature_summary">Features: loading...</div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="num_songs">Target Playlist Size (N):</label>
+                <select id="num_songs" class="form-control">
+                    <option value="10">10</option>
+                    <option value="15">15</option>
+                    <option value="20" selected>20</option>
+                    <option value="25">25</option>
+                    <option value="30">30</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="threshold">Similarity Threshold (T): <span id="t_val">0.35</span></label>
+                <input type="range" id="threshold" min="0.10" max="1.00" step="0.01" value="0.35">
+                <p class="help-text">Lower is stricter (normalized distance). Suggested: 0.30–0.45.</p>
+            </div>
+
+            <div class="form-group">
+                <label for="ollama_model">Ollama Model:</label>
+                <input type="text" id="ollama_model" class="form-control" value="{{ ollama_model }}">
+            </div>
+
+            <div class="form-group">
+                <button id="start_btn" class="primary-button" disabled>Generate</button>
+                <button id="stop_btn" class="secondary-button" style="display:none;">Stop</button>
+            </div>
+        </div>
+
+        <div id="progress_section" style="display:none;" class="progress-section">
+            <h3>Generation Progress</h3>
+            <div class="progress-bar-container">
+                <div class="progress-bar">
+                    <div id="progress_fill" class="progress-fill" style="width: 0%"></div>
+                </div>
+                <div id="progress_text" class="progress-text">0%</div>
+            </div>
+            <div id="progress_step" class="progress-step">Initializing...</div>
+            <div id="progress_stats" class="progress-stats">
+                <span id="attempts_text">Attempts: 0/10</span>
+                <span id="candidates_text">Candidates: 0</span>
+                <span id="accepted_text">Accepted: 0</span>
+            </div>
+        </div>
+
+        <div class="results-container">
+            <h2>Results</h2>
+            <div id="result_meta" class="help-text" style="margin-bottom:8px;"></div>
+            <ul id="results_list" class="list-group"></ul>
+            <div id="export_section" style="display:none; margin-top:16px;">
+                <button id="export_json_btn" class="secondary-button">Export JSON</button>
+                <button id="export_m3u_btn" class="secondary-button">Export M3U</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.progress-section {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.progress-bar-container {
+    position: relative;
+    margin: 15px 0;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 20px;
+    background-color: #e9ecef;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #007bff, #0056b3);
+    transition: width 0.3s ease;
+    border-radius: 10px;
+}
+
+.progress-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-weight: bold;
+    color: #495057;
+    font-size: 12px;
+}
+
+.progress-step {
+    font-weight: 500;
+    color: #495057;
+    margin: 10px 0;
+    text-align: center;
+}
+
+.progress-stats {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 15px;
+    font-size: 14px;
+    color: #6c757d;
+}
+
+.progress-stats span {
+    background: white;
+    padding: 5px 10px;
+    border-radius: 15px;
+    border: 1px solid #dee2e6;
+}
+
+.secondary-button {
+    background-color: #6c757d;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 10px;
+}
+
+.secondary-button:hover {
+    background-color: #5a6268;
+}
+
+.secondary-button:disabled {
+    background-color: #adb5bd;
+    cursor: not-allowed;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const seedInput = document.getElementById('seed_search');
+    const seedResults = document.getElementById('seed_results');
+    const seedSelected = document.getElementById('seed_selected');
+    const startBtn = document.getElementById('start_btn');
+    const stopBtn = document.getElementById('stop_btn');
+    const list = document.getElementById('results_list');
+    const progressSection = document.getElementById('progress_section');
+    const progressFill = document.getElementById('progress_fill');
+    const progressText = document.getElementById('progress_text');
+    const progressStep = document.getElementById('progress_step');
+    const attemptsText = document.getElementById('attempts_text');
+    const candidatesText = document.getElementById('candidates_text');
+    const acceptedText = document.getElementById('accepted_text');
+    const tSlider = document.getElementById('threshold');
+    const tVal = document.getElementById('t_val');
+    const exportSection = document.getElementById('export_section');
+
+    let seedTrack = null; // {id,title,artist,album}
+    let searchTimer = null;
+    let currentJobId = null;
+    let progressTimer = null;
+
+    tSlider.addEventListener('input', () => { tVal.textContent = tSlider.value; });
+
+    async function setSeed(track) {
+        seedTrack = track;
+        seedSelected.style.display = 'block';
+        seedSelected.textContent = `Seed: ${track.artist} - ${track.title}`;
+        startBtn.disabled = false;
+        seedResults.innerHTML = '';
+        // fetch features for seed and show a small summary
+        try {
+            const resp = await fetch(`/api/sonic/seed-info?track_id=${track.id}`);
+            const data = await resp.json();
+            const box = document.getElementById('seed_feature_box');
+            const summ = document.getElementById('seed_feature_summary');
+            if (!data || !data.success) {
+                summ.textContent = 'No features yet for this track';
+                box.style.display = 'block';
+                return;
+            }
+            if (data.schema_ok === false) {
+                summ.textContent = `Audio features schema incomplete (missing: ${(data.missing||[]).join(', ')})`;
+                box.style.display = 'block';
+                return;
+            }
+            const f = data.features || {};
+            const parts = [];
+            if (f.energy !== undefined) parts.push(`energy: ${Number(f.energy).toFixed(2)}`);
+            if (f.valence !== undefined) parts.push(`valence: ${Number(f.valence).toFixed(2)}`);
+            if (f.tempo !== undefined) parts.push(`tempo: ${Math.round(f.tempo)} bpm`);
+            summ.textContent = parts.length ? parts.join('  ·  ') : 'No features yet for this track';
+            box.style.display = 'block';
+        } catch (e) {
+            const box = document.getElementById('seed_feature_box');
+            const summ = document.getElementById('seed_feature_summary');
+            summ.textContent = 'Error loading features';
+            box.style.display = 'block';
+        }
+    }
+
+    seedInput.addEventListener('input', () => {
+        const q = seedInput.value.trim();
+        console.log('Search input:', q, 'length:', q.length);
+        if (searchTimer) clearTimeout(searchTimer);
+        if (q.length < 2) { 
+            seedResults.innerHTML = '';
+            console.log('Query too short, clearing results');
+            return; 
+        }
+        searchTimer = setTimeout(async () => {
+            try {
+                console.log('Starting search for:', q);
+                const resp = await fetch(`/api/local-search?q=${encodeURIComponent(q)}`);
+                console.log('Search response status:', resp.status);
+                
+                if (!resp.ok) {
+                    throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+                }
+                
+                const rows = await resp.json();
+                console.log('Search results:', rows);
+                console.log('Number of results:', rows ? rows.length : 0);
+                
+                seedResults.innerHTML = '';
+                if (rows && rows.length > 0) {
+                    rows.forEach((r, index) => {
+                        console.log(`Creating result item ${index + 1}:`, r);
+                        const item = document.createElement('div');
+                        item.className = 'list-group-item search-result';
+                        item.innerHTML = `<strong>${r.artist || 'Unknown Artist'}</strong> - ${r.title || 'Unknown Title'}<br><span class="help-text">${r.album || 'Unknown Album'}</span>`;
+                        item.style.cursor = 'pointer';
+                        item.onclick = () => setSeed(r);
+                        seedResults.appendChild(item);
+                        console.log(`Added item ${index + 1} to DOM`);
+                    });
+                    console.log(`Displayed ${rows.length} results`);
+                    
+                    // Visual feedback that results are shown
+                    seedResults.style.border = '2px solid #28a745';
+                    seedResults.style.backgroundColor = '#1e1e1e';
+                } else {
+                    console.log('No results to display');
+                    seedResults.innerHTML = '<div class="list-group-item search-result">No results found</div>';
+                    seedResults.style.border = '2px solid #dc3545';
+                }
+            } catch(e) {
+                console.error('Search failed:', e);
+            }
+        }, 300);
+    });
+
+    function updateProgress(job) {
+        progressFill.style.width = `${job.progress}%`;
+        progressText.textContent = `${Math.round(job.progress)}%`;
+        progressStep.textContent = job.current_step;
+        attemptsText.textContent = `Attempts: ${job.attempts}/${job.max_attempts}`;
+        candidatesText.textContent = `Candidates: ${job.total_candidates}`;
+        acceptedText.textContent = `Accepted: ${job.accepted_tracks}`;
+    }
+
+    function showResults(job) {
+        const meta = document.getElementById('result_meta');
+        if (job.status === 'completed') {
+            meta.textContent = `Generated ${job.accepted_tracks} tracks from ${job.total_candidates} candidates in ${job.attempts} attempts.`;
+            exportSection.style.display = 'block';
+        } else if (job.status === 'failed') {
+            meta.textContent = `Generation failed: ${job.error}`;
+            exportSection.style.display = 'none';
+        } else if (job.status === 'stopped') {
+            meta.textContent = `Generation stopped. Generated ${job.accepted_tracks} tracks.`;
+            exportSection.style.display = 'block';
+        }
+
+        list.innerHTML = '';
+        (job.results || []).forEach(tr => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item';
+            const dist = (tr.distance !== undefined) ? `  ·  d=${tr.distance}` : '';
+            li.textContent = `${tr.artist} - ${tr.title}${dist}`;
+            list.appendChild(li);
+        });
+    }
+
+    async function pollProgress() {
+        if (!currentJobId) return;
+        
+        try {
+            const resp = await fetch(`/api/sonic/status?job_id=${currentJobId}`);
+            const data = await resp.json();
+            
+            if (!data.success) {
+                console.error('Progress poll failed:', data.error);
+                return;
+            }
+            
+            const job = data.job;
+            updateProgress(job);
+            
+            if (job.status === 'running') {
+                // Continue polling
+                progressTimer = setTimeout(pollProgress, 1000);
+            } else {
+                // Job completed, failed, or stopped
+                showResults(job);
+                progressSection.style.display = 'none';
+                startBtn.style.display = 'inline-block';
+                stopBtn.style.display = 'none';
+                startBtn.disabled = false;
+                currentJobId = null;
+                
+                // Clean up the job
+                try {
+                    await fetch('/api/sonic/cleanup', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({job_id: job.id})
+                    });
+                } catch (e) {
+                    console.error('Cleanup failed:', e);
+                }
+            }
+        } catch (e) {
+            console.error('Progress poll error:', e);
+            // Continue polling on error
+            progressTimer = setTimeout(pollProgress, 2000);
+        }
+    }
+
+    startBtn.addEventListener('click', async () => {
+        if (!seedTrack) return;
+        
+        list.innerHTML = '';
+        progressSection.style.display = 'block';
+        startBtn.style.display = 'none';
+        stopBtn.style.display = 'inline-block';
+        startBtn.disabled = true;
+        
+        const payload = {
+            seed_track_id: seedTrack.id,
+            num_songs: parseInt(document.getElementById('num_songs').value) || 20,
+            threshold: parseFloat(tSlider.value) || 0.35,
+            ollama_model: document.getElementById('ollama_model').value.trim()
+        };
+        
+        try {
+            const resp = await fetch('/api/sonic/start', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to start generation');
+            }
+            
+            currentJobId = data.job_id;
+            
+            // Start progress polling
+            pollProgress();
+            
+        } catch (e) {
+            console.error('Start failed:', e);
+            alert(`Failed to start generation: ${e.message}`);
+            progressSection.style.display = 'none';
+            startBtn.style.display = 'inline-block';
+            stopBtn.style.display = 'none';
+            startBtn.disabled = false;
+        }
+    });
+
+    stopBtn.addEventListener('click', async () => {
+        if (!currentJobId) return;
+        
+        try {
+            const resp = await fetch('/api/sonic/stop', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({job_id: currentJobId})
+            });
+            
+            if (resp.ok) {
+                // Progress polling will handle the final state update
+                console.log('Stop request sent');
+            }
+        } catch (e) {
+            console.error('Stop failed:', e);
+        }
+    });
+
+    // Export functionality
+    document.getElementById('export_json_btn').addEventListener('click', () => {
+        if (!currentJobId) return;
+        
+        // Download JSON file
+        const url = `/api/sonic/export-json?job_id=${currentJobId}`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    });
+
+    document.getElementById('export_m3u_btn').addEventListener('click', () => {
+        if (!currentJobId) return;
+        
+        // Download M3U file
+        const url = `/api/sonic/export-m3u?job_id=${currentJobId}`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    });
+});
+</script>
+{% endblock %}
+
+

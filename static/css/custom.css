@@ -46,6 +46,13 @@
     font-size: 12px;
 }
 
+.list-group {
+    border: 1px solid #444;
+    border-radius: 4px;
+    background-color: #2d2d2d;
+    overflow: hidden;
+}
+
 .list-group-item {
     display: flex;
     justify-content: space-between;
@@ -56,6 +63,35 @@
     border: 1px solid #444;
     border-radius: 4px;
     color: #e0e0e0;
+}
+
+/* Special styling for search result items */
+.list-group-item.search-result {
+    display: block;
+    justify-content: initial;
+    align-items: initial;
+    padding: 10px 12px;
+    margin-bottom: 2px;
+    background-color: #333;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #e0e0e0;
+    cursor: pointer;
+}
+
+.list-group-item.search-result:hover {
+    background-color: #444;
+}
+
+.list-group-item.search-result strong {
+    color: #e0e0e0;
+    font-weight: 600;
+}
+
+.list-group-item.search-result .help-text {
+    color: #aaa;
+    font-size: 14px;
+    margin-top: 4px;
 }
 
 .artist-name {
