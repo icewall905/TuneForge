@@ -2112,6 +2112,171 @@ def api_local_music_stats():
     stats = get_local_track_stats()
     return jsonify({'success': True, 'stats': stats})
 
+# Audio Analysis Web Interface Routes
+@main_bp.route('/audio-analysis')
+def audio_analysis_page():
+    """Audio analysis management page"""
+    try:
+        # Get analysis progress from database
+        from audio_analysis_service import AudioAnalysisService
+        service = AudioAnalysisService()
+        progress = service.get_analysis_progress()
+        
+        return render_template('audio_analysis.html', progress=progress)
+    except Exception as e:
+        debug_log(f"Error loading audio analysis page: {e}", "ERROR")
+        return render_template('error.html', error="Failed to load audio analysis page")
+
+@main_bp.route('/api/audio-analysis/start', methods=['POST'])
+def api_start_audio_analysis():
+    """Start audio analysis batch processing"""
+    try:
+        data = request.get_json() or {}
+        max_workers = data.get('max_workers', 3)
+        batch_size = data.get('batch_size', 100)
+        limit = data.get('limit', None)  # None = process all pending tracks
+        
+        # Check if required libraries are available
+        try:
+            import librosa
+        except ImportError:
+            return jsonify({
+                'success': False, 
+                'error': 'Audio analysis libraries not available. Please ensure librosa, numpy, and scipy are installed in the Flask environment.'
+            })
+        
+        # Import and initialize the advanced batch processor
+        try:
+            from advanced_batch_processor import AdvancedBatchProcessor
+        except ImportError as e:
+            return jsonify({
+                'success': False, 
+                'error': f'Failed to import audio analysis modules: {str(e)}. Please check the module paths and virtual environment.'
+            })
+        
+        # Check if processing is already running
+        if hasattr(api_start_audio_analysis, 'processor') and api_start_audio_analysis.processor:
+            return jsonify({'success': False, 'error': 'Audio analysis is already running'})
+        
+        # Initialize processor
+        processor = AdvancedBatchProcessor(
+            max_workers=max_workers,
+            batch_size=batch_size
+        )
+        
+        # Store processor instance
+        api_start_audio_analysis.processor = processor
+        
+        # Initialize queue
+        jobs_added = processor.initialize_queue(limit=limit)
+        
+        if jobs_added == 0:
+            return jsonify({'success': False, 'error': 'No tracks available for analysis'})
+        
+        # Start processing in background thread
+        def start_processing():
+            try:
+                processor.start_processing()
+            except Exception as e:
+                debug_log(f"Error in audio analysis processing: {e}", "ERROR")
+        
+        import threading
+        thread = threading.Thread(target=start_processing, daemon=True)
+        thread.start()
+        
+        # Return response with additional info for UI integration
+        return jsonify({
+            'success': True,
+            'message': f'Started audio analysis with {max_workers} workers',
+            'jobs_queued': jobs_added,
+            'max_workers': max_workers,
+            'trigger_ui_update': True  # Signal to UI that status should be updated
+        })
+        
+    except Exception as e:
+        debug_log(f"Error starting audio analysis: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)})
+
+@main_bp.route('/api/audio-analysis/stop', methods=['POST'])
+def api_stop_audio_analysis():
+    """Stop audio analysis batch processing"""
+    try:
+        if not hasattr(api_start_audio_analysis, 'processor') or not api_start_audio_analysis.processor:
+            return jsonify({'success': False, 'error': 'No audio analysis running'})
+        
+        processor = api_start_audio_analysis.processor
+        success = processor.stop_processing()
+        
+        if success:
+            api_start_audio_analysis.processor = None
+            return jsonify({'success': True, 'message': 'Audio analysis stopped successfully'})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to stop audio analysis'})
+            
+    except Exception as e:
+        debug_log(f"Error stopping audio analysis: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)})
+
+@main_bp.route('/api/audio-analysis/status')
+def api_audio_analysis_status():
+    """Get current audio analysis status"""
+    try:
+        if not hasattr(api_start_audio_analysis, 'processor') or not api_start_audio_analysis.processor:
+            return jsonify({
+                'status': 'stopped',
+                'progress': {
+                    'total_jobs': 0,
+                    'completed_jobs': 0,
+                    'failed_jobs': 0,
+                    'progress_percentage': 0,
+                    'success_rate': 0
+                }
+            })
+        
+        processor = api_start_audio_analysis.processor
+        status = processor.get_status()
+        
+        return jsonify(status)
+        
+    except Exception as e:
+        debug_log(f"Error getting audio analysis status: {e}", "ERROR")
+        return jsonify({'error': str(e)})
+
+@main_bp.route('/api/audio-analysis/progress')
+def api_audio_analysis_progress():
+    """Get audio analysis progress from database"""
+    try:
+        from audio_analysis_service import AudioAnalysisService
+        service = AudioAnalysisService()
+        progress = service.get_analysis_progress()
+        
+        return jsonify({'success': True, 'progress': progress})
+        
+    except Exception as e:
+        debug_log(f"Error getting audio analysis progress: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)})
+
+@main_bp.route('/api/audio-analysis/cleanup', methods=['POST'])
+def api_audio_analysis_cleanup():
+    """Clean up old audio analysis data"""
+    try:
+        data = request.get_json() or {}
+        days_old = data.get('days_old', 30)
+        
+        from audio_analysis_service import AudioAnalysisService
+        service = AudioAnalysisService()
+        removed_count = service.cleanup_old_analysis_data(days_old)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleaned up {removed_count} old analysis records',
+            'removed_count': removed_count
+        })
+        
+    except Exception as e:
+        debug_log(f"Error cleaning up audio analysis data: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)})
+
 @main_bp.route('/api/browse-path')
 def api_browse_path():
     """API endpoint for file browsing"""

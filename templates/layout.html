@@ -26,6 +26,7 @@
                 <ul>
                     <li><a href="{{ url_for('main.index') }}" class="{% if request.endpoint == 'main.index' %}active{% endif %}">Generate</a></li>
                     <li><a href="{{ url_for('main.local_music_page') }}" class="{% if request.endpoint == 'main.local_music_page' %}active{% endif %}">Local Music</a></li>
+                    <li><a href="{{ url_for('main.audio_analysis_page') }}" class="{% if request.endpoint == 'main.audio_analysis_page' %}active{% endif %}">Audio Analysis</a></li>
                     <li><a href="{{ url_for('main.history') }}" class="{% if request.endpoint == 'main.history' %}active{% endif %}">History</a></li>
                     <li><a href="{{ url_for('main.settings') }}" class="{% if request.endpoint == 'main.settings' %}active{% endif %}">Settings</a></li>
                 </ul>
@@ -91,6 +92,7 @@
             window.globalStatusManager = {
                 activeScans: new Map(),
                 activePlaylists: new Map(),
+                activeAudioAnalysis: null, // Single audio analysis process
                 progressPanel: null,
                 progressContent: null,
                 pollIntervals: new Map(),
@@ -102,12 +104,16 @@
             
             // Restore state from localStorage
             this.restoreState();
-            // Validate any restored scans and playlists with the server before polling
+            // Validate any restored scans, playlists, and audio analysis with the server before polling
             this.validateRestoredScans();
             this.validateRestoredPlaylists();
+            this.validateRestoredAudioAnalysis();
             
             // Start background polling
             this.startBackgroundPolling();
+            
+            // Immediately check for running audio analysis
+            setTimeout(() => this.checkForRunningAudioAnalysis(), 1000);
             
             // Ensure progress panel is visible if there are active tasks
             this.ensureVisibility();
@@ -160,6 +166,64 @@
             }
         },
         
+        async validateRestoredAudioAnalysis() {
+            try {
+                if (this.activeAudioAnalysis) {
+                    try {
+                        const resp = await fetch('/api/audio-analysis/status');
+                        const status = await resp.json();
+                        
+                        if (status.error) {
+                            // Server has no knowledge of this analysis; remove immediately
+                            console.log(`[Sidebar] Removing stale audio analysis: ${status.error}`);
+                            this.removeAudioAnalysis();
+                            return;
+                        }
+                        
+                        if (['stopped', 'completed'].includes(status.status)) {
+                            // Terminal on server; remove soon for UX
+                            console.log(`[Sidebar] Audio analysis is ${status.status}, removing soon`);
+                            setTimeout(() => this.removeAudioAnalysis(), 3000);
+                        } else {
+                            // Active on server; ensure polling is running
+                            console.log(`[Sidebar] Audio analysis is active, starting polling`);
+                            this.startAudioAnalysisPolling();
+                        }
+                    } catch (e) {
+                        // Network or parse error: remove to avoid stale UI
+                        console.log(`[Sidebar] Removing audio analysis due to error:`, e);
+                        this.removeAudioAnalysis();
+                    }
+                } else {
+                    // Check if there's running audio analysis that we don't know about
+                    await this.checkForRunningAudioAnalysis();
+                }
+            } catch (e) {
+                console.error('Failed to validate restored audio analysis:', e);
+            }
+        },
+        
+        async checkForRunningAudioAnalysis() {
+            try {
+                console.log('[Sidebar] Checking for running audio analysis...');
+                const resp = await fetch('/api/audio-analysis/status');
+                const status = await resp.json();
+                
+                console.log('[Sidebar] Audio analysis status:', status.status);
+                
+                if (status.status === 'running' && !this.activeAudioAnalysis) {
+                    console.log('[Sidebar] Found running audio analysis, adding to UI');
+                    this.addAudioAnalysis();
+                } else if (status.status === 'running' && this.activeAudioAnalysis) {
+                    console.log('[Sidebar] Audio analysis already in UI');
+                } else {
+                    console.log('[Sidebar] No running audio analysis found');
+                }
+            } catch (e) {
+                console.error('Failed to check for running audio analysis:', e);
+            }
+        },
+        
         async validateRestoredPlaylists() {
             try {
                 const toRemove = [];
@@ -196,6 +260,7 @@
                     const state = {
                         activeScans: Array.from(this.activeScans.entries()),
                         activePlaylists: Array.from(this.activePlaylists.entries()),
+                        activeAudioAnalysis: this.activeAudioAnalysis,
                         timestamp: Date.now()
                     };
                     localStorage.setItem('globalStatusManagerState', JSON.stringify(state));
@@ -212,11 +277,17 @@
                             if (now - state.timestamp < 3600000) {
                                 this.activeScans = new Map(state.activeScans || []);
                                 this.activePlaylists = new Map(state.activePlaylists || []);
-                                console.log(`[Sidebar] Restored ${this.activeScans.size} active scans and ${this.activePlaylists.size} active playlists from localStorage`);
+                                this.activeAudioAnalysis = state.activeAudioAnalysis || null;
+                                console.log(`[Sidebar] Restored ${this.activeScans.size} active scans, ${this.activePlaylists.size} active playlists, and audio analysis: ${this.activeAudioAnalysis ? 'active' : 'none'} from localStorage`);
                                 
                                 // If we have stale scans, they'll be cleaned up by validateRestoredScans
                                 if (this.activeScans.size > 0) {
                                     console.log(`[Sidebar] Will validate ${this.activeScans.size} restored scans with server`);
+                                }
+                                
+                                // If we have audio analysis, start polling
+                                if (this.activeAudioAnalysis) {
+                                    console.log(`[Sidebar] Will validate audio analysis with server`);
                                 }
                             } else {
                                 console.log('[Sidebar] Saved state too old, starting fresh');
@@ -356,13 +427,13 @@
                 },
         
         updateDisplay() {
-            console.log(`[Sidebar] updateDisplay called - Scans: ${this.activeScans.size}, Playlists: ${this.activePlaylists.size}`);
+            console.log(`[Sidebar] updateDisplay called - Scans: ${this.activeScans.size}, Playlists: ${this.activePlaylists.size}, Audio Analysis: ${this.activeAudioAnalysis ? 'active' : 'none'}`);
             if (!this.progressContent) {
                 console.log('[Sidebar] No progress content element found');
                 return;
             }
             
-            if (this.activeScans.size === 0 && this.activePlaylists.size === 0) {
+            if (this.activeScans.size === 0 && this.activePlaylists.size === 0 && !this.activeAudioAnalysis) {
                 console.log('[Sidebar] No active tasks, hiding panel');
                 this.hidePanel();
                 return;
@@ -437,6 +508,36 @@
                 `;
             }
             
+            // Display audio analysis
+            if (this.activeAudioAnalysis) {
+                const elapsed = Math.round((Date.now() - this.activeAudioAnalysis.startTime) / 1000);
+                const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.round(elapsed/60)}m ${elapsed%60}s`;
+                
+                html += `
+                    <div class="progress-indicator audio-analysis">
+                        <div class="progress-header">
+                            <span class="progress-icon">🎵</span>
+                            <span class="progress-folder">Audio Analysis</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${this.activeAudioAnalysis.progress}%"></div>
+                        </div>
+                        <div class="progress-info">
+                            <span class="progress-text">${this.activeAudioAnalysis.progress}%</span>
+                            <span class="progress-counts">${this.activeAudioAnalysis.processedTracks}/${this.activeAudioAnalysis.totalTracks}</span>
+                        </div>
+                        <div class="progress-current">${this.activeAudioAnalysis.currentStatus}</div>
+                        <div class="progress-details">
+                            Workers: ${this.activeAudioAnalysis.workers} | 
+                            Queue: ${this.activeAudioAnalysis.queueSize} | 
+                            Failed: ${this.activeAudioAnalysis.failedTracks} | 
+                            Time: ${elapsedStr}
+                        </div>
+                        ${(['completed','error'].includes(this.activeAudioAnalysis.status)) ? '' : `<button class="cancel-btn" onclick="window.globalStatusManager.stopAudioAnalysis()">Stop</button>`}
+                    </div>
+                `;
+            }
+            
             this.progressContent.innerHTML = html;
             this.showPanel();
         },
@@ -501,7 +602,7 @@
         },
         
         ensureVisibility() {
-            if (this.activeScans.size > 0 || this.activePlaylists.size > 0) {
+            if (this.activeScans.size > 0 || this.activePlaylists.size > 0 || this.activeAudioAnalysis) {
                 this.showPanel();
                 this.updateDisplay();
             }
@@ -551,6 +652,18 @@
                         console.log(`Restarting polling for playlist ${playlistId}`);
                         this.startPlaylistPolling(playlistId);
                     }
+                }
+                
+                // Ensure audio analysis polling is running
+                if (this.activeAudioAnalysis && !this.activeAudioAnalysis.pollInterval && 
+                    this.activeAudioAnalysis.status !== 'completed' && this.activeAudioAnalysis.status !== 'error') {
+                    console.log('Restarting polling for audio analysis');
+                    this.startAudioAnalysisPolling();
+                }
+                
+                // Check for running audio analysis that we don't know about
+                if (!this.activeAudioAnalysis) {
+                    this.checkForRunningAudioAnalysis();
                 }
             }, 10000); // Check every 10 seconds
         },
@@ -604,6 +717,126 @@
                 }
             }, 2000);
             this.playlistPollIntervals.set(playlistId, pollInterval);
+        },
+        
+        // Audio Analysis Management
+        addAudioAnalysis() {
+            console.log('[Sidebar] Adding audio analysis to UI...');
+            this.activeAudioAnalysis = {
+                status: 'starting',
+                progress: 0,
+                currentStatus: 'Initializing...',
+                totalTracks: 0,
+                processedTracks: 0,
+                failedTracks: 0,
+                startTime: Date.now(),
+                workers: 0,
+                queueSize: 0
+            };
+            
+            console.log('[Sidebar] Audio analysis object created:', this.activeAudioAnalysis);
+            this.showPanel();
+            this.updateDisplay();
+            this.startAudioAnalysisPolling();
+            this.saveState();
+            console.log('[Sidebar] Audio analysis added successfully');
+        },
+        
+        updateAudioAnalysis(data) {
+            if (this.activeAudioAnalysis) {
+                Object.assign(this.activeAudioAnalysis, data);
+                this.updateDisplay();
+                this.saveState();
+            }
+        },
+        
+        removeAudioAnalysis() {
+            this.activeAudioAnalysis = null;
+            this.updateDisplay();
+            this.saveState();
+            
+            if (this.activeScans.size === 0 && this.activePlaylists.size === 0) {
+                this.hidePanel();
+            }
+        },
+        
+        startAudioAnalysisPolling() {
+            const pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/api/audio-analysis/status');
+                    const status = await response.json();
+                    
+                    if (status.error) {
+                        this.updateAudioAnalysis({ 
+                            status: 'error', 
+                            currentStatus: `Error: ${status.error}` 
+                        });
+                        clearInterval(pollInterval);
+                        setTimeout(() => this.removeAudioAnalysis(), 5000);
+                        return;
+                    }
+                    
+                    if (status.status === 'stopped' || status.status === 'completed') {
+                        this.updateAudioAnalysis({ 
+                            status: 'completed', 
+                            currentStatus: 'Analysis completed!' 
+                        });
+                        clearInterval(pollInterval);
+                        setTimeout(() => this.removeAudioAnalysis(), 5000);
+                    } else {
+                        // Update status
+                        this.updateAudioAnalysis({
+                            status: status.status,
+                            workers: status.workers || 0,
+                            queueSize: status.queue_size || 0
+                        });
+                        
+                        // Get progress data
+                        const progressResponse = await fetch('/api/audio-analysis/progress');
+                        const progress = await progressResponse.json();
+                        
+                        if (progress.success) {
+                            const total = progress.total || 0;
+                            const analyzed = progress.analyzed || 0;
+                            const progressPercent = total > 0 ? Math.round((analyzed / total) * 100) : 0;
+                            
+                            this.updateAudioAnalysis({
+                                progress: progressPercent,
+                                totalTracks: total,
+                                processedTracks: analyzed,
+                                failedTracks: progress.errors || 0,
+                                currentStatus: `Processing: ${analyzed}/${total} tracks`
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error polling audio analysis progress:', error);
+                }
+            }, 2000); // Poll every 2 seconds
+            
+            // Store the interval for cleanup
+            this.activeAudioAnalysis.pollInterval = pollInterval;
+        },
+        
+        stopAudioAnalysis() {
+            if (this.activeAudioAnalysis && this.activeAudioAnalysis.pollInterval) {
+                clearInterval(this.activeAudioAnalysis.pollInterval);
+            }
+            
+            // Call the API to stop analysis
+            fetch('/api/audio-analysis/stop', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        this.updateAudioAnalysis({ 
+                            status: 'stopping', 
+                            currentStatus: 'Stopping analysis...' 
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error stopping audio analysis:', error);
+                });
         }
     };
     

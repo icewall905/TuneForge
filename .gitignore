@@ -16,7 +16,6 @@ logs/
 .cache/*
 
 # Documentation and notes (keep private)
-notes/
 notes/*
 
 db/*

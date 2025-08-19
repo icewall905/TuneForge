@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 # Simple script to start TuneForge
 
 # Change to the script's directory
