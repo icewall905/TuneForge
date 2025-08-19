@@ -975,6 +975,43 @@ def history():
     playlist_history.sort(key=_parse_ts, reverse=True)
     return render_template('history.html', history=playlist_history)
 
+@main_bp.route('/api/history/delete', methods=['POST'])
+def api_delete_playlist():
+    """Delete a playlist from history"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'No data provided'})
+        
+        playlist_index = data.get('playlist_index')
+        playlist_id = data.get('playlist_id')
+        
+        if playlist_index is None:
+            return jsonify({'success': False, 'error': 'Playlist index not provided'})
+        
+        # Load current history
+        history = load_playlist_history()
+        
+        if playlist_index < 0 or playlist_index >= len(history):
+            return jsonify({'success': False, 'error': 'Invalid playlist index'})
+        
+        # Remove the playlist
+        deleted_playlist = history.pop(playlist_index)
+        debug_log(f"Deleted playlist: {deleted_playlist.get('name', 'Unknown')} (ID: {playlist_id})", 'INFO')
+        
+        # Save updated history
+        save_playlist_history(history)
+        
+        return jsonify({
+            'success': True, 
+            'message': f'Playlist "{deleted_playlist.get("name", "Unknown")}" deleted successfully',
+            'deleted_index': playlist_index
+        })
+        
+    except Exception as e:
+        debug_log(f"Error deleting playlist: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': str(e)})
+
 @main_bp.route('/new-generator', methods=['GET', 'POST'])
 def new_generator():
     if request.method == 'GET':

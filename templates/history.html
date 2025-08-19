@@ -74,9 +74,14 @@
                     </div>
                     
                     <div class="playlist-actions">
-                        <button class="btn btn-primary" onclick="viewFullPlaylist({{ loop.index0 }})">
-                            View Full Playlist
-                        </button>
+                        <div class="action-buttons">
+                            <button class="btn btn-primary" onclick="viewFullPlaylist({{ loop.index0 }})">
+                                View Full Playlist
+                            </button>
+                            <button class="btn btn-danger" onclick="deletePlaylist({{ loop.index0 }})" title="Delete this playlist">
+                                🗑️
+                            </button>
+                        </div>
                         <div class="rating">
                             {% for i in range(1, 6) %}
                                 <button class="rating-star {% if playlist.get('rating') == i %}active{% endif %}" 
@@ -164,6 +169,82 @@
                 star.classList.remove('active');
             }
         });
+    }
+    
+    // Function to delete a playlist
+    function deletePlaylist(playlistIndex) {
+        const playlist = historyData[playlistIndex];
+        if (!playlist) {
+            console.error('Playlist not found at index:', playlistIndex);
+            return;
+        }
+        
+        const playlistName = playlist.name || 'Unknown Playlist';
+        if (!confirm(`Are you sure you want to delete "${playlistName}"?\n\nThis action cannot be undone.`)) {
+            return;
+        }
+        
+        try {
+            console.log('Deleting playlist:', playlistName);
+            
+            // Send delete request to backend
+            fetch('/api/history/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    playlist_index: playlistIndex,
+                    playlist_id: playlist.id || playlist.name
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Playlist deleted successfully');
+                    // Remove the playlist card from the UI
+                    const playlistCard = document.querySelector(`[data-playlist-index="${playlistIndex}"]`);
+                    if (playlistCard) {
+                        playlistCard.remove();
+                    }
+                    // Update the history data
+                    historyData.splice(playlistIndex, 1);
+                    // Update data attributes for remaining cards
+                    document.querySelectorAll('.playlist-card').forEach((card, index) => {
+                        card.setAttribute('data-playlist-index', index);
+                        // Update onclick handlers
+                        const viewBtn = card.querySelector('.btn-primary');
+                        const deleteBtn = card.querySelector('.btn-danger');
+                        if (viewBtn) viewBtn.onclick = () => viewFullPlaylist(index);
+                        if (deleteBtn) deleteBtn.onclick = () => deletePlaylist(index);
+                        // Update rating stars
+                        card.querySelectorAll('.rating-star').forEach(star => {
+                            star.setAttribute('data-playlist-index', index);
+                        });
+                    });
+                    
+                    // Check if no playlists remain
+                    if (historyData.length === 0) {
+                        // Reload the page to show "no playlists" message
+                        location.reload();
+                        return;
+                    }
+                    
+                    // Show success message
+                    alert('Playlist deleted successfully!');
+                } else {
+                    console.error('Failed to delete playlist:', data.error);
+                    alert('Failed to delete playlist: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error deleting playlist:', error);
+                alert('Error deleting playlist: ' + error.message);
+            });
+        } catch (err) {
+            console.error('Failed to delete playlist:', err);
+            alert('Failed to delete playlist: ' + err.message);
+        }
     }
     
     // Function to view full playlist details
