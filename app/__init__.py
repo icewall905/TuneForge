@@ -14,4 +14,12 @@ def create_app():
         from . import routes
         app.register_blueprint(routes.main_bp)
 
+        # Ensure the local music database (tracks table) exists at startup
+        try:
+            from .routes import init_local_music_db
+            init_local_music_db()
+        except Exception as e:
+            # Avoid hard failure at startup; routes that need DB will surface errors
+            print(f"[Startup] Warning: failed to initialize local music DB: {e}")
+
     return app

@@ -39,6 +39,35 @@ class AudioAnalysisService:
         if db_path is None:
             # Use the same database as the main application
             db_path = os.path.join(os.path.dirname(__file__), 'db', 'local_music.db')
+
+        # Ensure base DB and tracks table exist before altering columns
+        try:
+            from app.routes import init_local_music_db
+            init_local_music_db()
+        except Exception:
+            # If import fails outside app context, fallback to creating minimal tracks table
+            try:
+                os.makedirs(os.path.join(os.path.dirname(__file__), 'db'), exist_ok=True)
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS tracks (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            file_path TEXT UNIQUE NOT NULL,
+                            title TEXT,
+                            artist TEXT,
+                            album TEXT,
+                            genre TEXT,
+                            year INTEGER,
+                            track_number INTEGER,
+                            duration REAL,
+                            file_size INTEGER,
+                            last_modified REAL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    conn.commit()
+            except Exception as _:
+                pass
         
         self.db_path = db_path
         self._ensure_database_structure()
