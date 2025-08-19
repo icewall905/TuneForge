@@ -24,7 +24,7 @@
             <div class="sidebar-section">
                 <h3>Menu</h3>
                 <ul>
-                    <li><a href="{{ url_for('main.index') }}" class="{% if request.endpoint == 'main.index' %}active{% endif %}">Generate</a></li>
+                    <li><a href="{{ url_for('main.index') }}" class="{% if request.endpoint == 'main.index' %}active{% endif %}">Ask a Friend</a></li>
                     <li><a href="{{ url_for('main.new_generator') }}" class="{% if request.endpoint == 'main.new_generator' %}active{% endif %}">Sonic Traveller</a></li>
                     <li><a href="{{ url_for('main.local_music_page') }}" class="{% if request.endpoint == 'main.local_music_page' %}active{% endif %}">Local Music</a></li>
                     <li><a href="{{ url_for('main.audio_analysis_page') }}" class="{% if request.endpoint == 'main.audio_analysis_page' %}active{% endif %}">Audio Analysis</a></li>
