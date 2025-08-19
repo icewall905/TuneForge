@@ -16,6 +16,10 @@
 - Logging system
 - Audio analysis system with floating progress indicator
 - Global status management for background processes
+  - Debounced updates (500ms) with 1s minimum interval
+  - Stable progress (no 0% regressions), cached last-good value
+  - Scoped page selectors prevent sidebar interference
+  - Status polling consolidated; stop clears promptly
 
 ## Configuration
 - Uses `config.ini` (copied from `config.ini.example`)
@@ -46,11 +50,11 @@
 - **Audio Analysis**: Phase 3 Complete ✅ - Database integration, batch processing, and web interface with floating progress indicator
 
 ## Next Steps for Development
-1. Test Ollama integration for playlist generation
-2. Test Navidrome/Plex connectivity
-3. Implement new features
-4. Add comprehensive error handling
-5. Optimize database queries for large library
+1. Playlist generator: match Ollama suggestions against local library (no Navidrome search)
+2. Begin Phase 4 (Recommendation Engine): similarity calc, weighting, endpoints
+3. Test Navidrome/Plex connectivity
+4. Add comprehensive error handling and retries across services
+5. Optimize DB queries for large library (100k+)
 
 ## Troubleshooting
 - If port conflicts occur, check `lsof -i :5395`
