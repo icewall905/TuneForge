@@ -17,6 +17,10 @@ logs/
 
 # Documentation (sensitive instructions)
 notes/instructions.md
-notes/*
+notes/private/
+notes/sensitive/
+# Allow public documentation files
+!notes/*.md
+!notes/*.txt
 
 db/*
