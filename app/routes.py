@@ -2154,9 +2154,16 @@ def api_start_audio_analysis():
                 'error': f'Failed to import audio analysis modules: {str(e)}. Please check the module paths and virtual environment.'
             })
         
-        # Check if processing is already running
+        # Check if processing is already running (and clear stale references)
         if hasattr(api_start_audio_analysis, 'processor') and api_start_audio_analysis.processor:
-            return jsonify({'success': False, 'error': 'Audio analysis is already running'})
+            try:
+                current_status = api_start_audio_analysis.processor.get_status()
+                if current_status and current_status.get('status') in ['running', 'stopping']:
+                    return jsonify({'success': False, 'error': 'Audio analysis is already running'})
+            except Exception:
+                pass
+            # Stale or not running – clear reference and continue
+            api_start_audio_analysis.processor = None
         
         # Initialize processor
         processor = AdvancedBatchProcessor(
@@ -2164,14 +2171,16 @@ def api_start_audio_analysis():
             batch_size=batch_size
         )
         
-        # Store processor instance
-        api_start_audio_analysis.processor = processor
-        
         # Initialize queue
         jobs_added = processor.initialize_queue(limit=limit)
         
         if jobs_added == 0:
+            # Nothing to do; ensure no stale processor is kept
+            api_start_audio_analysis.processor = None
             return jsonify({'success': False, 'error': 'No tracks available for analysis'})
+        
+        # Store processor instance only when there is actual work
+        api_start_audio_analysis.processor = processor
         
         # Start processing in background thread
         def start_processing():
