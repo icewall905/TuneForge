@@ -22,3 +22,4 @@ logs/
 notes/*
 
 db/*
+audio_analysis_checkpoint.json
