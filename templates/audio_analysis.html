@@ -430,6 +430,8 @@ class AudioAnalysisManager {
         this.lastKnownProgress = null;
         this.lastStatusCheck = 0;
         this.cachedProgress = null;  // Cache the last good progress value
+        this.lastKnownRate = null;   // Cache the last known processing rate
+        this.lastRateUpdate = 0;     // Timestamp of last rate update
         this.init();
     }
 
@@ -971,6 +973,10 @@ class AudioAnalysisManager {
                 const rateText = `${rate.toFixed(2)} tracks/min`;
                 processingRate.textContent = rateText;
                 
+                // Cache the last known rate
+                this.lastKnownRate = rate;
+                this.lastRateUpdate = Date.now();
+                
                 // Add visual indicators for processing rate
                 if (rate > 1.0) {
                     processingRate.className = 'metric-value rate-high';
@@ -980,8 +986,13 @@ class AudioAnalysisManager {
                     processingRate.className = 'metric-value rate-low';
                 }
             } else {
-                processingRate.textContent = 'N/A';
-                processingRate.className = 'metric-value';
+                // Only show N/A if we haven't had a rate update in the last 10 seconds
+                const timeSinceLastRate = Date.now() - (this.lastRateUpdate || 0);
+                if (timeSinceLastRate > 10000) { // 10 seconds
+                    processingRate.textContent = 'N/A';
+                    processingRate.className = 'metric-value';
+                }
+                // Otherwise keep showing the last known rate
             }
         }
         
