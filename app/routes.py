@@ -2590,10 +2590,9 @@ def api_start_audio_analysis():
         thread.start()
         
         # Return response with additional info for UI integration
-        worker_warning = " (SQLite compatible)" if max_workers == 1 else " ⚠️ Multiple workers may cause database locks with SQLite"
         return jsonify({
             'success': True,
-            'message': f'Started audio analysis with {max_workers} workers{worker_warning}',
+            'message': 'Started audio analysis',
             'jobs_queued': jobs_added,
             'max_workers': max_workers,
             'trigger_ui_update': True  # Signal to UI that status should be updated
