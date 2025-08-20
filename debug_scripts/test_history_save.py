@@ -62,12 +62,12 @@ def test_history_save():
         
         print(f"Mock job created with {len(mock_job.results)} results")
         print(f"Current working directory: {os.getcwd()}")
-        print(f"History file path: playlist_history.json")
-        print(f"History file exists: {os.path.exists('playlist_history.json')}")
+        print(f"History file path: temp/playlist_history.json")
+        print(f"History file exists: {os.path.exists('temp/playlist_history.json')}")
         
         # Check current history
-        if os.path.exists('playlist_history.json'):
-            with open('playlist_history.json', 'r') as f:
+        if os.path.exists('temp/playlist_history.json'):
+            with open('temp/playlist_history.json', 'r') as f:
                 current_history = f.read()
                 print(f"Current history file size: {len(current_history)} characters")
                 print(f"Current history ends with ']': {current_history.strip().endswith(']')}")

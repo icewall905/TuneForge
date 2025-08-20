@@ -88,7 +88,7 @@ def filesizeformat(bytes):
 main_bp.add_app_template_filter(filesizeformat, 'filesizeformat')
 
 CONFIG_FILE = 'config.ini'
-HISTORY_FILE = 'playlist_history.json'
+HISTORY_FILE = 'temp/playlist_history.json'
 
 # --- Config Functions ---
 def load_config():

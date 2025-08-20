@@ -292,9 +292,13 @@ class AudioAnalysisMonitor:
                 if error_rate > 0.1:  # More than 10% errors
                     return HealthStatus.ERROR
             
-            # Check processing rate
+            # Check processing rate with short-term smoothing to avoid flicker
             if snapshot.processing_rate is not None:
-                if snapshot.processing_rate < self.config.min_progress_threshold:
+                recent_avg_rate = self._get_recent_average_processing_rate(limit=3)
+                if (
+                    recent_avg_rate is not None
+                    and recent_avg_rate < self.config.min_progress_threshold
+                ):
                     return HealthStatus.WARNING
             
             # Check if analysis is complete
@@ -393,10 +397,16 @@ class AudioAnalysisMonitor:
                                 anomalies.append(f"Progress dropped by {drop:.1f}% in the last hour")
                                 break
             
-            # Check for unusually slow processing
+            # Check for unusually slow processing (use smoothed average over recent samples)
             if snapshot.processing_rate is not None and snapshot.processing_rate > 0:
-                if snapshot.processing_rate < self.config.min_progress_threshold:
-                    anomalies.append(f"Processing rate ({snapshot.processing_rate:.2f} tracks/min) is below optimal threshold")
+                recent_avg_rate = self._get_recent_average_processing_rate(limit=3)
+                if (
+                    recent_avg_rate is not None
+                    and recent_avg_rate < self.config.min_progress_threshold
+                ):
+                    anomalies.append(
+                        f"Processing rate ({recent_avg_rate:.2f} tracks/min) is below optimal threshold"
+                    )
             
             # Check for high error rates
             if snapshot.error_tracks > 0 and snapshot.total_tracks > 0:
@@ -407,9 +417,9 @@ class AudioAnalysisMonitor:
             # Check for stuck analysis (no progress for extended period)
             if snapshot.progress_percentage < 100.0:
                 recent_history = self._get_recent_progress_history(hours=2)
-                if len(recent_history) >= 3:
+                if len(recent_history) >= 5:
                     # Check if progress has been stagnant
-                    recent_progress = [h['progress_percentage'] for h in recent_history[:3]]
+                    recent_progress = [h['progress_percentage'] for h in recent_history[:5]]
                     # Consider it real stagnation only if there is work pending and something analyzing
                     if len(set(recent_progress)) == 1:
                         try:
@@ -425,6 +435,37 @@ class AudioAnalysisMonitor:
             logger.error(f"Error detecting anomalies: {e}")
         
         return anomalies
+
+    def _get_recent_average_processing_rate(self, limit: int = 3) -> Optional[float]:
+        """Compute the average processing rate over the most recent snapshots.
+
+        Uses a small window to smooth transient dips and reduce UI warning flicker.
+
+        Args:
+            limit: Number of most recent snapshots to average over.
+
+        Returns:
+            Average processing rate or None if insufficient data.
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute(
+                    """
+                    SELECT processing_rate
+                    FROM analysis_progress_history
+                    WHERE processing_rate IS NOT NULL
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+                rates = [row[0] for row in cursor.fetchall() if row[0] is not None and row[0] > 0]
+                if not rates:
+                    return None
+                return sum(rates) / len(rates)
+        except Exception as e:
+            logger.error(f"Error computing recent average processing rate: {e}")
+            return None
     
     def get_stall_analysis(self) -> Dict[str, Any]:
         """

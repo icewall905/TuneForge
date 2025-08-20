@@ -123,7 +123,7 @@ class AdvancedBatchProcessor:
         
         # Checkpoint and resume
         self.last_checkpoint = 0
-        self.checkpoint_file = "audio_analysis_checkpoint.json"
+        self.checkpoint_file = "temp/audio_analysis_checkpoint.json"
         
         logger.info(f"AdvancedBatchProcessor initialized with {max_workers} workers, "
                    f"batch size {batch_size}, checkpoint interval {checkpoint_interval}")
