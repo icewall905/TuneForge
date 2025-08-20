@@ -840,3 +840,192 @@
 .art-and-tracks { display: flex; gap: 12px; align-items: flex-start; }
 .art-thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #444; background: #333; }
 .tracks-col { display: flex; flex-direction: column; }
+
+/* History Service Integration Styles */
+.service-buttons-history {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.btn-service {
+    padding: 6px 10px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-service.navidrome {
+    background: linear-gradient(135deg, #28a745, #20c997);
+    color: white;
+}
+
+.btn-service.navidrome:hover {
+    background: linear-gradient(135deg, #218838, #1ea085);
+    transform: translateY(-1px);
+}
+
+.btn-service.plex {
+    background: linear-gradient(135deg, #fd7e14, #e83e8c);
+    color: white;
+}
+
+.btn-service.plex:hover {
+    background: linear-gradient(135deg, #e8690b, #d63384);
+    transform: translateY(-1px);
+}
+
+.btn-service:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+/* Service Status Modal Styles */
+.service-status-modal {
+    background: #e8f4fd;
+    border: 1px solid #bee5eb;
+    border-radius: 6px;
+    padding: 15px;
+    margin-top: 15px;
+}
+
+.service-status-modal .status-message {
+    font-weight: 500;
+    margin-bottom: 15px;
+}
+
+.service-status-modal .status-message.success {
+    color: #155724;
+}
+
+.service-status-modal .status-message.error {
+    color: #721c24;
+}
+
+.service-status-modal .status-message.loading {
+    color: #0c5460;
+}
+
+.service-status-modal .mapping-results h4 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    color: #0c5460;
+}
+
+.service-status-modal .mapping-results .mapping-summary {
+    font-size: 12px;
+    color: #0c5460;
+    line-height: 1.4;
+}
+
+/* Modal Service Integration Styles */
+.service-integration-modal {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #444;
+}
+
+.service-integration-modal h4 {
+    color: #e0e0e0;
+    margin-bottom: 15px;
+    font-size: 16px;
+}
+
+.playlist-naming-modal {
+    margin-bottom: 20px;
+}
+
+.playlist-naming-modal label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: #ccc;
+}
+
+.playlist-naming-modal input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    font-size: 14px;
+    background: #333;
+    color: #e0e0e0;
+}
+
+.playlist-naming-modal .help-text {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: #888;
+}
+
+.service-buttons-modal {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.service-buttons-modal .btn-service {
+    min-width: 140px;
+    height: auto;
+    padding: 10px 16px;
+}
+
+/* Ask a Friend Results Styles */
+.playlist-meta {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.playlist-info h4 {
+    margin: 0 0 15px 0;
+    color: #495057;
+    font-size: 18px;
+}
+
+.playlist-info p {
+    margin: 8px 0;
+    color: #6c757d;
+    font-size: 14px;
+}
+
+#tracks_section h3 {
+    color: #495057;
+    margin-bottom: 15px;
+}
+
+#tracks_list .list-group-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    background: white;
+}
+
+.track-info {
+    flex: 1;
+    color: #495057;
+}
+
+.track-source {
+    background: #e9ecef;
+    color: #6c757d;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+}

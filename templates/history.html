@@ -78,13 +78,26 @@
                             <button class="btn btn-primary" onclick="viewFullPlaylist({{ loop.index0 }})">
                                 View Full Playlist
                             </button>
+                            
+                            <!-- Service Integration Buttons -->
+                            <div class="service-buttons-history">
+                                <button class="btn btn-service navidrome" onclick="saveToService('navidrome', {{ loop.index0 }})" 
+                                        data-playlist-index="{{ loop.index0 }}" title="Save to Navidrome" style="display:none;">
+                                    🎧
+                                </button>
+                                <button class="btn btn-service plex" onclick="saveToService('plex', {{ loop.index0 }})" 
+                                        data-playlist-index="{{ loop.index0 }}" title="Save to Plex" style="display:none;">
+                                    🎬
+                                </button>
+                            </div>
+                            
                             <button class="btn btn-danger" onclick="deletePlaylist({{ loop.index0 }})" title="Delete this playlist">
                                 🗑️
                             </button>
                         </div>
                         <div class="rating">
                             {% for i in range(1, 6) %}
-                                <button class="rating-star {% if playlist.get('rating') == i %}active{% endif %}" 
+                                <button class="rating-star {% if playlist.get('rating', i) == i %}active{% endif %}" 
                                     data-playlist-index="{{ loop.index0 }}" data-rating="{{ i }}">
                                     {% if playlist.get('rating', 0) >= i %}★{% else %}☆{% endif %}
                                 </button>
@@ -113,6 +126,36 @@
                 <div id="share-link-container" style="display: none; margin-top: 10px;">
                     <input type="text" id="share-link" class="form-control" readonly>
                     <button class="btn btn-sm btn-secondary" onclick="copyShareLink()">Copy</button>
+                </div>
+                
+                <!-- Service Integration Modal Section -->
+                <div class="service-integration-modal">
+                    <h4>🎵 Save to Music Services</h4>
+                    <div class="playlist-naming-modal">
+                        <label for="modal_playlist_name">Playlist Name:</label>
+                        <input type="text" id="modal_playlist_name" class="form-control" placeholder="Enter custom playlist name (optional)">
+                        <small class="help-text">Leave empty to use current playlist name</small>
+                    </div>
+                    
+                    <div class="service-buttons-modal">
+                        <button id="modal_save_to_navidrome_btn" class="btn btn-service navidrome" onclick="saveToServiceFromModal('navidrome')" style="display:none;">
+                            <span class="service-icon">🎧</span>
+                            <span class="service-text">Save to Navidrome</span>
+                        </button>
+                        <button id="modal_save_to_plex_btn" class="btn btn-service plex" onclick="saveToServiceFromModal('plex')" style="display:none;">
+                            <span class="service-icon">🎬</span>
+                            <span class="service-text">Save to Plex</span>
+                        </button>
+                    </div>
+                    
+                    <!-- Service Status in Modal -->
+                    <div id="modal_service_status" class="service-status-modal" style="display:none;">
+                        <div class="status-message"></div>
+                        <div class="mapping-results" style="display:none;">
+                            <h4>Track Mapping Results</h4>
+                            <div class="mapping-summary"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
             
@@ -331,5 +374,166 @@
             .then?.(() => alert('Link copied to clipboard!'))
             .catch?.(() => alert('Failed to copy link'));
     }
+
+    // Service Integration Functionality
+    let serviceButtonsInitialized = false;
+
+    async function initializeServiceButtons() {
+        if (serviceButtonsInitialized) return;
+        
+        try {
+            // Check which services are enabled
+            const response = await fetch('/api/sonic/service-config');
+            if (response.ok) {
+                const config = await response.json();
+                
+                if (config.success) {
+                    // Show Navidrome button if enabled
+                    if (config.navidrome_enabled) {
+                        document.getElementById('modal_save_to_navidrome_btn').style.display = 'inline-flex';
+                    }
+                    
+                    // Show Plex button if enabled
+                    if (config.plex_enabled) {
+                        document.getElementById('modal_save_to_plex_btn').style.display = 'inline-flex';
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Failed to check service settings:', e);
+        }
+        
+        serviceButtonsInitialized = true;
+    }
+
+    async function saveToService(serviceName, playlistIndex) {
+        // For the card buttons, open the modal first
+        viewFullPlaylist(playlistIndex);
+        
+        // Initialize service buttons and wait a bit for modal to open
+        setTimeout(() => {
+            initializeServiceButtons();
+            // Focus on the service button in the modal
+            const modalButton = document.getElementById(`modal_save_to_${serviceName}_btn`);
+            if (modalButton) {
+                modalButton.focus();
+            }
+        }, 100);
+    }
+
+    async function saveToServiceFromModal(serviceName) {
+        if (currentPlaylistId === null) {
+            alert('No playlist selected.');
+            return;
+        }
+        
+        const playlist = historyData[currentPlaylistId];
+        if (!playlist) {
+            alert('Playlist not found.');
+            return;
+        }
+        
+        const playlistName = document.getElementById('modal_playlist_name').value.trim() || playlist.name;
+        const button = document.getElementById(`modal_save_to_${serviceName}_btn`);
+        const originalText = button.innerHTML;
+        
+        try {
+            // Disable button and show loading state
+            button.disabled = true;
+            button.innerHTML = '<span class="service-icon">⏳</span><span class="service-text">Saving...</span>';
+            
+            // Show service status section
+            const serviceStatus = document.getElementById('modal_service_status');
+            serviceStatus.style.display = 'block';
+            
+            const statusMessage = serviceStatus.querySelector('.status-message');
+            statusMessage.textContent = `Saving playlist to ${serviceName}...`;
+            statusMessage.className = 'status-message loading';
+            
+            // Make API call
+            const response = await fetch(`/api/history/save-to-${serviceName}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    playlist_name: playlistName,
+                    tracks: playlist.tracks_details || playlist.tracks || []
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                // Success
+                statusMessage.textContent = result.message;
+                statusMessage.className = 'status-message success';
+                
+                // Show mapping results
+                if (result.mapping_results) {
+                    const mappingResults = serviceStatus.querySelector('.mapping-results');
+                    const mappingSummary = serviceStatus.querySelector('.mapping-summary');
+                    
+                    const found = result.mapping_results.found.length;
+                    const notFound = result.mapping_results.not_found.length;
+                    const total = result.mapping_results.total_processed;
+                    
+                    mappingSummary.innerHTML = `
+                        <strong>Successfully mapped:</strong> ${found}/${total} tracks<br>
+                        <strong>Not found in ${serviceName}:</strong> ${notFound} tracks<br>
+                        <strong>Playlist ID:</strong> ${result.playlist_id}<br>
+                        <strong>Playlist Name:</strong> ${result.playlist_name}
+                    `;
+                    
+                    mappingResults.style.display = 'block';
+                }
+                
+                // Clear playlist name input
+                document.getElementById('modal_playlist_name').value = '';
+                
+            } else {
+                // Error
+                statusMessage.textContent = `Error: ${result.error}`;
+                statusMessage.className = 'status-message error';
+                
+                // Show mapping results if available
+                if (result.mapping_results) {
+                    const mappingResults = serviceStatus.querySelector('.mapping-results');
+                    const mappingSummary = serviceStatus.querySelector('.mapping-summary');
+                    
+                    const found = result.mapping_results.found.length;
+                    const notFound = result.mapping_results.not_found.length;
+                    const total = result.mapping_results.total_processed;
+                    
+                    mappingSummary.innerHTML = `
+                        <strong>Successfully mapped:</strong> ${found}/${total} tracks<br>
+                        <strong>Not found in ${serviceName}:</strong> ${notFound} tracks<br>
+                        <strong>Error:</strong> ${result.error}
+                    `;
+                    
+                    mappingResults.style.display = 'block';
+                }
+            }
+            
+        } catch (e) {
+            console.error(`Error saving to ${serviceName}:`, e);
+            const statusMessage = serviceStatus.querySelector('.status-message');
+            statusMessage.textContent = `Network error: ${e.message}`;
+            statusMessage.className = 'status-message error';
+        } finally {
+            // Re-enable button
+            button.disabled = false;
+            button.innerHTML = originalText;
+        }
+    }
+
+    // Initialize service buttons when modal opens
+    const originalViewFullPlaylist = viewFullPlaylist;
+    viewFullPlaylist = function(playlistIndex) {
+        originalViewFullPlaylist(playlistIndex);
+        
+        // Initialize service buttons
+        setTimeout(() => {
+            initializeServiceButtons();
+        }, 100);
+    };
 </script>
 {% endblock %}

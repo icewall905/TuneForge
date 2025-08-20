@@ -3500,3 +3500,485 @@ def api_sonic_export_m3u():
     except Exception as e:
         debug_log(f"Sonic export M3U error: {e}", 'ERROR')
         return jsonify({'success': False, 'error': 'Internal error'}), 500
+
+# --- Sonic Traveller Music Service Integration ---
+
+@main_bp.route('/api/sonic/save-to-navidrome', methods=['POST'])
+def api_save_sonic_to_navidrome():
+    """Save Sonic Traveller playlist to Navidrome"""
+    try:
+        data = request.get_json() or {}
+        job_id = data.get('job_id')
+        playlist_name = data.get('playlist_name', '').strip()
+        
+        if not job_id:
+            return jsonify({'success': False, 'error': 'job_id required'}), 400
+            
+        # Check if Navidrome is enabled
+        if get_config_value('APP', 'EnableNavidrome', 'no').lower() != 'yes':
+            return jsonify({'success': False, 'error': 'Navidrome is not enabled'}), 400
+            
+        # Get Navidrome configuration
+        navidrome_url = get_config_value('NAVIDROME', 'URL', '')
+        navidrome_username = get_config_value('NAVIDROME', 'Username', '')
+        navidrome_password = get_config_value('NAVIDROME', 'Password', '')
+        
+        if not all([navidrome_url, navidrome_username, navidrome_password]):
+            return jsonify({'success': False, 'error': 'Navidrome configuration incomplete'}), 400
+            
+        # Get the Sonic Traveller job
+        with _sonic_job_lock:
+            job = _sonic_jobs.get(job_id)
+            if not job:
+                return jsonify({'success': False, 'error': 'Job not found'}), 404
+                
+            if job.status not in ['completed', 'stopped']:
+                return jsonify({'success': False, 'error': 'Job not completed'}), 400
+                
+            if not job.results:
+                return jsonify({'success': False, 'error': 'No tracks to save'}), 400
+        
+        # Generate playlist name if not provided
+        if not playlist_name:
+            seed_track = _get_track_by_id(job.seed_track_id)
+            if seed_track:
+                artist = seed_track.get('artist', 'Unknown')
+                title = seed_track.get('title', 'Unknown')
+                playlist_name = f"Sonic Traveller: {artist} - {title} ({datetime.now().strftime('%Y-%m-%d')})"
+            else:
+                playlist_name = f"Sonic Traveller Playlist ({datetime.now().strftime('%Y-%m-%d')})"
+        
+        # Map local tracks to Navidrome tracks
+        navidrome_track_ids = []
+        mapping_results = {
+            'found': [],
+            'not_found': [],
+            'total_processed': len(job.results)
+        }
+        
+        for track in job.results:
+            # Search for track in Navidrome
+            search_query = f"{track['title']} {track['artist']}"
+            navidrome_tracks = search_track_in_navidrome(search_query, navidrome_url, navidrome_username, navidrome_password)
+            
+            if navidrome_tracks:
+                # Use the first (best) match
+                best_match = navidrome_tracks[0]
+                navidrome_track_ids.append(best_match['id'])
+                mapping_results['found'].append({
+                    'local': {'title': track['title'], 'artist': track['artist']},
+                    'navidrome': {'id': best_match['id'], 'title': best_match['title'], 'artist': best_match['artist']}
+                })
+            else:
+                mapping_results['not_found'].append({
+                    'title': track['title'],
+                    'artist': track['artist']
+                })
+        
+        if not navidrome_track_ids:
+            return jsonify({
+                'success': False, 
+                'error': 'No tracks could be found in Navidrome',
+                'mapping_results': mapping_results
+            }), 400
+        
+        # Create playlist in Navidrome
+        playlist_id = create_playlist_in_navidrome(
+            navidrome_url, navidrome_username, navidrome_password, 
+            playlist_name, navidrome_track_ids
+        )
+        
+        if playlist_id:
+            # Update local history with Navidrome creation results
+            _update_sonic_history_with_service_results(job_id, 'navidrome', {
+                'playlist_id': playlist_id,
+                'playlist_name': playlist_name,
+                'tracks_added': len(navidrome_track_ids),
+                'mapping_results': mapping_results
+            })
+            
+            return jsonify({
+                'success': True,
+                'message': f'Playlist "{playlist_name}" created in Navidrome with {len(navidrome_track_ids)} tracks',
+                'playlist_id': playlist_id,
+                'playlist_name': playlist_name,
+                'tracks_added': len(navidrome_track_ids),
+                'mapping_results': mapping_results
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to create playlist in Navidrome',
+                'mapping_results': mapping_results
+            }), 500
+            
+    except Exception as e:
+        debug_log(f"Error saving Sonic Traveller to Navidrome: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@main_bp.route('/api/sonic/save-to-plex', methods=['POST'])
+def api_save_sonic_to_plex():
+    """Save Sonic Traveller playlist to Plex"""
+    try:
+        data = request.get_json() or {}
+        job_id = data.get('job_id')
+        playlist_name = data.get('playlist_name', '').strip()
+        
+        if not job_id:
+            return jsonify({'success': False, 'error': 'job_id required'}), 400
+            
+        # Check if Plex is enabled
+        if get_config_value('APP', 'EnablePlex', 'no').lower() != 'yes':
+            return jsonify({'success': False, 'error': 'Plex is not enabled'}), 400
+            
+        # Get Plex configuration
+        plex_server_url = get_config_value('PLEX', 'ServerURL', '')
+        plex_token = get_config_value('PLEX', 'Token', '')
+        plex_machine_id = get_config_value('PLEX', 'MachineID', '')
+        plex_music_section_id = get_config_value('PLEX', 'MusicSectionID', '')
+        
+        if not all([plex_server_url, plex_token, plex_machine_id, plex_music_section_id]):
+            return jsonify({'success': False, 'error': 'Plex configuration incomplete'}), 400
+            
+        # Get the Sonic Traveller job
+        with _sonic_job_lock:
+            job = _sonic_jobs.get(job_id)
+            if not job:
+                return jsonify({'success': False, 'error': 'Job not found'}), 404
+                
+            if job.status not in ['completed', 'stopped']:
+                return jsonify({'success': False, 'error': 'Job not completed'}), 400
+                
+            if not job.results:
+                return jsonify({'success': False, 'error': 'No tracks to save'}), 400
+        
+        # Generate playlist name if not provided
+        if not playlist_name:
+            seed_track = _get_track_by_id(job.seed_track_id)
+            if seed_track:
+                artist = seed_track.get('artist', 'Unknown')
+                title = seed_track.get('title', 'Unknown')
+                playlist_name = f"Sonic Traveller: {artist} - {title} ({datetime.now().strftime('%Y-%m-%d')})"
+            else:
+                playlist_name = f"Sonic Traveller Playlist ({datetime.now().strftime('%Y-%m-%d')})"
+        
+        # Map local tracks to Plex tracks
+        plex_track_ids = []
+        mapping_results = {
+            'found': [],
+            'not_found': [],
+            'total_processed': len(job.results)
+        }
+        
+        for track in job.results:
+            # Search for track in Plex
+            plex_track = search_track_in_plex(
+                plex_server_url, plex_token, 
+                track['title'], track['artist'], track.get('album'), 
+                plex_music_section_id
+            )
+            
+            if plex_track:
+                plex_track_ids.append(plex_track['id'])
+                mapping_results['found'].append({
+                    'local': {'title': track['title'], 'artist': track['artist']},
+                    'plex': {'id': plex_track['id'], 'title': plex_track['title'], 'artist': plex_track['artist']}
+                })
+            else:
+                mapping_results['not_found'].append({
+                    'title': track['title'],
+                    'artist': track['artist']
+                })
+        
+        if not plex_track_ids:
+            return jsonify({
+                'success': False, 
+                'error': 'No tracks could be found in Plex',
+                'mapping_results': mapping_results
+            }), 400
+        
+        # Create playlist in Plex
+        playlist_id, tracks_added = create_playlist_in_plex(
+            playlist_name, plex_track_ids, plex_server_url, plex_token, plex_machine_id
+        )
+        
+        if playlist_id:
+            # Update local history with Plex creation results
+            _update_sonic_history_with_service_results(job_id, 'plex', {
+                'playlist_id': playlist_id,
+                'playlist_name': playlist_name,
+                'tracks_added': tracks_added,
+                'mapping_results': mapping_results
+            })
+            
+            return jsonify({
+                'success': True,
+                'message': f'Playlist "{playlist_name}" created in Plex with {tracks_added} tracks',
+                'playlist_id': playlist_id,
+                'playlist_name': playlist_name,
+                'tracks_added': tracks_added,
+                'mapping_results': mapping_results
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to create playlist in Plex',
+                'mapping_results': mapping_results
+            }), 500
+            
+    except Exception as e:
+        debug_log(f"Error saving Sonic Traveller to Plex: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def _update_sonic_history_with_service_results(job_id, service_name, results):
+    """Update Sonic Traveller history with service creation results"""
+    try:
+        # Load current history
+        history = load_playlist_history()
+        
+        # Find the Sonic Traveller entry
+        for entry in history:
+            if entry.get('id') == f"sonic_{job_id}":
+                # Initialize service results if not present
+                if 'service_results' not in entry['metadata']:
+                    entry['metadata']['service_results'] = {}
+                
+                # Update with new service results
+                entry['metadata']['service_results'][service_name] = {
+                    'created_at': datetime.now().isoformat(),
+                    'playlist_id': results['playlist_id'],
+                    'playlist_name': results['playlist_name'],
+                    'tracks_added': results['tracks_added'],
+                    'mapping_results': results['mapping_results']
+                }
+                
+                # Save updated history
+                save_playlist_history(history)
+                debug_log(f"Updated Sonic Traveller history with {service_name} results for job {job_id}", 'INFO')
+                break
+                
+    except Exception as e:
+        debug_log(f"Error updating Sonic Traveller history with {service_name} results: {e}", 'ERROR')
+
+@main_bp.route('/api/sonic/service-config')
+def api_sonic_service_config():
+    """Get service configuration for Sonic Traveller"""
+    try:
+        return jsonify({
+            'success': True,
+            'navidrome_enabled': get_config_value('APP', 'EnableNavidrome', 'no').lower() == 'yes',
+            'plex_enabled': get_config_value('APP', 'EnablePlex', 'no').lower() == 'yes'
+        })
+    except Exception as e:
+        debug_log(f"Error getting service config: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@main_bp.route('/api/history/save-to-navidrome', methods=['POST'])
+def api_save_history_to_navidrome():
+    """Save History playlist to Navidrome"""
+    try:
+        data = request.get_json() or {}
+        playlist_name = data.get('playlist_name', '').strip()
+        tracks = data.get('tracks', [])
+        
+        if not tracks:
+            return jsonify({'success': False, 'error': 'No tracks provided'}), 400
+            
+        # Check if Navidrome is enabled
+        if get_config_value('APP', 'EnableNavidrome', 'no').lower() != 'yes':
+            return jsonify({'success': False, 'error': 'Navidrome is not enabled'}), 400
+            
+        # Get Navidrome configuration
+        navidrome_url = get_config_value('NAVIDROME', 'URL', '')
+        navidrome_username = get_config_value('NAVIDROME', 'Username', '')
+        navidrome_password = get_config_value('NAVIDROME', 'Password', '')
+        
+        if not all([navidrome_url, navidrome_username, navidrome_password]):
+            return jsonify({'success': False, 'error': 'Navidrome configuration incomplete'}), 400
+        
+        # Map tracks to Navidrome tracks
+        navidrome_track_ids = []
+        mapping_results = {
+            'found': [],
+            'not_found': [],
+            'total_processed': len(tracks)
+        }
+        
+        for track in tracks:
+            # Try multiple search strategies for better matching
+            search_strategies = [
+                f"{track.get('artist', '')} {track.get('title', '')}",  # Artist first (often better)
+                track.get('title', ''),  # Title only
+                track.get('artist', ''),  # Artist only
+                f"{track.get('title', '')} {track.get('artist', '')}",  # Title first (original strategy)
+            ]
+            
+            navidrome_tracks = []
+            used_strategy = None
+            
+            for strategy in search_strategies:
+                if not strategy.strip():
+                    continue
+                    
+                try:
+                    navidrome_tracks = search_track_in_navidrome(strategy, navidrome_url, navidrome_username, navidrome_password)
+                    if navidrome_tracks:
+                        used_strategy = strategy
+                        break
+                except Exception as e:
+                    debug_log(f"Search strategy '{strategy}' failed: {e}", 'WARN')
+                    continue
+            
+            if navidrome_tracks:
+                # Use the first (best) match
+                best_match = navidrome_tracks[0]
+                navidrome_track_ids.append(best_match['id'])
+                mapping_results['found'].append({
+                    'local': {'title': track.get('title', ''), 'artist': track.get('artist', '')},
+                    'navidrome': {'id': best_match['id'], 'title': best_match['title'], 'artist': best_match['artist']},
+                    'search_strategy': used_strategy
+                })
+            else:
+                mapping_results['not_found'].append({
+                    'title': track.get('title', ''),
+                    'artist': track.get('artist', '')
+                })
+        
+        if not navidrome_track_ids:
+            return jsonify({
+                'success': False, 
+                'error': 'No tracks could be found in Navidrome',
+                'mapping_results': mapping_results
+            }), 400
+        
+        # Create playlist in Navidrome
+        playlist_id = create_playlist_in_navidrome(
+            navidrome_url, navidrome_username, navidrome_password, 
+            playlist_name, navidrome_track_ids
+        )
+        
+        if playlist_id:
+            return jsonify({
+                'success': True,
+                'message': f'Playlist "{playlist_name}" created in Navidrome with {len(navidrome_track_ids)} tracks',
+                'playlist_id': playlist_id,
+                'playlist_name': playlist_name,
+                'tracks_added': len(navidrome_track_ids),
+                'mapping_results': mapping_results
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to create playlist in Navidrome',
+                'mapping_results': mapping_results
+            }), 500
+            
+    except Exception as e:
+        debug_log(f"Error saving History playlist to Navidrome: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@main_bp.route('/api/history/save-to-plex', methods=['POST'])
+def api_save_history_to_plex():
+    """Save History playlist to Plex"""
+    try:
+        data = request.get_json() or {}
+        playlist_name = data.get('playlist_name', '').strip()
+        tracks = data.get('tracks', [])
+        
+        if not tracks:
+            return jsonify({'success': False, 'error': 'No tracks provided'}), 400
+            
+        # Check if Plex is enabled
+        if get_config_value('APP', 'EnablePlex', 'no').lower() != 'yes':
+            return jsonify({'success': False, 'error': 'Plex is not enabled'}), 400
+            
+        # Get Plex configuration
+        plex_server_url = get_config_value('PLEX', 'ServerURL', '')
+        plex_token = get_config_value('PLEX', 'Token', '')
+        plex_machine_id = get_config_value('PLEX', 'MachineID', '')
+        plex_music_section_id = get_config_value('PLEX', 'MusicSectionID', '')
+        
+        if not all([plex_server_url, plex_token, plex_machine_id, plex_music_section_id]):
+            return jsonify({'success': False, 'error': 'Plex configuration incomplete'}), 400
+        
+        # Map tracks to Plex tracks
+        plex_track_ids = []
+        mapping_results = {
+            'found': [],
+            'not_found': [],
+            'total_processed': len(tracks)
+        }
+        
+        for track in tracks:
+            # Try multiple search strategies for better matching
+            search_strategies = [
+                (track.get('title', ''), track.get('artist', ''), track.get('album')),  # Full info
+                (track.get('title', ''), track.get('artist', ''), None),  # No album
+                (track.get('title', ''), None, None),  # Title only
+                (None, track.get('artist', ''), None),  # Artist only
+            ]
+            
+            plex_track = None
+            used_strategy = None
+            
+            for title, artist, album in search_strategies:
+                if not title and not artist:
+                    continue
+                    
+                try:
+                    plex_track = search_track_in_plex(
+                        plex_server_url, plex_token, 
+                        title or '', artist or '', album, 
+                        plex_music_section_id
+                    )
+                    if plex_track:
+                        used_strategy = f"Title: {title or 'N/A'}, Artist: {artist or 'N/A'}"
+                        break
+                except Exception as e:
+                    debug_log(f"Plex search strategy failed: {e}", 'WARN')
+                    continue
+            
+            if plex_track:
+                plex_track_ids.append(plex_track['id'])
+                mapping_results['found'].append({
+                    'local': {'title': track.get('title', ''), 'artist': track.get('artist', '')},
+                    'plex': {'id': plex_track['id'], 'title': plex_track['title'], 'artist': plex_track['artist']},
+                    'search_strategy': used_strategy
+                })
+            else:
+                mapping_results['not_found'].append({
+                    'title': track.get('title', ''),
+                    'artist': track.get('artist', '')
+                })
+        
+        if not plex_track_ids:
+            return jsonify({
+                'success': False, 
+                'error': 'No tracks could be found in Plex',
+                'mapping_results': mapping_results
+            }), 400
+        
+        # Create playlist in Plex
+        playlist_id, tracks_added = create_playlist_in_plex(
+            playlist_name, plex_track_ids, plex_server_url, plex_token, plex_machine_id
+        )
+        
+        if playlist_id:
+            return jsonify({
+                'success': True,
+                'message': f'Playlist "{playlist_name}" created in Plex with {tracks_added} tracks',
+                'playlist_id': playlist_id,
+                'playlist_name': playlist_name,
+                'tracks_added': tracks_added,
+                'mapping_results': mapping_results
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to create playlist in Plex',
+                'mapping_results': mapping_results
+            }), 500
+            
+    except Exception as e:
+        debug_log(f"Error saving History playlist to Plex: {e}", 'ERROR')
+        return jsonify({'success': False, 'error': str(e)}), 500

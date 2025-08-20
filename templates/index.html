@@ -74,6 +74,58 @@
         <div class="results-container">
             <h2>Console Output</h2>
             <div id="console_output" class="console-output"></div>
+            
+            <!-- Playlist Results Section -->
+            <div id="playlist_results" style="display:none;">
+                <h2>Generated Playlist</h2>
+                <div id="playlist_meta" class="playlist-meta"></div>
+                
+                <!-- Export Section -->
+                <div id="export_section" style="display:none; margin-top:16px;">
+                    <button id="export_json_btn" class="secondary-button">Export JSON</button>
+                    <button id="export_m3u_btn" class="secondary-button">Export M3U</button>
+                </div>
+                
+                <!-- Service Integration Section -->
+                <div id="service_integration_section" style="display:none; margin-top:20px;">
+                    <h3>🎵 Save to Music Services</h3>
+                    <div class="service-integration-container">
+                        <!-- Playlist Naming -->
+                        <div class="playlist-naming">
+                            <label for="playlist_name">Playlist Name:</label>
+                            <input type="text" id="playlist_name" class="form-control" placeholder="Enter custom playlist name (optional)">
+                            <small class="help-text">Leave empty to use current playlist name</small>
+                        </div>
+                        
+                        <!-- Service Buttons -->
+                        <div class="service-buttons">
+                            <button id="save_to_navidrome_btn" class="service-button navidrome" style="display:none;">
+                                <span class="service-icon">🎧</span>
+                                <span class="service-text">Save to Navidrome</span>
+                            </button>
+                            <button id="save_to_plex_btn" class="service-button plex" style="display:none;">
+                                <span class="service-icon">🎬</span>
+                                <span class="service-text">Save to Plex</span>
+                            </button>
+                        </div>
+                        
+                        <!-- Service Status -->
+                        <div id="service_status" class="service-status" style="display:none;">
+                            <div class="status-message"></div>
+                            <div class="mapping-results" style="display:none;">
+                                <h4>Track Mapping Results</h4>
+                                <div class="mapping-summary"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Tracks List -->
+                <div id="tracks_section" style="margin-top:20px;">
+                    <h3>Playlist Tracks</h3>
+                    <ul id="tracks_list" class="list-group"></ul>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -304,6 +356,9 @@
                 // Show the final result immediately
                 displayFinalResult(outputElement, data);
                 
+                // Show playlist results
+                displayPlaylistResults(data);
+                
                 // Allow new submissions after this completes
                 window.__playlistSubmitInProgress = false;
             })
@@ -427,6 +482,247 @@
         }
 
         // Note: Removed local startPlaylistProgressPolling; sidebar now handles polling
+        
+        // Function to display playlist results
+        function displayPlaylistResults(data) {
+            const playlistResults = document.getElementById('playlist_results');
+            const playlistMeta = document.getElementById('playlist_meta');
+            const tracksList = document.getElementById('tracks_list');
+            const exportSection = document.getElementById('export_section');
+            const serviceSection = document.getElementById('service_integration_section');
+            
+            // Show results section
+            playlistResults.style.display = 'block';
+            
+            // Display playlist metadata
+            playlistMeta.innerHTML = `
+                <div class="playlist-info">
+                    <h4>${data.playlist_name || 'Generated Playlist'}</h4>
+                    <p><strong>Status:</strong> ${data.message}</p>
+                    <p><strong>Tracks Found:</strong> ${data.tracks_added_count || 0}/${data.target_song_count || 0}</p>
+                    <p><strong>Ollama Calls:</strong> ${data.ollama_api_calls || 0}</p>
+                    <p><strong>Playlist ID:</strong> ${data.playlist_id || 'N/A'}</p>
+                </div>
+            `;
+            
+            // Display tracks if available
+            if (data.tracks_details && data.tracks_details.length > 0) {
+                tracksList.innerHTML = '';
+                data.tracks_details.forEach(track => {
+                    const li = document.createElement('li');
+                    li.className = 'list-group-item';
+                    li.innerHTML = `
+                        <span class="track-info">
+                            <strong>${track.artist || 'Unknown Artist'}</strong> - ${track.title || 'Unknown Title'}
+                        </span>
+                        <span class="track-source">${track.source || 'Unknown'}</span>
+                    `;
+                    tracksList.appendChild(li);
+                });
+                
+                // Show export section
+                exportSection.style.display = 'block';
+                
+                // Show service integration section
+                serviceSection.style.display = 'block';
+                
+                // Initialize service buttons
+                initializeServiceButtons();
+                
+                // Store playlist data for service integration
+                window.currentPlaylistData = data;
+            }
+        }
+        
+        // Service Integration Functionality
+        let serviceButtonsInitialized = false;
+        
+        async function initializeServiceButtons() {
+            if (serviceButtonsInitialized) return;
+            
+            try {
+                // Check which services are enabled
+                const response = await fetch('/api/sonic/service-config');
+                if (response.ok) {
+                    const config = await response.json();
+                    
+                    if (config.success) {
+                        // Show Navidrome button if enabled
+                        if (config.navidrome_enabled) {
+                            document.getElementById('save_to_navidrome_btn').style.display = 'inline-flex';
+                        }
+                        
+                        // Show Plex button if enabled
+                        if (config.plex_enabled) {
+                            document.getElementById('save_to_plex_btn').style.display = 'inline-flex';
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to check service settings:', e);
+            }
+            
+            serviceButtonsInitialized = true;
+        }
+        
+        async function saveToService(serviceName) {
+            if (!window.currentPlaylistData) {
+                alert('No playlist generated yet. Please generate a playlist first.');
+                return;
+            }
+            
+            const playlistName = document.getElementById('playlist_name').value.trim() || window.currentPlaylistData.playlist_name;
+            const button = document.getElementById(`save_to_${serviceName}_btn`);
+            const originalText = button.innerHTML;
+            
+            try {
+                // Disable button and show loading state
+                button.disabled = true;
+                button.innerHTML = '<span class="service-icon">⏳</span><span class="service-text">Saving...</span>';
+                
+                // Show service status section
+                const serviceStatus = document.getElementById('service_status');
+                serviceStatus.style.display = 'block';
+                
+                const statusMessage = serviceStatus.querySelector('.status-message');
+                statusMessage.textContent = `Saving playlist to ${serviceName}...`;
+                statusMessage.className = 'status-message loading';
+                
+                // Make API call
+                const response = await fetch(`/api/history/save-to-${serviceName}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        playlist_name: playlistName,
+                        tracks: window.currentPlaylistData.tracks_details || []
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Success
+                    statusMessage.textContent = result.message;
+                    statusMessage.className = 'status-message success';
+                    
+                    // Show mapping results
+                    if (result.mapping_results) {
+                        const mappingResults = serviceStatus.querySelector('.mapping-results');
+                        const mappingSummary = serviceStatus.querySelector('.mapping-summary');
+                        
+                        const found = result.mapping_results.found.length;
+                        const notFound = result.mapping_results.not_found.length;
+                        const total = result.mapping_results.total_processed;
+                        
+                        mappingSummary.innerHTML = `
+                            <strong>Successfully mapped:</strong> ${found}/${total} tracks<br>
+                            <strong>Not found in ${serviceName}:</strong> ${notFound} tracks<br>
+                            <strong>Playlist ID:</strong> ${result.playlist_id}<br>
+                            <strong>Playlist Name:</strong> ${result.playlist_name}
+                        `;
+                        
+                        mappingResults.style.display = 'block';
+                    }
+                    
+                    // Clear playlist name input
+                    document.getElementById('playlist_name').value = '';
+                    
+                } else {
+                    // Error
+                    statusMessage.textContent = `Error: ${result.error}`;
+                    statusMessage.className = 'status-message error';
+                    
+                    // Show mapping results if available
+                    if (result.mapping_results) {
+                        const mappingResults = serviceStatus.querySelector('.mapping-results');
+                        const mappingSummary = serviceStatus.querySelector('.mapping-summary');
+                        
+                        const found = result.mapping_results.found.length;
+                        const notFound = result.mapping_results.not_found.length;
+                        const total = result.mapping_results.total_processed;
+                        
+                        mappingSummary.innerHTML = `
+                            <strong>Successfully mapped:</strong> ${found}/${total} tracks<br>
+                            <strong>Not found in ${serviceName}:</strong> ${notFound} tracks<br>
+                            <strong>Error:</strong> ${result.error}
+                        `;
+                        
+                        mappingResults.style.display = 'block';
+                    }
+                }
+                
+            } catch (e) {
+                console.error(`Error saving to ${serviceName}:`, e);
+                const statusMessage = serviceStatus.querySelector('.status-message');
+                statusMessage.textContent = `Network error: ${e.message}`;
+                statusMessage.className = 'status-message error';
+            } finally {
+                // Re-enable button
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        }
+        
+        // Export functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            // Export JSON
+            document.getElementById('export_json_btn')?.addEventListener('click', () => {
+                if (!window.currentPlaylistData) return;
+                
+                const exportData = {
+                    playlist_name: window.currentPlaylistData.playlist_name,
+                    tracks: window.currentPlaylistData.tracks_details || [],
+                    metadata: {
+                        generated_at: new Date().toISOString(),
+                        ollama_calls: window.currentPlaylistData.ollama_api_calls,
+                        target_songs: window.currentPlaylistData.target_song_count
+                    }
+                };
+                
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${exportData.playlist_name.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
+            
+            // Export M3U
+            document.getElementById('export_m3u_btn')?.addEventListener('click', () => {
+                if (!window.currentPlaylistData) return;
+                
+                const tracks = window.currentPlaylistData.tracks_details || [];
+                const m3uLines = [
+                    '#EXTM3U',
+                    `# ${window.currentPlaylistData.playlist_name}`,
+                    `# Generated: ${new Date().toISOString()}`,
+                    `# Tracks: ${tracks.length}`,
+                    ''
+                ];
+                
+                tracks.forEach(track => {
+                    m3uLines.push(`#EXTINF:-1,${track.artist || 'Unknown'} - ${track.title || 'Unknown'}`);
+                    m3uLines.push(`# ${track.artist || 'Unknown'} - ${track.title || 'Unknown'} (${track.source || 'Unknown'})`);
+                });
+                
+                const blob = new Blob([m3uLines.join('\n')], { type: 'audio/x-mpegurl' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${window.currentPlaylistData.playlist_name.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.m3u`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
+            
+            // Service button event listeners
+            document.getElementById('save_to_navidrome_btn')?.addEventListener('click', () => saveToService('navidrome'));
+            document.getElementById('save_to_plex_btn')?.addEventListener('click', () => saveToService('plex'));
+        });
     });
 </script>
 {% endblock %}
