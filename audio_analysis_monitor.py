@@ -549,37 +549,203 @@ class AudioAnalysisMonitor:
         return "Multiple stall indicators detected. Manual intervention recommended."
     
     def _identify_stall_factors(self) -> List[str]:
-        """Identify potential factors contributing to stalls"""
-        factors = []
-        
+        """Identify specific factors contributing to stalls."""
         try:
-            # Check for recent errors
-            recent_history = self._get_recent_progress_history(hours=1)
-            if recent_history:
-                latest = recent_history[0]
-                if latest.get('error_tracks', 0) > 0:
-                    factors.append("High error rate in recent processing")
-            
-            # Check for progress stagnation
-            if len(recent_history) >= 3:
-                recent_progress = [h['progress_percentage'] for h in recent_history[:3]]
-                if all(abs(recent_progress[i] - recent_progress[i + 1]) < 0.1 for i in range(len(recent_progress) - 1)):
-                    factors.append("Progress has been stagnant")
-            
-            # Check for low processing rate
-            if latest and latest.get('processing_rate', 0) < self.config.min_progress_threshold:
-                factors.append("Processing rate below healthy threshold")
-            
-            # Check for consecutive stalls
-            consecutive_stalls = self._count_consecutive_stalls()
-            if consecutive_stalls > 0:
-                factors.append(f"Multiple consecutive stalls ({consecutive_stalls})")
-            
+            with sqlite3.connect(self.db_path) as conn:
+                factors = []
+                
+                # Check for files with multiple failures
+                cursor = conn.execute("""
+                    SELECT file_path, analysis_error, COUNT(*) as failure_count
+                    FROM tracks 
+                    WHERE analysis_status = 'error' 
+                    GROUP BY file_path, analysis_error
+                    HAVING failure_count >= 3
+                    ORDER BY failure_count DESC
+                    LIMIT 5
+                """)
+                
+                problematic_files = cursor.fetchall()
+                if problematic_files:
+                    factors.append(f"Found {len(problematic_files)} files with 3+ failures")
+                    for file_path, error_msg, count in problematic_files[:3]:
+                        filename = os.path.basename(file_path) if file_path else "Unknown"
+                        factors.append(f"  - {filename}: {count} failures ({error_msg[:50] if error_msg else 'No error message'}...)")
+                
+                # Check for files stuck in 'analyzing' status for too long
+                cursor = conn.execute("""
+                    SELECT file_path, 
+                           (strftime('%s', 'now') - strftime('%s', created_at)) / 60.0 as minutes_stuck
+                    FROM tracks 
+                    WHERE analysis_status = 'analyzing' 
+                    AND created_at IS NOT NULL
+                    AND (strftime('%s', 'now') - strftime('%s', created_at)) > 300
+                    ORDER BY minutes_stuck DESC
+                    LIMIT 5
+                """)
+                
+                stuck_files = cursor.fetchall()
+                if stuck_files:
+                    factors.append(f"Found {len(stuck_files)} files stuck in analysis for 5+ minutes")
+                    for file_path, minutes in stuck_files[:3]:
+                        filename = os.path.basename(file_path) if file_path else "Unknown"
+                        factors.append(f"  - {filename}: stuck for {minutes:.1f} minutes")
+                
+                # Check for recent error patterns
+                cursor = conn.execute("""
+                    SELECT error_message, COUNT(*) as count
+                    FROM tracks 
+                    WHERE analysis_status = 'error' 
+                    AND last_updated > datetime('now', '-1 hour')
+                    GROUP BY error_message
+                    ORDER BY count DESC
+                    LIMIT 3
+                """)
+                
+                error_patterns = cursor.fetchall()
+                if error_patterns:
+                    factors.append("Recent error patterns:")
+                    for error_msg, count in error_patterns:
+                        factors.append(f"  - {error_msg[:50]}...: {count} occurrences")
+                
+                return factors
+                
         except Exception as e:
             logger.error(f"Error identifying stall factors: {e}")
-            factors.append("Unable to determine stall factors")
+            return ["Unable to analyze stall factors due to database error"]
+    
+    def get_problematic_files_report(self) -> Dict[str, Any]:
+        """
+        Get a detailed report of problematic files that may be causing stalls.
         
-        return factors if factors else ["No specific stall factors identified"]
+        Returns:
+            Dictionary with problematic files information and recommendations
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                report = {
+                    'summary': {},
+                    'problematic_files': [],
+                    'stuck_files': [],
+                    'error_patterns': [],
+                    'recommendations': []
+                }
+                
+                # Get summary statistics
+                cursor = conn.execute("""
+                    SELECT analysis_status, COUNT(*) as count
+                    FROM tracks 
+                    GROUP BY analysis_status
+                """)
+                
+                status_counts = dict(cursor.fetchall())
+                report['summary'] = {
+                    'total_tracks': sum(status_counts.values()),
+                    'pending_tracks': status_counts.get('pending', 0),
+                    'analyzing_tracks': status_counts.get('analyzing', 0),
+                    'completed_tracks': status_counts.get('completed', 0),
+                    'error_tracks': status_counts.get('error', 0)
+                }
+                
+                # Get files with multiple failures
+                cursor = conn.execute("""
+                    SELECT file_path, analysis_error, COUNT(*) as failure_count,
+                           MAX(created_at) as last_failure
+                    FROM tracks 
+                    WHERE analysis_status = 'error' 
+                    GROUP BY file_path, analysis_error
+                    HAVING failure_count >= 2
+                    ORDER BY failure_count DESC, last_failure DESC
+                    LIMIT 10
+                """)
+                
+                for row in cursor.fetchall():
+                    file_path, error_msg, count, last_failure = row
+                    filename = os.path.basename(file_path) if file_path else "Unknown"
+                    report['problematic_files'].append({
+                        'filename': filename,
+                        'file_path': file_path,
+                        'failure_count': count,
+                        'last_failure': last_failure,
+                        'error_message': error_msg,
+                        'recommendation': 'skip' if count >= 3 else 'retry'
+                    })
+                
+                # Get files stuck in analysis
+                cursor = conn.execute("""
+                    SELECT file_path, created_at,
+                           (strftime('%s', 'now') - strftime('%s', created_at)) / 60.0 as minutes_stuck
+                    FROM tracks 
+                    WHERE analysis_status = 'analyzing' 
+                    AND created_at IS NOT NULL
+                    AND (strftime('%s', 'now') - strftime('%s', created_at)) > 60
+                    ORDER BY minutes_stuck DESC
+                    LIMIT 10
+                """)
+                
+                for row in cursor.fetchall():
+                    file_path, created_at, minutes = row
+                    filename = os.path.basename(file_path) if file_path else "Unknown"
+                    report['stuck_files'].append({
+                        'filename': filename,
+                        'file_path': file_path,
+                        'minutes_stuck': minutes,
+                        'last_updated': created_at,
+                        'recommendation': 'force_reset' if minutes > 300 else 'monitor'
+                    })
+                
+                # Get error patterns
+                cursor = conn.execute("""
+                    SELECT analysis_error, COUNT(*) as count,
+                           MAX(created_at) as last_occurrence
+                    FROM tracks 
+                    WHERE analysis_status = 'error' 
+                    AND created_at > datetime('now', '-24 hours')
+                    GROUP BY analysis_error
+                    ORDER BY count DESC
+                    LIMIT 5
+                """)
+                
+                for row in cursor.fetchall():
+                    error_msg, count, last_occurrence = row
+                    report['error_patterns'].append({
+                        'error_message': error_msg,
+                        'count': count,
+                        'last_occurrence': last_occurrence,
+                        'frequency': 'high' if count > 10 else 'medium' if count > 5 else 'low'
+                    })
+                
+                # Generate recommendations
+                if report['problematic_files']:
+                    high_failure_files = [f for f in report['problematic_files'] if f['failure_count'] >= 3]
+                    if high_failure_files:
+                        report['recommendations'].append(f"Skip {len(high_failure_files)} files with 3+ failures to prevent stalls")
+                
+                if report['stuck_files']:
+                    long_stuck_files = [f for f in report['stuck_files'] if f['minutes_stuck'] > 300]
+                    if long_stuck_files:
+                        report['recommendations'].append(f"Force reset {len(long_stuck_files)} files stuck for 5+ hours")
+                
+                if report['error_patterns']:
+                    high_freq_errors = [e for e in report['error_patterns'] if e['frequency'] == 'high']
+                    if high_freq_errors:
+                        report['recommendations'].append(f"Investigate {len(high_freq_errors)} high-frequency error patterns")
+                
+                if not report['recommendations']:
+                    report['recommendations'].append("No immediate action required - system appears healthy")
+                
+                return report
+                
+        except Exception as e:
+            logger.error(f"Error generating problematic files report: {e}")
+            return {
+                'error': f"Failed to generate report: {str(e)}",
+                'summary': {},
+                'problematic_files': [],
+                'stuck_files': [],
+                'error_patterns': [],
+                'recommendations': []
+            }
     
     def get_health_status(self) -> Dict[str, Any]:
         """
@@ -780,6 +946,27 @@ def main():
         print(f"   - Snapshot captured at: {snapshot.timestamp}")
         print(f"   - Progress: {snapshot.progress_percentage}%")
         print(f"   - Processing Rate: {snapshot.processing_rate or 'N/A'} tracks/min")
+        
+        # Test problematic files report
+        print(f"\n📊 Testing problematic files report...")
+        report = monitor.get_problematic_files_report()
+        print(f"   - Summary: {report['summary']}")
+        if report['problematic_files']:
+            print(f"   - Problematic Files:")
+            for pf in report['problematic_files']:
+                print(f"     • {pf['filename']} (Path: {pf['file_path']}) - {pf['failure_count']} failures, last at {pf['last_failure']}")
+        if report['stuck_files']:
+            print(f"   - Stuck Files:")
+            for sf in report['stuck_files']:
+                print(f"     • {sf['filename']} (Path: {sf['file_path']}) - stuck for {sf['minutes_stuck']:.1f} minutes")
+        if report['error_patterns']:
+            print(f"   - Error Patterns:")
+            for ep in report['error_patterns']:
+                print(f"     • {ep['error_message'][:50]}... ({ep['count']} occurrences)")
+        if report['recommendations']:
+            print(f"   - Recommendations:")
+            for rec in report['recommendations']:
+                print(f"     • {rec}")
         
         # Test cleanup
         print(f"\n🧹 Testing cleanup...")

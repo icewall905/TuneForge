@@ -4560,3 +4560,80 @@ def api_save_history_to_plex():
     except Exception as e:
         debug_log(f"Error saving History playlist to Plex: {e}", 'ERROR')
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@main_bp.route('/api/audio-analysis/problematic-files')
+def api_get_problematic_files():
+    """Get detailed report of problematic files causing stalls."""
+    try:
+        monitor = get_audio_analysis_monitor()
+        if not monitor:
+            return jsonify({'error': 'Audio analysis monitoring not available'}), 500
+        
+        report = monitor.get_problematic_files_report()
+        return jsonify(report)
+        
+    except Exception as e:
+        logger.error(f"Error getting problematic files report: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/audio-analysis/force-skip', methods=['POST'])
+def api_force_skip_file():
+    """Force skip a problematic file to prevent stalls."""
+    try:
+        data = request.get_json()
+        if not data or 'file_path' not in data:
+            return jsonify({'error': 'file_path is required'}), 400
+        
+        file_path = data['file_path']
+        reason = data.get('reason', 'Manually skipped to prevent stall')
+        
+        # Get the audio analysis service
+        from audio_analysis_service import AudioAnalysisService
+        service = AudioAnalysisService()
+        
+        # Find the track by file path
+        track_id = service.get_track_id_by_file_path(file_path)
+        if not track_id:
+            return jsonify({'error': f'Track not found for file: {file_path}'}), 404
+        
+        # Update status to skipped
+        if service.update_analysis_status(track_id, 'skipped', reason):
+            logger.info(f"Force skipped file {file_path} with reason: {reason}")
+            return jsonify({'success': True, 'message': f'File {os.path.basename(file_path)} skipped successfully'})
+        else:
+            return jsonify({'error': 'Failed to update track status'}), 500
+        
+    except Exception as e:
+        logger.error(f"Error force skipping file: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/audio-analysis/force-reset', methods=['POST'])
+def api_force_reset_file():
+    """Force reset a stuck file back to pending status."""
+    try:
+        data = request.get_json()
+        if not data or 'file_path' not in data:
+            return jsonify({'error': 'file_path is required'}), 400
+        
+        file_path = data['file_path']
+        reason = data.get('reason', 'Manually reset from stuck state')
+        
+        # Get the audio analysis service
+        from audio_analysis_service import AudioAnalysisService
+        service = AudioAnalysisService()
+        
+        # Find the track by file path
+        track_id = service.get_track_id_by_file_path(file_path)
+        if not track_id:
+            return jsonify({'error': f'Track not found for file: {file_path}'}), 404
+        
+        # Update status back to pending
+        if service.update_analysis_status(track_id, 'pending', reason):
+            logger.info(f"Force reset file {file_path} with reason: {reason}")
+            return jsonify({'success': True, 'message': f'File {os.path.basename(file_path)} reset to pending successfully'})
+        else:
+            return jsonify({'error': 'Failed to update track status'}), 500
+        
+    except Exception as e:
+        logger.error(f"Error force resetting file: {e}")
+        return jsonify({'error': str(e)}), 500

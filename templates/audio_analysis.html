@@ -395,6 +395,26 @@
             </div>
         </div>
     </div>
+
+    <!-- Problematic Files Management -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">
+                <i class="fas fa-exclamation-triangle text-warning"></i>
+                Problematic Files Management
+            </h5>
+            <button class="btn btn-sm btn-outline-primary" onclick="window.audioAnalysisManager.refreshProblematicFiles()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+        <div class="card-body">
+            <div id="problematic-files-content">
+                <div class="text-center text-muted">
+                    <i class="fas fa-spinner fa-spin"></i> Loading problematic files report...
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Status Messages -->
@@ -414,6 +434,13 @@ class AudioAnalysisManager {
     }
 
     init() {
+        console.log('[AudioAnalysis] Initializing AudioAnalysisManager');
+        console.log('[AudioAnalysis] Global status manager available:', !!window.globalStatusManager);
+        console.log('[AudioAnalysis] Global status manager details:', window.globalStatusManager);
+        if (window.globalStatusManager) {
+            console.log('[AudioAnalysis] Global status manager methods:', Object.getOwnPropertyNames(window.globalStatusManager));
+        }
+        
         this.bindEvents();
         this.loadInitialStatus();
         this.startStatusPolling();
@@ -427,11 +454,21 @@ class AudioAnalysisManager {
         
         // Start health monitoring polling
         this.startHealthPolling();
+        
+        // Load problematic files on page load
+        this.refreshProblematicFiles();
+        
+        console.log('[AudioAnalysis] AudioAnalysisManager initialization complete');
     }
 
     bindEvents() {
         // Control buttons
-        document.getElementById('start-analysis').addEventListener('click', () => this.startAnalysis());
+        const startButton = document.getElementById('start-analysis');
+        console.log('[AudioAnalysis] Start button found:', startButton);
+        startButton.addEventListener('click', () => {
+            console.log('[AudioAnalysis] Start button clicked');
+            this.startAnalysis();
+        });
         document.getElementById('stop-analysis').addEventListener('click', () => this.stopAnalysis());
         document.getElementById('refresh-status').addEventListener('click', () => this.refreshStatus());
         document.getElementById('cleanup-data').addEventListener('click', () => this.cleanupData());
@@ -452,14 +489,25 @@ class AudioAnalysisManager {
     }
 
     async startAnalysis() {
+        console.log('[AudioAnalysis] startAnalysis called');
         try {
             const batchSize = parseInt(document.getElementById('batch-size').value);
             const limit = document.getElementById('process-limit').value || null;
+            console.log('[AudioAnalysis] Batch size:', batchSize, 'Limit:', limit);
 
             // Add to global status manager immediately (same pattern as playlist generator)
             if (window.globalStatusManager) {
+                console.log('[AudioAnalysis] Global status manager available');
+                console.log('[AudioAnalysis] Global status manager state:', {
+                    hasInit: typeof window.globalStatusManager.init === 'function',
+                    hasAddAudioAnalysis: typeof window.globalStatusManager.addAudioAnalysis === 'function',
+                    activeAudioAnalysis: window.globalStatusManager.activeAudioAnalysis
+                });
+                
                 // Check if we should allow adding audio analysis
-                if (!this.shouldAllowAudioAnalysis()) {
+                const shouldAllow = this.shouldAllowAudioAnalysis();
+                console.log('[AudioAnalysis] Should allow audio analysis:', shouldAllow);
+                if (!shouldAllow) {
                     console.log('[AudioAnalysis] Preventing audio analysis from being added (recently stopped)');
                     return;
                 }
@@ -467,7 +515,13 @@ class AudioAnalysisManager {
                 // Clear cache when starting new analysis
                 this.cachedProgress = null;
                 
-                window.globalStatusManager.addAudioAnalysis();
+                console.log('[AudioAnalysis] Calling globalStatusManager.addAudioAnalysis()');
+                try {
+                    window.globalStatusManager.addAudioAnalysis();
+                    console.log('[AudioAnalysis] addAudioAnalysis() called successfully');
+                } catch (error) {
+                    console.error('[AudioAnalysis] Error calling addAudioAnalysis():', error);
+                }
                 
                 // Initialize with cached progress if available
                 if (this.cachedProgress && this.cachedProgress.progress_percentage > 0) {
@@ -484,13 +538,17 @@ class AudioAnalysisManager {
                 console.warn('Global status manager not available to add audio analysis immediately');
             }
 
+            console.log('[AudioAnalysis] Proceeding to API call...');
+            console.log('[AudioAnalysis] Making API call to /api/audio-analysis/start');
             const response = await fetch('/api/audio-analysis/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ max_workers: 1, batch_size: batchSize, limit: limit })
             });
+            console.log('[AudioAnalysis] API response received:', response.status);
 
             const result = await response.json();
+            console.log('[AudioAnalysis] API result:', result);
 
             if (result.success) {
                 this.showMessage(result.message, 'success');
@@ -809,7 +867,9 @@ class AudioAnalysisManager {
     shouldAllowAudioAnalysis() {
         // Prevent re-adding audio analysis if it was recently stopped (within 10 seconds)
         const timeSinceLastCheck = Date.now() - this.lastStatusCheck;
-        return timeSinceLastCheck > 10000; // 10 seconds
+        const shouldAllow = timeSinceLastCheck > 10000;
+        console.log('[AudioAnalysis] shouldAllowAudioAnalysis - lastStatusCheck:', this.lastStatusCheck, 'timeSinceLastCheck:', timeSinceLastCheck, 'shouldAllow:', shouldAllow, 'Date.now():', Date.now());
+        return shouldAllow; // 10 seconds
     }
     
     startHealthPolling() {
@@ -1162,9 +1222,6 @@ class AudioAnalysisManager {
             });
             html += '</ul>';
         }
-        
-        html += '</div>';
-        container.innerHTML = html;
     }
     
     updateEstimatedCompletion(estimatedCompletion) {
@@ -1475,11 +1532,360 @@ class AudioAnalysisManager {
             window.globalStatusManager.removeAudioAnalysis();
         }
     }
+
+    // Problematic Files Management
+    refreshProblematicFiles() {
+        fetch('/api/audio-analysis/problematic-files')
+            .then(response => response.json())
+            .then(data => {
+                this.displayProblematicFiles(data);
+            })
+            .catch(error => {
+                console.error('Error fetching problematic files:', error);
+                this.displayProblematicFiles({ error: 'Failed to load problematic files report' });
+            });
+    }
+
+    displayProblematicFiles(data) {
+        const container = document.getElementById('problematic-files-content');
+        
+        if (data.error) {
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-circle"></i>
+                    Error: ${data.error}
+                </div>
+            `;
+            return;
+        }
+
+        let html = '';
+
+        // Summary section
+        if (data.summary) {
+            const summary = data.summary;
+            html += `
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="h4 text-primary">${summary.total_tracks || 0}</div>
+                            <small class="text-muted">Total Tracks</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="h4 text-warning">${summary.pending_tracks || 0}</div>
+                            <small class="text-muted">Pending</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="h4 text-success">${summary.completed_tracks || 0}</div>
+                            <small class="text-muted">Completed</small>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="h4 text-danger">${summary.error_tracks || 0}</div>
+                            <small class="text-muted">Errors</small>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Problematic files section
+        if (data.problematic_files && data.problematic_files.length > 0) {
+            html += `
+                <div class="mb-4">
+                    <h6 class="text-warning">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        Problematic Files (${data.problematic_files.length})
+                    </h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Filename</th>
+                                    <th>Failures</th>
+                                    <th>Last Failure</th>
+                                    <th>Error Message</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+            
+            data.problematic_files.forEach(file => {
+                const filename = file.filename || 'Unknown';
+                const shortPath = file.file_path ? file.file_path.substring(0, 50) + '...' : 'Unknown';
+                
+                html += `
+                    <tr>
+                        <td>
+                            <div class="fw-bold">${filename}</div>
+                            <small class="text-muted">${shortPath}</small>
+                        </td>
+                        <td>
+                            <span class="badge bg-danger">${file.failure_count}</span>
+                        </td>
+                        <td>
+                            <small>${file.last_failure || 'Unknown'}</small>
+                        </td>
+                        <td>
+                            <small class="text-danger">${file.error_message ? file.error_message.substring(0, 60) + '...' : 'No error message'}</small>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-warning" 
+                                    onclick="window.audioAnalysisManager.forceSkipFile('${file.file_path.replace(/'/g, '\\\'').replace(/"/g, '\\"')}', '${filename.replace(/'/g, '\\\'').replace(/"/g, '\\"')}')"
+                                    title="Skip this file permanently">
+                                <i class="fas fa-ban"></i> Skip
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Stuck files section
+        if (data.stuck_files && data.stuck_files.length > 0) {
+            html += `
+                <div class="mb-4">
+                    <h6 class="text-info">
+                        <i class="fas fa-clock"></i>
+                        Stuck Files (${data.stuck_files.length})
+                    </h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Filename</th>
+                                    <th>Time Stuck</th>
+                                    <th>Last Update</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+            
+            data.stuck_files.forEach(file => {
+                const filename = file.filename || 'Unknown';
+                const shortPath = file.file_path ? file.file_path.substring(0, 50) + '...' : 'Unknown';
+                const timeClass = file.minutes_stuck > 300 ? 'text-danger' : 'text-warning';
+                
+                html += `
+                    <tr>
+                        <td>
+                            <div class="fw-bold">${filename}</div>
+                            <small class="text-muted">${shortPath}</small>
+                        </td>
+                        <td>
+                            <span class="${timeClass}">${file.minutes_stuck.toFixed(1)} min</span>
+                        </td>
+                        <td>
+                            <small>${file.last_updated || 'Unknown'}</small>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-info" 
+                                    onclick="window.audioAnalysisManager.forceResetFile('${file.file_path.replace(/'/g, '\\\'').replace(/"/g, '\\"')}', '${filename.replace(/'/g, '\\\'').replace(/"/g, '\\"')}')"
+                                    title="Reset this file to pending status">
+                                <i class="fas fa-redo"></i> Reset
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Error patterns section
+        if (data.error_patterns && data.error_patterns.length > 0) {
+            html += `
+                <div class="mb-4">
+                    <h6 class="text-danger">
+                        <i class="fas fa-bug"></i>
+                        Error Patterns (${data.error_patterns.length})
+                    </h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Error Message</th>
+                                    <th>Frequency</th>
+                                    <th>Last Occurrence</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+            
+            data.error_patterns.forEach(pattern => {
+                const freqClass = pattern.frequency === 'high' ? 'bg-danger' : 
+                               pattern.frequency === 'medium' ? 'bg-warning' : 'bg-info';
+                
+                html += `
+                    <tr>
+                        <td>
+                            <small class="text-danger">${pattern.error_message.substring(0, 80)}...</small>
+                        </td>
+                        <td>
+                            <span class="badge ${freqClass}">${pattern.count}</span>
+                        </td>
+                        <td>
+                            <small>${pattern.last_occurrence || 'Unknown'}</small>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Recommendations section
+        if (data.recommendations && data.recommendations.length > 0) {
+            html += `
+                <div class="mb-3">
+                    <h6 class="text-primary">
+                        <i class="fas fa-lightbulb"></i>
+                        Recommendations
+                    </h6>
+                    <ul class="list-unstyled">
+            `;
+            
+            data.recommendations.forEach(rec => {
+                html += `
+                    <li class="mb-2">
+                        <i class="fas fa-arrow-right text-primary"></i>
+                        ${rec}
+                    </li>
+                `;
+            });
+            
+            html += `
+                    </ul>
+                </div>
+            `;
+        }
+
+        // No issues message
+        if ((!data.problematic_files || data.problematic_files.length === 0) &&
+            (!data.stuck_files || data.stuck_files.length === 0) &&
+            (!data.error_patterns || data.error_patterns.length === 0)) {
+            html += `
+                <div class="text-center text-success py-4">
+                    <i class="fas fa-check-circle fa-3x mb-3"></i>
+                    <h5>No Problematic Files Detected</h5>
+                    <p class="text-muted">Your audio analysis system is running smoothly!</p>
+                </div>
+            `;
+        }
+
+        container.innerHTML = html;
+    }
+
+    forceSkipFile(filePath, filename) {
+        if (!confirm(`Are you sure you want to permanently skip "${filename}"?\n\nThis will mark the file as skipped and it won't be processed again.`)) {
+            return;
+        }
+
+        fetch('/api/audio-analysis/force-skip', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                file_path: filePath,
+                reason: 'Manually skipped by user to prevent stall'
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                this.showAlert('success', `File "${filename}" skipped successfully`);
+                this.refreshProblematicFiles();
+                this.refreshHealthStatus(); // Refresh health status
+            } else {
+                this.showAlert('danger', `Failed to skip file: ${data.error}`);
+            }
+        })
+        .catch(error => {
+            console.error('Error skipping file:', error);
+            this.showAlert('danger', 'Error skipping file. Please try again.');
+        });
+    }
+
+    forceResetFile(filePath, filename) {
+        if (!confirm(`Are you sure you want to reset "${filename}"?\n\nThis will move the file back to pending status for retry.`)) {
+            return;
+        }
+
+        fetch('/api/audio-analysis/force-reset', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                file_path: filePath,
+                reason: 'Manually reset by user from stuck state'
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                this.showAlert('success', `File "${filename}" reset successfully`);
+                this.refreshProblematicFiles();
+                this.refreshHealthStatus(); // Refresh health status
+            } else {
+                this.showAlert('danger', `Failed to reset file: ${data.error}`);
+            }
+        })
+        .catch(error => {
+            console.error('Error resetting file:', error);
+            this.showAlert('danger', 'Error resetting file. Please try again.');
+        });
+    }
+
+    showAlert(type, message) {
+        const messagesContainer = document.getElementById('status-messages');
+        const messageElement = document.createElement('div');
+        messageElement.className = `status-message status-${type}`;
+        messageElement.textContent = message;
+        
+        messagesContainer.appendChild(messageElement);
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            if (messageElement.parentNode) {
+                messageElement.parentNode.removeChild(messageElement);
+            }
+        }, 5000);
+    }
 }
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', () => {
-    window.audioAnalysisManager = new AudioAnalysisManager();
+    // Wait a bit for globalStatusManager to be ready
+    setTimeout(() => {
+        console.log('[AudioAnalysis] Creating AudioAnalysisManager after delay');
+        window.audioAnalysisManager = new AudioAnalysisManager();
+    }, 100);
 });
 
 // Clean up when page is unloaded

@@ -40,6 +40,7 @@ class ProcessingStatus(Enum):
     FAILED = "failed"
     RETRYING = "retrying"
     CANCELLED = "cancelled"
+    SKIPPED = "skipped" # Added SKIPPED status
 
 @dataclass
 class ProcessingJob:
@@ -69,6 +70,7 @@ class ProcessingStats:
     estimated_completion: Optional[datetime] = None
     average_processing_time: float = 0.0
     success_rate: float = 0.0
+    skipped_jobs: int = 0 # Added skipped_jobs to stats
 
 class AdvancedBatchProcessor:
     """
@@ -108,6 +110,7 @@ class AdvancedBatchProcessor:
         self.active_jobs: Dict[str, ProcessingJob] = {}
         self.completed_jobs: List[ProcessingJob] = []
         self.failed_jobs: List[ProcessingJob] = []
+        self.skipped_jobs: List[ProcessingJob] = [] # Added skipped_jobs list
         
         # Statistics and monitoring
         self.stats = ProcessingStats()
@@ -329,7 +332,22 @@ class AdvancedBatchProcessor:
             job.error_message = error_msg
             job.attempts += 1
             
-            if job.attempts < job.max_attempts:
+            # Check if this file should be permanently skipped
+            if self._should_skip_file_permanently(job):
+                job.status = ProcessingStatus.SKIPPED
+                job.completed_at = datetime.now()
+                
+                # Update database status to 'skipped' with reason
+                self.service.update_analysis_status(job.track_id, 'skipped', f"Permanently skipped after {job.attempts} failures: {error_msg}")
+                
+                with self.processing_lock:
+                    self.skipped_jobs.append(job)
+                    self.stats.skipped_jobs += 1
+                    self._update_stats()
+                
+                logger.warning(f"Job {job.track_id} permanently skipped after {job.attempts} failures: {error_msg}")
+                
+            elif job.attempts < job.max_attempts:
                 # Retry with exponential backoff
                 job.status = ProcessingStatus.RETRYING
                 delay = min(300, 2 ** job.attempts)  # Max 5 minutes
@@ -426,7 +444,7 @@ class AdvancedBatchProcessor:
     
     def _update_stats(self):
         """Update processing statistics"""
-        total_processed = self.stats.completed_jobs + self.stats.failed_jobs
+        total_processed = self.stats.completed_jobs + self.stats.failed_jobs + self.stats.skipped_jobs
         
         if total_processed > 0:
             # Calculate average processing time
@@ -444,7 +462,7 @@ class AdvancedBatchProcessor:
     
     def _calculate_progress(self) -> Dict[str, Any]:
         """Calculate current processing progress"""
-        total_processed = self.stats.completed_jobs + self.stats.failed_jobs
+        total_processed = self.stats.completed_jobs + self.stats.failed_jobs + self.stats.skipped_jobs
         
         return {
             'total_jobs': self.stats.total_jobs,
@@ -457,7 +475,8 @@ class AdvancedBatchProcessor:
             'average_processing_time': round(self.stats.average_processing_time, 2),
             'estimated_completion': self.stats.estimated_completion.isoformat() if self.stats.estimated_completion else None,
             'active_workers': len(self.workers),
-            'queue_size': len(self.jobs_queue)
+            'queue_size': len(self.jobs_queue),
+            'skipped_jobs': self.stats.skipped_jobs # Added skipped_jobs to progress
         }
     
     def _save_checkpoint(self):
@@ -508,6 +527,38 @@ class AdvancedBatchProcessor:
                 'queue_size': len(self.jobs_queue),
                 'shutdown_requested': self.shutdown_event.is_set()
             }
+
+    def _should_skip_file_permanently(self, job: ProcessingJob) -> bool:
+        """
+        Determine if a file should be permanently skipped based on failure patterns.
+        
+        Args:
+            job: The job that just failed
+            
+        Returns:
+            True if the file should be permanently skipped
+        """
+        # Skip files with 3+ failures
+        if job.attempts >= 3:
+            return True
+        
+        # Skip files with specific error patterns that indicate corruption
+        error_msg = job.error_message.lower()
+        skip_patterns = [
+            'file not found',
+            'permission denied',
+            'corrupted',
+            'invalid format',
+            'unsupported format',
+            'file is empty',
+            'access denied'
+        ]
+        
+        if any(pattern in error_msg for pattern in skip_patterns):
+            logger.info(f"File {job.track_id} matches skip pattern, marking as permanently skipped")
+            return True
+        
+        return False
 
 
 def main():

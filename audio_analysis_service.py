@@ -399,6 +399,59 @@ class AudioAnalysisService:
             logger.error(f"Error getting features for track {track_id}: {e}")
             return None
     
+    def get_track_by_id(self, track_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Get track information by ID.
+        
+        Args:
+            track_id: The track ID to retrieve
+            
+        Returns:
+            Track dictionary or None if not found
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT * FROM tracks WHERE id = ?
+                """, (track_id,))
+                
+                row = cursor.fetchone()
+                if row:
+                    columns = [description[0] for description in cursor.description]
+                    return dict(zip(columns, row))
+                
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting track by ID {track_id}: {e}")
+            return None
+    
+    def get_track_id_by_file_path(self, file_path: str) -> Optional[int]:
+        """
+        Get track ID by file path.
+        
+        Args:
+            file_path: The file path to search for
+            
+        Returns:
+            Track ID or None if not found
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT id FROM tracks WHERE file_path = ?
+                """, (file_path,))
+                
+                row = cursor.fetchone()
+                if row:
+                    return row[0]
+                
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting track ID for file path {file_path}: {e}")
+            return None
+
     def cleanup_old_analysis_data(self, days_old: int = 30) -> int:
         """
         Clean up old analysis data to save space.
