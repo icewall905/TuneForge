@@ -4,7 +4,6 @@ config.ini
 # Checkpoint and history files
 temp/
 temp/*
-playlist_history.json
 *checkpoint.json
 audio_analysis_checkpoint.json
 
