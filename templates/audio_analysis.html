@@ -33,9 +33,9 @@
             </div>
             <div class="progress-bar-container">
                 <div class="progress-bar">
-                    <div id="page-progress-fill" class="progress-fill" style="width: {{ progress.progress_percentage }}%;"></div>
+                    <div id="page-progress-fill" class="progress-fill"></div>
                 </div>
-                <span id="page-progress-text" class="progress-text">{{ progress.progress_percentage }}% Complete</span>
+                <span id="page-progress-text" class="progress-text">0% Complete</span>
             </div>
         </div>
     </div>
@@ -392,6 +392,17 @@ class AudioAnalysisManager {
     async loadInitialStatus() {
         await this.updateStatus();
         await this.updateProgress();
+        
+        // Set initial progress bar width from server data
+        const initialProgressElement = document.getElementById('page-progress-text');
+        if (initialProgressElement) {
+            const initialProgressText = initialProgressElement.textContent;
+            const initialProgress = parseInt(initialProgressText) || 0;
+            const progressFill = document.getElementById('page-progress-fill');
+            if (progressFill) {
+                progressFill.style.width = `${initialProgress}%`;
+            }
+        }
     }
 
     async updateStatus() {
