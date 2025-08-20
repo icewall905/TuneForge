@@ -1,126 +1,101 @@
 # TuneForge
 
-A web application that uses Ollama's LLM capabilities to generate personalized music playlists that can be saved to Navidrome or Plex.
+![TuneForge Logo](https://raw.githubusercontent.com/icewall905/tuneforge/main/static/images/logo_big.jpeg)
 
-## 🎉 **NEW: Sonic Traveller is Fully Functional!** ✅
+**TuneForge is a smart, local-first music playlist generator that uses AI to create personalized playlists from your own music library.** It connects to your Navidrome or Plex server, learns your tastes, and builds playlists for any mood or occasion.
 
-The Sonic Traveller AI-powered playlist generation system is now **production-ready** and successfully generates playlists using audio feature similarity analysis with an enhanced feedback loop system.
+---
 
-## Features
+## ✨ Key Features
 
-- Generate personalized playlists based on your music preferences
-- **NEW**: Sonic Traveller - AI-powered playlist generation with audio feature analysis
-- **NEW**: Enhanced feedback loop system for iterative quality improvement
-- **NEW**: Local playlist history integration with rich metadata
-- **NEW**: Real-time progress tracking and background processing
-- Rate your generated playlists
-- Save playlists to Navidrome or Plex
-- Local music library management
-- Audio analysis and feature extraction
-- **NEW**: Audio feature similarity matching with weighted Euclidean distance
-- **NEW**: Export to JSON and M3U formats
+-   **🤖 AI-Powered Playlist Generation**: Two distinct modes for creating the perfect playlist:
+    -   **Ask a Friend**: Simply describe the kind of playlist you want in plain English (e.g., "a playlist for a rainy afternoon" or "upbeat 80s rock tracks"). TuneForge's LLM will understand and build it for you.
+    -   **Sonic Traveller**: Pick a "seed" track from your library and let the AI find other songs that share similar audio characteristics like tempo, energy, danceability, and more. It's music discovery, powered by your own collection.
+-   **🎵 Deep Audio Analysis**: TuneForge automatically scans your music library, extracting 8 different audio features to enable intelligent, similarity-based playlist creation.
+-   **📺 Seamless Integration**: Directly connect to and save playlists on your **Navidrome** or **Plex** server.
+-   **📂 Local First**: Your music and data stay with you. TuneForge runs on your own machine.
+-   **📤 Export Options**: Save any created playlist as a standard `.m3u` or `.json` file for maximum compatibility.
+-   **📈 Real-Time UI**: Watch as playlists are generated in real-time and see the AI's feedback loop improve suggestions.
 
-## Quick Start
+---
 
-1. **Clone and setup**:
-   ```bash
-   git clone <repository>
-   cd TuneForge
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
+## 🚀 Getting Started
 
-2. **Configure**:
-   - Copy `config.ini.example` to `config.ini`
-   - Set your Ollama URL and model
-   - Configure Navidrome/Plex if desired
+### Prerequisites
 
-3. **Ask a Friend (Generate a playlist)**:
-   - Start the app: `source venv/bin/activate && python run.py`
-   - Open http://localhost:5395
-   - Enter your music preferences
-   - Click "Ask a Friend"
+1.  **Python 3.8+**
+2.  **Ollama**: You need a running instance of [Ollama](https://ollama.com/) with a model pulled (e.g., `ollama run llama3`).
 
-4. **NEW: Sonic Traveller**:
-   - Navigate to "Sonic Traveller" in the menu
-   - Select a seed track from your local library
-   - Set similarity threshold (0.5-2.0 recommended)
-   - Click "Ask a Friend" to start AI-powered generation
-   - Watch real-time progress and feedback loop improvements
-   - Export results as JSON or M3U playlist
+### Installation & Setup
 
-## 🚀 **Sonic Traveller Features**
+1.  **Clone the Repository**
+    ```bash
+    git clone [https://github.com/icewall905/tuneforge.git](https://github.com/icewall905/tuneforge.git)
+    cd tuneforge
+    ```
 
-### **AI-Powered Generation**
-- Uses Ollama LLM to suggest similar tracks
-- Random seed integration prevents stale results
-- Adaptive prompting based on successful candidates
+2.  **Set Up a Virtual Environment**
+    ```bash
+    python -m venv venv
+    source venv/bin/activate  # On Windows: venv\Scripts\activate
+    ```
 
-### **Audio Feature Analysis**
-- **8 audio features**: energy, valence, tempo, danceability, acousticness, instrumentalness, loudness, speechiness
-- **Normalized similarity**: Features scaled to [0,1] range for consistent comparison
-- **Weighted distance**: Euclidean distance with feature-specific weights
+3.  **Install Dependencies**
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-### **Enhanced Feedback Loop**
-- Learns from accepted/rejected tracks across iterations
-- Improves suggestion quality with each batch
-- Maintains generation history and metadata
+4.  **Configure the Application**
+    -   Copy `config.ini.example` to `config.ini`.
+    -   Open `config.ini` and fill in the required details:
+        -   Under `[OLLAMA]`, set `url` to your Ollama API endpoint and specify the `model`.
+        -   Under `[MUSIC]`, set `library_path` to the location of your music files.
+        -   (Optional) Configure the `[NAVIDROME]` and `[PLEX]` sections if you wish to save playlists there.
 
-### **Real-Time Processing**
-- Background job management with progress tracking
-- Live updates via Server-Sent Events
-- Non-blocking playlist generation
+5.  **Run the Application**
+    ```bash
+    python run.py
+    ```
+    TuneForge will now be running at `http://localhost:5395`.
 
-### **Export & History**
-- JSON export with full metadata
-- M3U playlist export
-- Local history integration with rich metadata
+---
 
-## Architecture
+## 🎧 Usage
 
-- **Frontend**: HTML/CSS/JavaScript with real-time updates
-- **Backend**: Flask with background processing
-- **Database**: SQLite with audio features and analysis queue
-- **AI**: Ollama integration for track suggestions
-- **Audio**: Librosa for feature extraction and analysis
+### 1. Index Your Music Library
 
-## Configuration
+-   The first time you run TuneForge, it will begin indexing your music library as defined in `config.ini`.
+-   You can monitor the progress of the audio analysis from the "Audio Analysis" page in the web UI. This process only needs to be done once per track.
 
-- **Ollama**: Set URL and model in `config.ini`
-- **Audio Analysis**: Enable/disable in `config.ini`
-- **Port**: Default 5395 (configurable)
+### 2. Create a Playlist with "Ask a Friend"
 
-## Development
+-   Navigate to the homepage.
+-   In the text box, describe the playlist you want. Be creative!
+-   Click "Ask a Friend" and watch the playlist get generated.
 
-- **Virtual Environment**: `venv/`
-- **Database**: `db/local_music.db`
-- **Logs**: `logs/tuneforge_app.log`
-- **Debug Scripts**: `debug_scripts/` folder
+### 3. Discover Music with "Sonic Traveller"
 
-## 🎯 **Current Status**
+-   Go to the "Sonic Traveller" page.
+-   Use the search bar to find and select a "seed" track from your library.
+-   Adjust the similarity threshold (a lower value means more similar tracks).
+-   Click "Ask a Friend" to start the generation process based on the seed track's audio features.
 
-✅ **Sonic Traveller**: Fully functional and production-ready
-✅ **Ask a Friend**: Main playlist generator working
-✅ **Audio Analysis**: Complete with floating progress indicator
-✅ **Local Music**: Library management and search
-✅ **History**: Playlist storage and management
-✅ **Export**: Multiple format support
+### 4. Save Your Playlist
 
-## 🔮 **Future Enhancements**
+-   Once a playlist is generated, you will see options to save it to Navidrome or Plex (if configured) or export it as an `.m3u` or `.json` file.
 
-- Advanced candidate filtering (genre awareness, artist diversity)
-- Prompt engineering optimization
-- Enhanced audio feature extraction
-- Large library optimization (100k+ tracks)
+---
 
-## Troubleshooting
+## 🛠️ Architecture
 
-- **Port conflicts**: Check `lsof -i :5395`
-- **Ollama issues**: Verify Ollama is running and accessible
-- **Audio analysis**: Check dependencies (librosa, numpy, scipy)
-- **Database**: Verify `db/local_music.db` exists and is accessible
+-   **Backend**: Flask (Python)
+-   **AI**: Ollama for Large Language Model integration.
+-   **Audio Analysis**: `librosa` for feature extraction.
+-   **Database**: SQLite for storing track metadata and audio features.
+-   **Frontend**: Standard HTML, CSS, and JavaScript for a real-time, responsive UI.
 
-## License
+---
 
-[License information]
+## 📜 License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
