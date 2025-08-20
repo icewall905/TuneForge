@@ -3,8 +3,12 @@
 {% block title %}Settings - TuneForge{% endblock %}
 
 {% block content %}
+<div class="page-header">
+    <h1>⚙️ Settings</h1>
+    <p>Configure TuneForge preferences and connections</p>
+</div>
+
 <div class="content-container">
-    <h1>Settings</h1>
     
     <div class="settings-form">
         <form id="settingsForm" action="{{ url_for('main.settings') }}" method="post">
