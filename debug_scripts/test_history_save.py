@@ -78,8 +78,8 @@ def test_history_save():
         
         # Check if it was saved
         print(f"\n🔍 Checking if save was successful...")
-        if os.path.exists('playlist_history.json'):
-            with open('playlist_history.json', 'r') as f:
+        if os.path.exists('temp/playlist_history.json'):
+            with open('temp/playlist_history.json', 'r') as f:
                 new_history = f.read()
                 print(f"New history file size: {len(new_history)} characters")
                 print(f"New history ends with ']': {new_history.strip().endswith(']')}")

@@ -1,7 +1,13 @@
 setup.conf
 config.ini
+
+# Checkpoint and history files
+temp/
+temp/*
 playlist_history.json
 *checkpoint.json
+audio_analysis_checkpoint.json
+
 __pycache__/
 *.py[cod]
 *$py.class
@@ -20,5 +26,3 @@ logs/
 notes/*
 
 db/*
-audio_analysis_checkpoint.json
-temp/*
