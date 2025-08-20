@@ -82,14 +82,14 @@ class AdvancedBatchProcessor:
     - Comprehensive error handling
     """
     
-    def __init__(self, db_path: str = None, max_workers: int = 3, 
+    def __init__(self, db_path: str = None, max_workers: int = 1, 
                  batch_size: int = 100, checkpoint_interval: int = 50):
         """
         Initialize the AdvancedBatchProcessor.
         
         Args:
             db_path: Path to the database
-            max_workers: Maximum concurrent workers
+            max_workers: Maximum concurrent workers (default 1 for SQLite compatibility)
             batch_size: Number of jobs to process in each batch
             checkpoint_interval: Save progress every N jobs
         """

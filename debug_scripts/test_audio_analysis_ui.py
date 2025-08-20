@@ -60,7 +60,7 @@ def test_audio_analysis_ui():
         response = requests.post(
             f"{base_url}/api/audio-analysis/start",
             json={
-                "max_workers": 2,
+                "max_workers": 1,  # SQLite compatible
                 "batch_size": 10,
                 "limit": 5  # Only process 5 tracks for testing
             },

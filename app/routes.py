@@ -2527,8 +2527,9 @@ def api_start_audio_analysis():
     """Start audio analysis batch processing"""
     try:
         data = request.get_json() or {}
-        max_workers = data.get('max_workers', 3)
-        batch_size = data.get('batch_size', 100)
+        # SQLite doesn't handle concurrent writes well, so default to 1 worker
+        max_workers = data.get('max_workers', int(get_config_value('AUDIO_ANALYSIS', 'MaxWorkers', '1')))
+        batch_size = data.get('batch_size', int(get_config_value('AUDIO_ANALYSIS', 'BatchSize', '100')))
         limit = data.get('limit', None)  # None = process all pending tracks
         
         # Check if required libraries are available
@@ -2589,9 +2590,10 @@ def api_start_audio_analysis():
         thread.start()
         
         # Return response with additional info for UI integration
+        worker_warning = " (SQLite compatible)" if max_workers == 1 else " ⚠️ Multiple workers may cause database locks with SQLite"
         return jsonify({
             'success': True,
-            'message': f'Started audio analysis with {max_workers} workers',
+            'message': f'Started audio analysis with {max_workers} workers{worker_warning}',
             'jobs_queued': jobs_added,
             'max_workers': max_workers,
             'trigger_ui_update': True  # Signal to UI that status should be updated

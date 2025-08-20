@@ -36,7 +36,7 @@ def test_floating_indicator_integration():
         response = requests.post(
             f"{base_url}/api/audio-analysis/start",
             json={
-                "max_workers": 2,
+                "max_workers": 1,  # SQLite compatible
                 "batch_size": 5,
                 "limit": 3
             },

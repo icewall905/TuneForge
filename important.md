@@ -37,6 +37,7 @@ The Sonic Traveller AI-powered playlist generation system is now **production-re
 - **Normalized vectors**: Features scaled to [0,1] range for consistent comparison
 - **Weighted distance**: Euclidean distance with feature-specific weights
 - **Database integration**: SQLite with optimized queries and indexing
+- **⚠️ SQLite Limitation**: Database locks occur with multiple workers - use `MaxWorkers = 1` in `[AUDIO_ANALYSIS]` config
 
 ## 🗄️ **Database Structure**
 - `tracks` table: Music metadata (id, title, artist, album, genre, path)

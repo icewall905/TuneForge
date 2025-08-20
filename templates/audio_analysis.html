@@ -46,16 +46,6 @@
             <h3>🎮 Control Panel</h3>
             <div class="control-options">
                 <div class="control-group">
-                    <label for="max-workers">Max Workers:</label>
-                    <select id="max-workers">
-                        <option value="1">1 Worker</option>
-                        <option value="2">2 Workers</option>
-                        <option value="3" selected>3 Workers</option>
-                        <option value="4">4 Workers</option>
-                        <option value="5">5 Workers</option>
-                    </select>
-                </div>
-                <div class="control-group">
                     <label for="batch-size">Batch Size:</label>
                     <select id="batch-size">
                         <option value="50">50 tracks</option>
@@ -103,7 +93,7 @@
                 </div>
                 <div class="status-item">
                     <span class="status-label">Workers:</span>
-                    <span id="active-workers" class="status-value">0</span>
+                    <span id="active-workers" class="status-value">1 (Fixed)</span>
                 </div>
                 <div class="status-item">
                     <span class="status-label">Queue Size:</span>
@@ -226,7 +216,6 @@ class AudioAnalysisManager {
 
     async startAnalysis() {
         try {
-            const maxWorkers = parseInt(document.getElementById('max-workers').value);
             const batchSize = parseInt(document.getElementById('batch-size').value);
             const limit = document.getElementById('process-limit').value || null;
 
@@ -261,7 +250,7 @@ class AudioAnalysisManager {
             const response = await fetch('/api/audio-analysis/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ max_workers: maxWorkers, batch_size: batchSize, limit: limit })
+                body: JSON.stringify({ max_workers: 1, batch_size: batchSize, limit: limit })
             });
 
             const result = await response.json();
@@ -706,6 +695,8 @@ window.addEventListener('beforeunload', () => {
     margin-bottom: 20px;
     font-size: 18px;
 }
+
+
 
 .stats-grid {
     display: grid;

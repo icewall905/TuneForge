@@ -27,3 +27,9 @@ EnableNavidrome = no
 EnablePlex = no
 VerboseLogging = no
 LocalMusicFolder = 
+
+[AUDIO_ANALYSIS]
+# SQLite doesn't handle concurrent writes well - keep at 1 for stability
+MaxWorkers = 1
+BatchSize = 100
+CheckpointInterval = 50
