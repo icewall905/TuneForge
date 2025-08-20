@@ -1,6 +1,9 @@
 setup.conf
 config.ini
 playlist_history.json
+audio_analysis_checkpoint.json
+audio_analysis_checkpoint*.json
+*.checkpoint.json
 __pycache__/
 *.py[cod]
 *$py.class
