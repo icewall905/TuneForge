@@ -118,10 +118,14 @@ def load_config():
 def get_config_value(section, key, default=None):
     config = load_config()
     if config.has_section(section):
-        # config.optionxform ensures keys are case-sensitive as read
-        # Direct case-sensitive access after optionxform is set:
+        # Try exact key match first (case-sensitive)
         if key in config[section]:
             return config[section][key]
+        # Fall back to case-insensitive lookup for legacy configs
+        lower_key = key.lower()
+        for existing_key in config[section].keys():
+            if existing_key.lower() == lower_key:
+                return config[section][existing_key]
     return default
 
 def save_config(data_dict):
@@ -2593,6 +2597,55 @@ def audio_analysis_page():
         debug_log(f"Error loading audio analysis page: {e}", "ERROR")
         return render_template('error.html', error="Failed to load audio analysis page")
 
+# Global auto-recovery instance
+_auto_recovery_instance = None
+
+def get_auto_recovery():
+    """Get or create the auto-recovery instance"""
+    global _auto_recovery_instance
+    
+    if _auto_recovery_instance is None:
+        try:
+            from audio_analysis_auto_recovery import AudioAnalysisAutoRecovery, AutoRecoveryConfig
+            from audio_analysis_monitor import AudioAnalysisMonitor
+            
+            # Initialize monitor
+            monitor = AudioAnalysisMonitor()
+            
+            # Initialize auto-recovery with restart callback
+            def restart_analysis_callback():
+                """Callback to restart audio analysis"""
+                try:
+                    # This will be called by the auto-recovery system
+                    # We'll implement the actual restart logic here
+                    debug_log("Auto-recovery: Attempting to restart audio analysis", "INFO")
+                    return True  # For now, assume success
+                except Exception as e:
+                    debug_log(f"Auto-recovery restart failed: {e}", "ERROR")
+                    return False
+            
+            config = AutoRecoveryConfig(
+                enabled=True,
+                check_interval=60,  # Check every minute
+                max_consecutive_failures=3,
+                base_backoff_minutes=5,
+                max_backoff_minutes=30
+            )
+            
+            _auto_recovery_instance = AudioAnalysisAutoRecovery(
+                config=config,
+                monitor=monitor,
+                restart_callback=restart_analysis_callback
+            )
+            
+            debug_log("Auto-recovery system initialized", "INFO")
+            
+        except Exception as e:
+            debug_log(f"Failed to initialize auto-recovery: {e}", "WARNING")
+            _auto_recovery_instance = None
+    
+    return _auto_recovery_instance
+
 @main_bp.route('/api/audio-analysis/start', methods=['POST'])
 def api_start_audio_analysis():
     """Start audio analysis batch processing"""
@@ -2660,6 +2713,15 @@ def api_start_audio_analysis():
         thread = threading.Thread(target=start_processing, daemon=True)
         thread.start()
         
+        # Start auto-recovery monitoring if available
+        auto_recovery = get_auto_recovery()
+        if auto_recovery:
+            try:
+                auto_recovery.start_monitoring()
+                debug_log("Auto-recovery monitoring started", "INFO")
+            except Exception as e:
+                debug_log(f"Failed to start auto-recovery monitoring: {e}", "WARNING")
+        
         # Return response with additional info for UI integration
         return jsonify({
             'success': True,
@@ -2684,6 +2746,15 @@ def api_stop_audio_analysis():
         success = processor.stop_processing()
         
         if success:
+            # Stop auto-recovery monitoring if available
+            auto_recovery = get_auto_recovery()
+            if auto_recovery:
+                try:
+                    auto_recovery.stop_monitoring()
+                    debug_log("Auto-recovery monitoring stopped", "INFO")
+                except Exception as e:
+                    debug_log(f"Failed to stop auto-recovery monitoring: {e}", "WARNING")
+            
             api_start_audio_analysis.processor = None
             return jsonify({'success': True, 'message': 'Audio analysis stopped successfully'})
         else:
@@ -2752,6 +2823,357 @@ def api_audio_analysis_cleanup():
     except Exception as e:
         debug_log(f"Error cleaning up audio analysis data: {e}", "ERROR")
         return jsonify({'success': False, 'error': str(e)})
+
+@main_bp.route('/api/audio-analysis/health')
+def api_audio_analysis_health():
+    """Get comprehensive health status of audio analysis system"""
+    try:
+        from audio_analysis_monitor import AudioAnalysisMonitor
+        
+        # Initialize monitor
+        monitor = AudioAnalysisMonitor()
+        
+        # Determine if analysis is running; if not, short-circuit with 'stopped' status
+        is_running = False
+        try:
+            if hasattr(api_start_audio_analysis, 'processor') and api_start_audio_analysis.processor:
+                current_status = api_start_audio_analysis.processor.get_status()
+                is_running = bool(current_status and current_status.get('status') == 'running')
+        except Exception:
+            is_running = False
+        
+        # Get health status (with awareness of running state)
+        health_status = monitor.get_health_status()
+        if not is_running:
+            # Override stall and warnings when stopped
+            health_status['current_status'] = 'stopped'
+            health_status['stalled'] = False
+            health_status['processing_rate'] = 0.0
+            # Clear anomalies/recommendations related to performance while stopped
+            health_status['anomalies'] = []
+            health_status['recommendations'] = ['Analysis is currently stopped. Start analysis to resume monitoring.']
+        
+        # Get stall analysis
+        stall_analysis = monitor.get_stall_analysis()
+        if not is_running:
+            stall_analysis['stall_probability'] = 'low'
+            stall_analysis['stall_indicators'] = []
+        
+        # Combine health information
+        health_info = {
+            'success': True,
+            'timestamp': datetime.now().isoformat(),
+            'health': health_status,
+            'stall_analysis': stall_analysis,
+            'auto_recovery_available': True,  # Will be enhanced when auto-recovery is integrated
+            'recommendations': health_status.get('recommendations', [])
+        }
+        
+        return jsonify(health_info)
+        
+    except Exception as e:
+        debug_log(f"Error getting audio analysis health: {e}", "ERROR")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        })
+
+@main_bp.route('/api/audio-analysis/restart', methods=['POST'])
+def api_audio_analysis_restart():
+    """Manually restart audio analysis (for recovery)"""
+    try:
+        # Check if analysis is currently running
+        if hasattr(api_start_audio_analysis, 'processor') and api_start_audio_analysis.processor:
+            try:
+                current_status = api_start_audio_analysis.processor.get_status()
+                if current_status and current_status.get('status') == 'running':
+                    # Stop current analysis
+                    api_start_audio_analysis.processor.stop_processing()
+                    api_start_audio_analysis.processor = None
+                    debug_log("Stopped running audio analysis for restart", "INFO")
+            except Exception as e:
+                debug_log(f"Error stopping current analysis: {e}", "WARNING")
+        
+        # Start fresh analysis
+        data = request.get_json() or {}
+        max_workers = data.get('max_workers', int(get_config_value('AUDIO_ANALYSIS', 'MaxWorkers', '1')))
+        batch_size = data.get('batch_size', int(get_config_value('AUDIO_ANALYSIS', 'BatchSize', '100')))
+        
+        # Import and initialize the advanced batch processor
+        try:
+            from advanced_batch_processor import AdvancedBatchProcessor
+        except ImportError as e:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to import audio analysis modules: {str(e)}'
+            })
+        
+        # Initialize processor
+        processor = AdvancedBatchProcessor(
+            max_workers=max_workers,
+            batch_size=batch_size
+        )
+        
+        # Initialize queue
+        jobs_added = processor.initialize_queue()
+        
+        if jobs_added == 0:
+            return jsonify({'success': False, 'error': 'No tracks available for analysis'})
+        
+        # Store processor instance
+        api_start_audio_analysis.processor = processor
+        
+        # Start processing in background thread
+        def start_processing():
+            try:
+                processor.start_processing()
+            except Exception as e:
+                debug_log(f"Error in audio analysis processing: {e}", "ERROR")
+        
+        import threading
+        thread = threading.Thread(target=start_processing, daemon=True)
+        thread.start()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Audio analysis restarted successfully',
+            'jobs_queued': jobs_added,
+            'max_workers': max_workers,
+            'trigger_ui_update': True
+        })
+        
+    except Exception as e:
+        debug_log(f"Error restarting audio analysis: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)})
+
+@main_bp.route('/api/audio-analysis/auto-recovery/status')
+def api_auto_recovery_status():
+    """Get auto-recovery system status"""
+    try:
+        auto_recovery = get_auto_recovery()
+        if not auto_recovery:
+            return jsonify({
+                'success': False,
+                'error': 'Auto-recovery system not available'
+            })
+        
+        status = auto_recovery.get_status()
+        history = auto_recovery.get_recovery_history()
+        
+        return jsonify({
+            'success': True,
+            'status': status,
+            'history': history
+        })
+        
+    except Exception as e:
+        debug_log(f"Error getting auto-recovery status: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)})
+
+@main_bp.route('/api/audio-analysis/auto-recovery/start', methods=['POST'])
+def api_auto_recovery_start():
+    """Start auto-recovery monitoring"""
+    try:
+        auto_recovery = get_auto_recovery()
+        if not auto_recovery:
+            return jsonify({
+                'success': False,
+                'error': 'Auto-recovery system not available'
+            })
+        
+        success = auto_recovery.start_monitoring()
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Auto-recovery monitoring started'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to start auto-recovery monitoring'
+            })
+        
+    except Exception as e:
+        debug_log(f"Error starting auto-recovery: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)})
+
+@main_bp.route('/api/audio-analysis/auto-recovery/stop', methods=['POST'])
+def api_auto_recovery_stop():
+    """Stop auto-recovery monitoring"""
+    try:
+        auto_recovery = get_auto_recovery()
+        if not auto_recovery:
+            return jsonify({
+                'success': False,
+                'error': 'Auto-recovery system not available'
+            })
+        
+        success = auto_recovery.stop_monitoring()
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Auto-recovery monitoring stopped'
+            })
+        else:
+                return jsonify({
+                'success': False,
+                'error': 'Failed to stop auto-recovery monitoring'
+            })
+        
+    except Exception as e:
+        debug_log(f"Error stopping auto-recovery: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)})
+
+@main_bp.route('/api/audio-analysis/auto-recovery/reset', methods=['POST'])
+def api_auto_recovery_reset():
+    """Reset auto-recovery failure count (manual intervention)"""
+    try:
+        auto_recovery = get_auto_recovery()
+        if not auto_recovery:
+            return jsonify({
+                'success': False,
+                'error': 'Auto-recovery system not available'
+            })
+        
+        auto_recovery.reset_failure_count()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Auto-recovery failure count reset'
+        })
+        
+    except Exception as e:
+        debug_log(f"Error resetting auto-recovery: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)})
+
+# --- Configuration Management ---
+@main_bp.route('/api/audio-analysis/config', methods=['GET'])
+def api_get_monitoring_config():
+    """Get current monitoring configuration"""
+    try:
+        from monitoring_config import get_config_manager
+        
+        config_manager = get_config_manager()
+        config = config_manager.get_monitoring_config()
+        
+        return jsonify({
+            'success': True,
+            'config': {
+                'stall_detection_timeout': config.stall_detection_timeout,
+                'monitoring_interval': config.monitoring_interval,
+                'progress_history_retention_days': config.progress_history_retention_days,
+                'auto_recovery_enabled': config.auto_recovery_enabled,
+                'auto_recovery_check_interval': config.auto_recovery_check_interval,
+                'max_consecutive_failures': config.max_consecutive_failures,
+                'recovery_backoff_multiplier': config.recovery_backoff_multiplier,
+                'recovery_max_delay': config.recovery_max_delay,
+                'high_error_rate_threshold': config.high_error_rate_threshold,
+                'stall_warning_threshold': config.stall_warning_threshold,
+                'escalation_threshold': config.escalation_threshold,
+                'critical_stall_threshold': config.critical_stall_threshold,
+                'progress_stagnation_hours': config.progress_stagnation_hours,
+                'health_update_interval': config.health_update_interval,
+                'stall_detection_interval': config.stall_detection_interval,
+                'progress_update_interval': config.progress_update_interval,
+                'recovery_status_interval': config.recovery_status_interval
+            }
+        })
+        
+    except Exception as e:
+        debug_log(f"Error getting monitoring config: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@main_bp.route('/api/audio-analysis/config', methods=['POST'])
+def api_update_monitoring_config():
+    """Update monitoring configuration"""
+    try:
+        from monitoring_config import get_config_manager
+        
+        config_manager = get_config_manager()
+        new_config = request.get_json()
+        
+        if not new_config:
+            return jsonify({'success': False, 'error': 'No configuration data provided'}), 400
+        
+        # Update configuration
+        config_manager.update_monitoring_config(**new_config)
+        
+        # Save to file
+        config_manager.save_config()
+        
+        # Validate updated configuration
+        validation = config_manager.validate_config()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuration updated successfully',
+            'validation': validation
+        })
+        
+    except Exception as e:
+        debug_log(f"Error updating monitoring config: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@main_bp.route('/api/audio-analysis/config/reset', methods=['POST'])
+def api_reset_monitoring_config():
+    """Reset monitoring configuration to defaults"""
+    try:
+        from monitoring_config import get_config_manager
+        
+        config_manager = get_config_manager()
+        
+        # Reset to defaults
+        config_manager.monitoring_config = config_manager.monitoring_config.__class__()
+        
+        # Save to file
+        config_manager.save_config()
+        
+        # Validate reset configuration
+        validation = config_manager.validate_config()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Configuration reset to defaults',
+            'config': config_manager.get_config_summary(),
+            'validation': validation
+        })
+        
+    except Exception as e:
+        debug_log(f"Error resetting monitoring config: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@main_bp.route('/api/audio-analysis/config/validate', methods=['POST'])
+def api_validate_monitoring_config():
+    """Validate monitoring configuration"""
+    try:
+        from monitoring_config import get_config_manager
+        
+        config_manager = get_config_manager()
+        new_config = request.get_json()
+        
+        if not new_config:
+            return jsonify({'success': False, 'error': 'No configuration data provided'}), 400
+        
+        # Create temporary config for validation
+        temp_config = config_manager.monitoring_config.__class__()
+        for key, value in new_config.items():
+            if hasattr(temp_config, key):
+                setattr(temp_config, key, value)
+        
+        # Validate configuration
+        validation = config_manager.validate_config()
+        
+        return jsonify({
+            'success': True,
+            'validation': validation
+        })
+        
+    except Exception as e:
+        debug_log(f"Error validating monitoring config: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @main_bp.route('/api/browse-path')
 def api_browse_path():

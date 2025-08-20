@@ -25,6 +25,7 @@ import sqlite3
 # Import our modules
 from audio_analyzer import AudioAnalyzer
 from audio_analysis_service import AudioAnalysisService
+# Monitoring will be imported dynamically in _progress_monitor to avoid circular imports
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -204,6 +205,9 @@ class AdvancedBatchProcessor:
             )
             monitor_thread.start()
             
+            # Capture initial progress snapshot for monitoring
+            self._capture_monitoring_snapshot()
+            
             return True
             
         except Exception as e:
@@ -232,6 +236,9 @@ class AdvancedBatchProcessor:
             
             # Save final checkpoint
             self._save_checkpoint()
+            
+            # Capture final progress snapshot for monitoring
+            self._capture_monitoring_snapshot()
             
             logger.info("Batch processing stopped successfully")
             return True
@@ -311,6 +318,9 @@ class AdvancedBatchProcessor:
                 self.stats.completed_jobs += 1
                 self._update_stats()
             
+            # Capture progress snapshot for monitoring
+            self._capture_monitoring_snapshot()
+            
             logger.info(f"Job {job.track_id} completed successfully in {job.processing_time:.2f}s")
             
         except Exception as e:
@@ -347,6 +357,9 @@ class AdvancedBatchProcessor:
                     self.stats.failed_jobs += 1
                     self._update_stats()
                 
+                # Capture progress snapshot for monitoring
+                self._capture_monitoring_snapshot()
+                
                 logger.error(f"Job {job.track_id} failed permanently after {job.attempts} attempts: {error_msg}")
         
         finally:
@@ -366,6 +379,20 @@ class AdvancedBatchProcessor:
     
     def _progress_monitor(self, progress_callback: Callable = None):
         """Monitor processing progress and save checkpoints"""
+        # Initialize monitoring if available
+        monitor = None
+        try:
+            from audio_analysis_monitor import AudioAnalysisMonitor
+            monitor = AudioAnalysisMonitor(self.db_path)
+            logger.info("Audio analysis monitoring enabled")
+        except ImportError as e:
+            logger.warning(f"Audio analysis monitoring not available: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize monitoring: {e}")
+        
+        last_monitoring_update = 0
+        monitoring_interval = 60  # Update monitoring every 60 seconds
+        
         while not self.shutdown_event.is_set():
             try:
                 # Update statistics
@@ -376,6 +403,16 @@ class AdvancedBatchProcessor:
                 if progress_callback:
                     progress = self._calculate_progress()
                     progress_callback(progress)
+                
+                # Capture progress snapshot for monitoring (every 60 seconds)
+                current_time = time.time()
+                if monitor and (current_time - last_monitoring_update) >= monitoring_interval:
+                    try:
+                        monitor.capture_progress_snapshot()
+                        last_monitoring_update = current_time
+                        logger.debug("Progress snapshot captured for monitoring")
+                    except Exception as e:
+                        logger.warning(f"Failed to capture progress snapshot: {e}")
                 
                 # Save checkpoint if needed
                 if self.stats.completed_jobs - self.last_checkpoint >= self.checkpoint_interval:
@@ -447,6 +484,16 @@ class AdvancedBatchProcessor:
             
         except Exception as e:
             logger.error(f"Error saving checkpoint: {e}")
+    
+    def _capture_monitoring_snapshot(self):
+        """Capture progress snapshot for monitoring system"""
+        try:
+            from audio_analysis_monitor import AudioAnalysisMonitor
+            monitor = AudioAnalysisMonitor(self.db_path)
+            monitor.capture_progress_snapshot()
+            logger.debug("Monitoring snapshot captured after job completion")
+        except Exception as e:
+            logger.debug(f"Failed to capture monitoring snapshot: {e}")
     
     def get_status(self) -> Dict[str, Any]:
         """Get current processing status"""

@@ -107,6 +107,219 @@
         </div>
     </div>
 
+    <!-- Health Monitoring -->
+    <div class="health-monitoring">
+        <div class="health-card">
+            <h3>🏥 System Health</h3>
+            <div id="health-status-content">
+                <div class="health-overview">
+                    <div class="health-indicator">
+                        <span class="health-label">Overall Health:</span>
+                        <span id="overall-health" class="health-value health-unknown">Unknown</span>
+                    </div>
+                    <div class="health-indicator">
+                        <span class="health-label">Stall Status:</span>
+                        <span id="stall-status" class="health-value health-unknown">Unknown</span>
+                    </div>
+                    <div class="health-indicator">
+                        <span class="health-label">Last Update:</span>
+                        <span id="last-health-update" class="health-value">Never</span>
+                    </div>
+                </div>
+                <div class="health-details">
+                    <div class="health-metrics">
+                        <div class="health-metric">
+                            <span class="metric-label">Processing Rate:</span>
+                            <span id="processing-rate" class="metric-value">N/A</span>
+                        </div>
+                        <div class="health-metric">
+                            <span class="metric-label">Stall Probability:</span>
+                            <span id="stall-probability" class="metric-value">Unknown</span>
+                        </div>
+                        <div class="health-metric">
+                            <span class="metric-label">Consecutive Stalls:</span>
+                            <span id="consecutive-stalls" class="metric-value">0</span>
+                        </div>
+                    </div>
+                    <div class="health-actions">
+                        <button id="refresh-health" class="btn btn-info btn-sm">
+                            <span class="btn-icon">🔄</span>
+                            Refresh Health
+                        </button>
+                        <button id="force-restart" class="btn btn-warning btn-sm">
+                            <span class="btn-icon">🔄</span>
+                            Force Restart
+                        </button>
+                    </div>
+                </div>
+                <div class="health-recommendations">
+                    <h4>💡 Recommendations</h4>
+                    <div id="health-recommendations-list">
+                        <div class="recommendation-item">
+                            <span class="recommendation-text">System health monitoring is active</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auto-Recovery Status -->
+    <div class="auto-recovery-status">
+        <div class="recovery-card">
+            <h3>🤖 Auto-Recovery</h3>
+            <div id="recovery-status-content">
+                <div class="recovery-overview">
+                    <div class="recovery-indicator">
+                        <span class="recovery-label">Status:</span>
+                        <span id="recovery-status" class="recovery-value recovery-unknown">Unknown</span>
+                    </div>
+                    <div class="recovery-indicator">
+                        <span class="recovery-label">Monitoring:</span>
+                        <span id="recovery-monitoring" class="recovery-value recovery-unknown">Unknown</span>
+                    </div>
+                    <div class="recovery-indicator">
+                        <span class="recovery-label">Last Recovery:</span>
+                        <span id="last-recovery-attempt" class="recovery-value">Never</span>
+                    </div>
+                </div>
+                <div class="recovery-details">
+                    <div class="recovery-metrics">
+                        <div class="recovery-metric">
+                            <span class="metric-label">Failures:</span>
+                            <span id="recovery-failures" class="metric-value">0</span>
+                        </div>
+                        <div class="recovery-metric">
+                            <span class="metric-label">Next Recovery:</span>
+                            <span id="next-recovery-time" class="metric-value">Available now</span>
+                        </div>
+                        <div class="recovery-metric">
+                            <span class="metric-label">Manual Intervention:</span>
+                            <span id="manual-intervention" class="metric-value">Not required</span>
+                        </div>
+                    </div>
+                    <div class="recovery-actions">
+                        <button id="start-recovery-monitoring" class="btn btn-success btn-sm">
+                            <span class="btn-icon">▶️</span>
+                            Start Monitoring
+                        </button>
+                        <button id="stop-recovery-monitoring" class="btn btn-danger btn-sm">
+                            <span class="btn-icon">⏹️</span>
+                            Stop Monitoring
+                        </button>
+                        <button id="reset-recovery-failures" class="btn btn-warning btn-sm">
+                            <span class="btn-icon">🔄</span>
+                            Reset Failures
+                        </button>
+                    </div>
+                </div>
+                <div class="recovery-history">
+                    <h4>📋 Recovery History</h4>
+                    <div id="recovery-history-list">
+                        <div class="history-item">
+                            <span class="history-text">No recovery attempts yet</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Configuration Settings -->
+    <div class="configuration-settings">
+        <div class="config-card">
+            <h3>⚙️ Monitoring Configuration</h3>
+            <div id="config-settings-content">
+                <div class="config-sections">
+                    <!-- Monitoring Settings -->
+                    <div class="config-section">
+                        <h4>📊 Monitoring</h4>
+                        <div class="config-group">
+                            <label for="stall-timeout">Stall Detection Timeout (seconds):</label>
+                            <input type="number" id="stall-timeout" min="60" max="3600" value="300">
+                        </div>
+                        <div class="config-group">
+                            <label for="monitoring-interval">Monitoring Interval (seconds):</label>
+                            <input type="number" id="monitoring-interval" min="30" max="300" value="60">
+                        </div>
+                        <div class="config-group">
+                            <label for="history-retention">Progress History Retention (days):</label>
+                            <input type="number" id="history-retention" min="1" max="30" value="7">
+                        </div>
+                    </div>
+                    
+                    <!-- Auto-Recovery Settings -->
+                    <div class="config-section">
+                        <h4>🤖 Auto-Recovery</h4>
+                        <div class="config-group">
+                            <label for="auto-recovery-enabled">
+                                <input type="checkbox" id="auto-recovery-enabled" checked>
+                                Enable Auto-Recovery
+                            </label>
+                        </div>
+                        <div class="config-group">
+                            <label for="max-failures">Max Consecutive Failures:</label>
+                            <input type="number" id="max-failures" min="1" max="10" value="3">
+                        </div>
+                        <div class="config-group">
+                            <label for="backoff-multiplier">Recovery Backoff Multiplier:</label>
+                            <input type="number" id="backoff-multiplier" min="1.0" max="5.0" step="0.1" value="2.0">
+                        </div>
+                    </div>
+                    
+                    <!-- Alert Thresholds -->
+                    <div class="config-section">
+                        <h4>🚨 Alert Thresholds</h4>
+                        <div class="config-group">
+                            <label for="error-rate-threshold">High Error Rate Threshold (%):</label>
+                            <input type="number" id="error-rate-threshold" min="1" max="50" step="0.1" value="10.0">
+                        </div>
+                        <div class="config-group">
+                            <label for="stall-warning-threshold">Stall Warning Threshold:</label>
+                            <input type="number" id="stall-warning-threshold" min="1" max="5" value="2">
+                        </div>
+                        <div class="config-group">
+                            <label for="escalation-threshold">Escalation Threshold:</label>
+                            <input type="number" id="escalation-threshold" min="2" max="10" value="3">
+                        </div>
+                    </div>
+                    
+                    <!-- UI Update Intervals -->
+                    <div class="config-section">
+                        <h4>🖥️ UI Updates</h4>
+                        <div class="config-group">
+                            <label for="health-update-interval">Health Update Interval (seconds):</label>
+                            <input type="number" id="health-update-interval" min="5" max="60" value="10">
+                        </div>
+                        <div class="config-group">
+                            <label for="stall-detection-interval">Stall Detection Interval (seconds):</label>
+                            <input type="number" id="stall-detection-interval" min="1" max="30" value="5">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="config-actions">
+                    <button id="save-config" class="btn btn-primary">
+                        <span class="btn-icon">💾</span>
+                        Save Configuration
+                    </button>
+                    <button id="reset-config" class="btn btn-secondary">
+                        <span class="btn-icon">🔄</span>
+                        Reset to Defaults
+                    </button>
+                    <button id="validate-config" class="btn btn-info">
+                        <span class="btn-icon">✅</span>
+                        Validate Configuration
+                    </button>
+                </div>
+                
+                <div class="config-status">
+                    <div id="config-validation-result"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Progress Details -->
     <div class="progress-details">
         <div class="progress-card">
@@ -204,6 +417,16 @@ class AudioAnalysisManager {
         this.bindEvents();
         this.loadInitialStatus();
         this.startStatusPolling();
+        
+        // Initialize health monitoring
+        this.refreshHealthStatus();
+        this.refreshRecoveryStatus();
+        
+        // Load configuration
+        this.loadConfiguration();
+        
+        // Start health monitoring polling
+        this.startHealthPolling();
     }
 
     bindEvents() {
@@ -212,6 +435,20 @@ class AudioAnalysisManager {
         document.getElementById('stop-analysis').addEventListener('click', () => this.stopAnalysis());
         document.getElementById('refresh-status').addEventListener('click', () => this.refreshStatus());
         document.getElementById('cleanup-data').addEventListener('click', () => this.cleanupData());
+        
+        // Health monitoring buttons
+        document.getElementById('refresh-health').addEventListener('click', () => this.refreshHealthStatus());
+        document.getElementById('force-restart').addEventListener('click', () => this.forceRestart());
+        
+        // Auto-recovery buttons
+        document.getElementById('start-recovery-monitoring').addEventListener('click', () => this.startRecoveryMonitoring());
+        document.getElementById('stop-recovery-monitoring').addEventListener('click', () => this.stopRecoveryMonitoring());
+        document.getElementById('reset-recovery-failures').addEventListener('click', () => this.resetRecoveryFailures());
+        
+        // Configuration buttons
+        document.getElementById('save-config').addEventListener('click', () => this.saveConfiguration());
+        document.getElementById('reset-config').addEventListener('click', () => this.resetConfiguration());
+        document.getElementById('validate-config').addEventListener('click', () => this.validateConfiguration());
     }
 
     async startAnalysis() {
@@ -575,6 +812,29 @@ class AudioAnalysisManager {
         return timeSinceLastCheck > 10000; // 10 seconds
     }
     
+    startHealthPolling() {
+        // Poll health status every 10 seconds for real-time updates
+        setInterval(async () => {
+            try {
+                await this.refreshHealthStatus();
+                await this.refreshRecoveryStatus();
+            } catch (error) {
+                console.error('Error in health polling:', error);
+            }
+        }, 10000); // 10 seconds for real-time updates
+        
+        // Also poll stall detection more frequently (every 5 seconds) when analysis is running
+        setInterval(async () => {
+            if (this.isRunning) {
+                try {
+                    await this.refreshHealthStatus();
+                } catch (error) {
+                    console.error('Error in stall detection polling:', error);
+                }
+            }
+        }, 5000); // 5 seconds for stall detection
+    }
+    
     safeUpdateProgress(progressData) {
         // Only update if we have valid progress data
         if (!progressData || progressData.progress_percentage === undefined) {
@@ -642,6 +902,569 @@ class AudioAnalysisManager {
         }, 5000);
     }
     
+    // Health Monitoring Methods
+    async refreshHealthStatus() {
+        try {
+            const response = await fetch('/api/audio-analysis/health');
+            const healthData = await response.json();
+            
+            if (healthData.success) {
+                this.updateHealthDisplay(healthData.health, healthData.stall_analysis);
+            } else {
+                console.error('Failed to get health status:', healthData.error);
+            }
+        } catch (error) {
+            console.error('Error refreshing health status:', error);
+        }
+    }
+    
+    updateHealthDisplay(health, stallAnalysis) {
+        // Update overall health
+        const overallHealth = document.getElementById('overall-health');
+        if (overallHealth) {
+            overallHealth.textContent = health.current_status;
+            overallHealth.className = `health-value health-${health.current_status}`;
+        }
+        
+        // Update stall status
+        const stallStatus = document.getElementById('stall-status');
+        if (stallStatus) {
+            const isStalled = health.stalled ? 'Stalled' : 'Healthy';
+            stallStatus.textContent = isStalled;
+            stallStatus.className = `health-value health-${health.stalled ? 'stalled' : 'healthy'}`;
+        }
+        
+        // Update last update time
+        const lastUpdate = document.getElementById('last-health-update');
+        if (lastUpdate) {
+            const updateTime = new Date(health.timestamp).toLocaleTimeString();
+            lastUpdate.textContent = updateTime;
+        }
+        
+        // Update processing rate with real-time visualization
+        const processingRate = document.getElementById('processing-rate');
+        if (processingRate) {
+            const rate = health.processing_rate;
+            if (rate) {
+                const rateText = `${rate.toFixed(2)} tracks/min`;
+                processingRate.textContent = rateText;
+                
+                // Add visual indicators for processing rate
+                if (rate > 1.0) {
+                    processingRate.className = 'metric-value rate-high';
+                } else if (rate > 0.5) {
+                    processingRate.className = 'metric-value rate-medium';
+                } else {
+                    processingRate.className = 'metric-value rate-low';
+                }
+            } else {
+                processingRate.textContent = 'N/A';
+                processingRate.className = 'metric-value';
+            }
+        }
+        
+        // Update stall probability with real-time warnings
+        const stallProbability = document.getElementById('stall-probability');
+        if (stallProbability) {
+            const probability = stallAnalysis.stall_probability || 'unknown';
+            stallProbability.textContent = probability;
+            
+            // Add visual warnings for high stall probability
+            if (probability === 'high') {
+                stallProbability.className = 'metric-value stall-warning';
+                this.showStallWarning();
+            } else {
+                stallProbability.className = 'metric-value';
+                this.hideStallWarning();
+            }
+        }
+        
+        // Update consecutive stalls with escalation warnings
+        const consecutiveStalls = document.getElementById('consecutive-stalls');
+        if (consecutiveStalls) {
+            const stalls = health.consecutive_stalls || 0;
+            consecutiveStalls.textContent = stalls;
+            
+            // Show escalation warnings
+            if (stalls >= 3) {
+                consecutiveStalls.className = 'metric-value escalation-warning';
+                this.showEscalationWarning(stalls);
+            } else {
+                consecutiveStalls.className = 'metric-value';
+                this.hideEscalationWarning();
+            }
+        }
+        
+        // Update recommendations
+        this.updateRecommendations(health.recommendations || []);
+        
+        // Update estimated completion time if available
+        this.updateEstimatedCompletion(health.estimated_completion);
+        
+        // Show real-time alerts for critical issues
+        this.checkCriticalAlerts(health, stallAnalysis);
+    }
+    
+    // Configuration Management Methods
+    async loadConfiguration() {
+        try {
+            const response = await fetch('/api/audio-analysis/config');
+            const configData = await response.json();
+            
+            if (configData.success) {
+                this.populateConfigurationForm(configData.config);
+            } else {
+                console.error('Failed to load configuration:', configData.error);
+            }
+        } catch (error) {
+            console.error('Error loading configuration:', error);
+        }
+    }
+    
+    populateConfigurationForm(config) {
+        // Populate form fields with current configuration
+        document.getElementById('stall-timeout').value = config.stall_detection_timeout || 300;
+        document.getElementById('monitoring-interval').value = config.monitoring_interval || 60;
+        document.getElementById('history-retention').value = config.progress_history_retention_days || 7;
+        
+        document.getElementById('auto-recovery-enabled').checked = config.auto_recovery_enabled !== false;
+        document.getElementById('max-failures').value = config.max_consecutive_failures || 3;
+        document.getElementById('backoff-multiplier').value = config.recovery_backoff_multiplier || 2.0;
+        
+        document.getElementById('error-rate-threshold').value = config.high_error_rate_threshold || 10.0;
+        document.getElementById('stall-warning-threshold').value = config.stall_warning_threshold || 2;
+        document.getElementById('escalation-threshold').value = config.escalation_threshold || 3;
+        
+        document.getElementById('health-update-interval').value = config.health_update_interval || 10;
+        document.getElementById('stall-detection-interval').value = config.stall_detection_interval || 5;
+    }
+    
+    async saveConfiguration() {
+        try {
+            const config = this.collectConfigurationForm();
+            
+            const response = await fetch('/api/audio-analysis/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                this.showMessage('Configuration saved successfully', 'success');
+                this.showValidationResult(result.validation, 'Configuration saved and validated');
+            } else {
+                this.showMessage(`Failed to save configuration: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error saving configuration: ${error.message}`, 'error');
+        }
+    }
+    
+    collectConfigurationForm() {
+        return {
+            stall_detection_timeout: parseInt(document.getElementById('stall-timeout').value),
+            monitoring_interval: parseInt(document.getElementById('monitoring-interval').value),
+            progress_history_retention_days: parseInt(document.getElementById('history-retention').value),
+            
+            auto_recovery_enabled: document.getElementById('auto-recovery-enabled').checked,
+            auto_recovery_check_interval: parseInt(document.getElementById('monitoring-interval').value),
+            max_consecutive_failures: parseInt(document.getElementById('max-failures').value),
+            recovery_backoff_multiplier: parseFloat(document.getElementById('backoff-multiplier').value),
+            recovery_max_delay: 1800, // Default value
+            
+            high_error_rate_threshold: parseFloat(document.getElementById('error-rate-threshold').value),
+            stall_warning_threshold: parseInt(document.getElementById('stall-warning-threshold').value),
+            escalation_threshold: parseInt(document.getElementById('escalation-threshold').value),
+            critical_stall_threshold: parseInt(document.getElementById('escalation-threshold').value) + 2,
+            progress_stagnation_hours: 2, // Default value
+            
+            health_update_interval: parseInt(document.getElementById('health-update-interval').value),
+            stall_detection_interval: parseInt(document.getElementById('stall-detection-interval').value),
+            progress_update_interval: 2, // Default value
+            recovery_status_interval: 15 // Default value
+        };
+    }
+    
+    async resetConfiguration() {
+        try {
+            const response = await fetch('/api/audio-analysis/config/reset', {
+                method: 'POST'
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                this.showMessage('Configuration reset to defaults', 'success');
+                this.populateConfigurationForm(result.config);
+                this.showValidationResult(result.validation, 'Configuration reset and validated');
+            } else {
+                this.showMessage(`Failed to reset configuration: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error resetting configuration: ${error.message}`, 'error');
+        }
+    }
+    
+    async validateConfiguration() {
+        try {
+            const config = this.collectConfigurationForm();
+            
+            const response = await fetch('/api/audio-analysis/config/validate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config)
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                this.showValidationResult(result.validation, 'Configuration validation completed');
+            } else {
+                this.showMessage(`Failed to validate configuration: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error validating configuration: ${error.message}`, 'error');
+        }
+    }
+    
+    showValidationResult(validation, message) {
+        const container = document.getElementById('config-validation-result');
+        if (!container) return;
+        
+        let className = 'validation-success';
+        let icon = '✅';
+        
+        if (!validation.valid) {
+            className = 'validation-error';
+            icon = '❌';
+        } else if (validation.warnings && validation.warnings.length > 0) {
+            className = 'validation-warning';
+            icon = '⚠️';
+        }
+        
+        let html = `<div class="${className}">`;
+        html += `<strong>${icon} ${message}</strong><br>`;
+        
+        if (validation.warnings && validation.warnings.length > 0) {
+            html += '<strong>Warnings:</strong><ul>';
+            validation.warnings.forEach(warning => {
+                html += `<li>${warning}</li>`;
+            });
+            html += '</ul>';
+        }
+        
+        if (validation.errors && validation.errors.length > 0) {
+            html += '<strong>Errors:</strong><ul>';
+            validation.errors.forEach(error => {
+                html += `<li>${error}</li>`;
+            });
+            html += '</ul>';
+        }
+        
+        html += '</div>';
+        container.innerHTML = html;
+    }
+    
+    updateEstimatedCompletion(estimatedCompletion) {
+        if (estimatedCompletion) {
+            try {
+                const completionTime = new Date(estimatedCompletion);
+                const now = new Date();
+                const timeRemaining = completionTime - now;
+                
+                if (timeRemaining > 0) {
+                    const hours = Math.floor(timeRemaining / (1000 * 60 * 60));
+                    const minutes = Math.floor((timeRemaining % (1000 * 60 * 60)) / (1000 * 60));
+                    
+                    let timeText = '';
+                    if (hours > 0) {
+                        timeText = `${hours}h ${minutes}m remaining`;
+                    } else {
+                        timeText = `${minutes}m remaining`;
+                    }
+                    
+                    // Update the ETA display in progress details
+                    const etaElement = document.getElementById('eta');
+                    if (etaElement) {
+                        etaElement.textContent = timeText;
+                    }
+                }
+            } catch (error) {
+                console.error('Error updating estimated completion:', error);
+            }
+        }
+    }
+    
+    showStallWarning() {
+        // Show visual stall warning
+        const stallStatus = document.getElementById('stall-status');
+        if (stallStatus) {
+            stallStatus.style.animation = 'pulse-warning 2s infinite';
+        }
+        
+        // Show notification
+        this.showMessage('⚠️ High stall probability detected - monitoring closely', 'warning');
+    }
+    
+    hideStallWarning() {
+        const stallStatus = document.getElementById('stall-status');
+        if (stallStatus) {
+            stallStatus.style.animation = '';
+        }
+    }
+    
+    showEscalationWarning(stallCount) {
+        // Show escalation warning for multiple consecutive stalls
+        const warningMessage = `🚨 ${stallCount} consecutive stalls detected - manual intervention may be required`;
+        this.showMessage(warningMessage, 'error');
+        
+        // Highlight the consecutive stalls counter
+        const consecutiveStalls = document.getElementById('consecutive-stalls');
+        if (consecutiveStalls) {
+            consecutiveStalls.style.animation = 'pulse-error 1s infinite';
+        }
+    }
+    
+    hideEscalationWarning() {
+        const consecutiveStalls = document.getElementById('consecutive-stalls');
+        if (consecutiveStalls) {
+            consecutiveStalls.style.animation = '';
+        }
+    }
+    
+    checkCriticalAlerts(health, stallAnalysis) {
+        // Check for critical issues that need immediate attention
+        
+        // Critical stall detection
+        if (health.stalled && health.consecutive_stalls >= 2) {
+            this.showCriticalAlert('🚨 CRITICAL: Analysis has stalled multiple times. Immediate action required!', 'error');
+        }
+        
+        // High error rate
+        if (health.progress && health.progress.error_tracks > 0) {
+            const errorRate = (health.progress.error_tracks / health.progress.total_tracks) * 100;
+            if (errorRate > 10) {
+                this.showCriticalAlert(`⚠️ High error rate: ${errorRate.toFixed(1)}% of tracks failed analysis`, 'warning');
+            }
+        }
+        
+        // Progress regression
+        if (health.anomalies && health.anomalies.some(a => a.includes('Progress dropped'))) {
+            this.showCriticalAlert('⚠️ Progress regression detected - analysis may be corrupted', 'warning');
+        }
+    }
+    
+    showCriticalAlert(message, type) {
+        // Show critical alert that doesn't auto-dismiss
+        const alertContainer = document.getElementById('critical-alerts') || this.createCriticalAlertContainer();
+        
+        const alertElement = document.createElement('div');
+        alertElement.className = `critical-alert alert-${type}`;
+        alertElement.innerHTML = `
+            <span class="alert-icon">${type === 'error' ? '🚨' : '⚠️'}</span>
+            <span class="alert-message">${message}</span>
+            <button class="alert-dismiss" onclick="this.parentElement.remove()">×</button>
+        `;
+        
+        alertContainer.appendChild(alertElement);
+        
+        // Auto-dismiss after 30 seconds for warnings
+        if (type === 'warning') {
+            setTimeout(() => {
+                if (alertElement.parentNode) {
+                    alertElement.remove();
+                }
+            }, 30000);
+        }
+    }
+    
+    createCriticalAlertContainer() {
+        // Create critical alerts container if it doesn't exist
+        const container = document.createElement('div');
+        container.id = 'critical-alerts';
+        container.className = 'critical-alerts-container';
+        document.body.appendChild(container);
+        return container;
+    }
+    
+    updateRecommendations(recommendations) {
+        const container = document.getElementById('health-recommendations-list');
+        if (!container) return;
+        
+        container.innerHTML = '';
+        
+        if (recommendations.length === 0) {
+            container.innerHTML = '<div class="recommendation-item"><span class="recommendation-text">No recommendations at this time</span></div>';
+            return;
+        }
+        
+        recommendations.forEach(rec => {
+            const item = document.createElement('div');
+            item.className = 'recommendation-item';
+            item.innerHTML = `<span class="recommendation-text">• ${rec}</span>`;
+            container.appendChild(item);
+        });
+    }
+    
+    // Auto-Recovery Methods
+    async refreshRecoveryStatus() {
+        try {
+            const response = await fetch('/api/audio-analysis/auto-recovery/status');
+            const recoveryData = await response.json();
+            
+            if (recoveryData.success) {
+                this.updateRecoveryDisplay(recoveryData.status, recoveryData.history);
+            } else {
+                console.error('Failed to get recovery status:', recoveryData.error);
+            }
+        } catch (error) {
+            console.error('Error refreshing recovery status:', error);
+        }
+    }
+    
+    updateRecoveryDisplay(status, history) {
+        // Update recovery status
+        const recoveryStatus = document.getElementById('recovery-status');
+        if (recoveryStatus) {
+            recoveryStatus.textContent = status.status;
+            recoveryStatus.className = `recovery-value recovery-${status.status}`;
+        }
+        
+        // Update monitoring status
+        const recoveryMonitoring = document.getElementById('recovery-monitoring');
+        if (recoveryMonitoring) {
+            const monitoringStatus = status.monitoring_active ? 'Active' : 'Inactive';
+            recoveryMonitoring.textContent = monitoringStatus;
+            recoveryMonitoring.className = `recovery-value recovery-${status.monitoring_active ? 'monitoring' : 'idle'}`;
+        }
+        
+        // Update last recovery attempt
+        const lastRecovery = document.getElementById('last-recovery-attempt');
+        if (lastRecovery) {
+            if (status.last_recovery_attempt) {
+                const recoveryTime = new Date(status.last_recovery_attempt).toLocaleTimeString();
+                lastRecovery.textContent = recoveryTime;
+            } else {
+                lastRecovery.textContent = 'Never';
+            }
+        }
+        
+        // Update recovery metrics
+        const recoveryFailures = document.getElementById('recovery-failures');
+        if (recoveryFailures) {
+            recoveryFailures.textContent = status.consecutive_failures || '0';
+        }
+        
+        const nextRecovery = document.getElementById('next-recovery-time');
+        if (nextRecovery) {
+            nextRecovery.textContent = status.next_recovery_available || 'Available now';
+        }
+        
+        const manualIntervention = document.getElementById('manual-intervention');
+        if (manualIntervention) {
+            manualIntervention.textContent = status.requires_manual_intervention ? 'Required' : 'Not required';
+        }
+        
+        // Update recovery history
+        this.updateRecoveryHistory(history);
+    }
+    
+    updateRecoveryHistory(history) {
+        const container = document.getElementById('recovery-history-list');
+        if (!container) return;
+        
+        container.innerHTML = '';
+        
+        if (history.length === 0) {
+            container.innerHTML = '<div class="history-item"><span class="history-text">No recovery attempts yet</span></div>';
+            return;
+        }
+        
+        history.forEach(attempt => {
+            const item = document.createElement('div');
+            item.className = 'history-item';
+            const successIcon = attempt.success ? '✅' : '❌';
+            const time = new Date(attempt.timestamp).toLocaleTimeString();
+            item.innerHTML = `<span class="history-text">${successIcon} ${time} - ${attempt.reason}</span>`;
+            container.appendChild(item);
+        });
+    }
+    
+    async startRecoveryMonitoring() {
+        try {
+            const response = await fetch('/api/audio-analysis/auto-recovery/start', {
+                method: 'POST'
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                this.showMessage('Auto-recovery monitoring started', 'success');
+                this.refreshRecoveryStatus();
+            } else {
+                this.showMessage(`Failed to start monitoring: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error starting monitoring: ${error.message}`, 'error');
+        }
+    }
+    
+    async stopRecoveryMonitoring() {
+        try {
+            const response = await fetch('/api/audio-analysis/auto-recovery/stop', {
+                method: 'POST'
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                this.showMessage('Auto-recovery monitoring stopped', 'success');
+                this.refreshRecoveryStatus();
+            } else {
+                this.showMessage(`Failed to stop monitoring: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error stopping monitoring: ${error.message}`, 'error');
+        }
+    }
+    
+    async resetRecoveryFailures() {
+        try {
+            const response = await fetch('/api/audio-analysis/auto-recovery/reset', {
+                method: 'POST'
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                this.showMessage('Recovery failure count reset', 'success');
+                this.refreshRecoveryStatus();
+            } else {
+                this.showMessage(`Failed to reset failures: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error resetting failures: ${error.message}`, 'error');
+        }
+    }
+    
+    async forceRestart() {
+        try {
+            const response = await fetch('/api/audio-analysis/restart', {
+                method: 'POST'
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                this.showMessage('Audio analysis restarted successfully', 'success');
+                this.refreshStatus();
+                this.refreshHealthStatus();
+            } else {
+                this.showMessage(`Failed to restart: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error restarting analysis: ${error.message}`, 'error');
+        }
+    }
+    
     cleanup() {
         // Stop all polling when cleaning up
         this.stopProgressPolling();
@@ -693,7 +1516,7 @@ window.addEventListener('beforeunload', () => {
     margin-bottom: 30px;
 }
 
-.overview-card, .control-card, .status-card, .progress-card, .activity-card, .maintenance-card {
+.overview-card, .control-card, .status-card, .progress-card, .activity-card, .maintenance-card, .health-card, .recovery-card, .config-card {
     background: #2a2a2a;
     border-radius: 12px;
     padding: 24px;
@@ -701,7 +1524,7 @@ window.addEventListener('beforeunload', () => {
     border: 1px solid #444;
 }
 
-.overview-card h3, .control-card h3, .status-card h3, .progress-card h3, .activity-card h3, .maintenance-card h3 {
+.overview-card h3, .control-card h3, .status-card h3, .progress-card h3, .activity-card h3, .maintenance-card h3, .health-card h3, .recovery-card h3, .config-card h3 {
     color: #6a8a5e;
     margin-bottom: 20px;
     font-size: 18px;
@@ -966,6 +1789,390 @@ window.addEventListener('beforeunload', () => {
     to {
         transform: translateX(0);
         opacity: 1;
+    }
+}
+
+/* Health Monitoring Styles */
+.health-monitoring, .auto-recovery-status {
+    margin-bottom: 30px;
+}
+
+.health-overview, .recovery-overview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.health-indicator, .recovery-indicator {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid #444;
+}
+
+.health-label, .recovery-label {
+    font-size: 14px;
+    color: #ccc;
+}
+
+.health-value, .recovery-value {
+    font-size: 14px;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+/* Health Status Colors */
+.health-healthy {
+    color: #28a745;
+    background: rgba(40, 167, 69, 0.1);
+}
+
+.health-warning {
+    color: #ffc107;
+    background: rgba(255, 193, 7, 0.1);
+}
+
+.health-stalled {
+    color: #dc3545;
+    background: rgba(220, 53, 69, 0.1);
+}
+
+.health-error {
+    color: #dc3545;
+    background: rgba(220, 53, 69, 0.1);
+}
+
+.health-unknown {
+    color: #6c757d;
+    background: rgba(108, 117, 125, 0.1);
+}
+
+/* Recovery Status Colors */
+.recovery-monitoring {
+    color: #28a745;
+    background: rgba(40, 167, 69, 0.1);
+}
+
+.recovery-idle {
+    color: #6c757d;
+    background: rgba(108, 117, 125, 0.1);
+}
+
+.recovery-recovering {
+    color: #ffc107;
+    background: rgba(255, 193, 7, 0.1);
+}
+
+.recovery-failed {
+    color: #dc3545;
+    background: rgba(220, 53, 69, 0.1);
+}
+
+.recovery-unknown {
+    color: #6c757d;
+    background: rgba(108, 117, 125, 0.1);
+}
+
+.health-details, .recovery-details {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 20px;
+    margin-bottom: 20px;
+    align-items: start;
+}
+
+.health-metrics, .recovery-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 15px;
+}
+
+.health-metric, .recovery-metric {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.health-actions, .recovery-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.btn-sm {
+    padding: 8px 16px;
+    font-size: 12px;
+}
+
+.btn-info {
+    background: #17a2b8;
+    color: white;
+}
+
+.btn-info:hover {
+    background: #138496;
+}
+
+.health-recommendations, .recovery-history {
+    margin-top: 20px;
+}
+
+.health-recommendations h4, .recovery-history h4 {
+    color: #6a8a5e;
+    margin-bottom: 15px;
+    font-size: 16px;
+}
+
+.recommendation-item, .history-item {
+    padding: 10px 0;
+    border-bottom: 1px solid #444;
+}
+
+.recommendation-item:last-child, .history-item:last-child {
+    border-bottom: none;
+}
+
+.recommendation-text, .history-text {
+    font-size: 14px;
+    color: #ccc;
+}
+
+/* Real-time Warning Styles */
+.rate-high {
+    color: #28a745 !important;
+    font-weight: bold;
+}
+
+.rate-medium {
+    color: #ffc107 !important;
+    font-weight: bold;
+}
+
+.rate-low {
+    color: #dc3545 !important;
+    font-weight: bold;
+}
+
+.stall-warning {
+    color: #ffc107 !important;
+    font-weight: bold;
+    background: rgba(255, 193, 7, 0.2) !important;
+}
+
+.escalation-warning {
+    color: #dc3545 !important;
+    font-weight: bold;
+    background: rgba(220, 53, 69, 0.2) !important;
+}
+
+/* Critical Alerts Container */
+.critical-alerts-container {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    z-index: 1001;
+    max-width: 400px;
+}
+
+.critical-alert {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 15px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    color: white;
+    font-size: 14px;
+    font-weight: 500;
+    animation: slideInRight 0.3s ease;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.alert-error {
+    background: #dc3545;
+    border-left: 4px solid #721c24;
+}
+
+.alert-warning {
+    background: #ffc107;
+    color: #212529;
+    border-left: 4px solid #856404;
+}
+
+.alert-icon {
+    font-size: 18px;
+    flex-shrink: 0;
+}
+
+.alert-message {
+    flex-grow: 1;
+}
+
+.alert-dismiss {
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: background-color 0.2s ease;
+}
+
+.alert-dismiss:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+/* Animations */
+@keyframes pulse-warning {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+@keyframes pulse-error {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .health-details, .recovery-details {
+        grid-template-columns: 1fr;
+    }
+    
+    .health-actions, .recovery-actions {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+    
+    .critical-alerts-container {
+        right: 10px;
+        left: 10px;
+        max-width: none;
+    }
+}
+
+/* Configuration Settings Styles */
+.configuration-settings {
+    margin-bottom: 30px;
+}
+
+.config-sections {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.config-section {
+    background: #333;
+    border-radius: 8px;
+    padding: 16px;
+    border: 1px solid #555;
+}
+
+.config-section h4 {
+    color: #6a8a5e;
+    margin-bottom: 15px;
+    font-size: 16px;
+    border-bottom: 1px solid #555;
+    padding-bottom: 8px;
+}
+
+.config-group {
+    margin-bottom: 15px;
+}
+
+.config-group label {
+    display: block;
+    font-size: 14px;
+    color: #ccc;
+    margin-bottom: 8px;
+}
+
+.config-group input[type="number"],
+.config-group input[type="text"] {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #555;
+    border-radius: 6px;
+    background: #444;
+    color: #fff;
+    font-size: 14px;
+}
+
+.config-group input[type="checkbox"] {
+    margin-right: 8px;
+    transform: scale(1.2);
+}
+
+.config-group input[type="checkbox"] + span {
+    color: #ccc;
+    font-size: 14px;
+}
+
+.config-actions {
+    display: flex;
+    gap: 15px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.config-status {
+    min-height: 60px;
+}
+
+#config-validation-result {
+    padding: 12px;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.validation-success {
+    background: rgba(40, 167, 69, 0.2);
+    border: 1px solid #28a745;
+    color: #28a745;
+}
+
+.validation-warning {
+    background: rgba(255, 193, 7, 0.2);
+    border: 1px solid #ffc107;
+    color: #ffc107;
+}
+
+.validation-error {
+    background: rgba(220, 53, 69, 0.2);
+    border: 1px solid #dc3545;
+    color: #dc3545;
+}
+
+/* Responsive Design for Configuration */
+@media (max-width: 768px) {
+    .config-sections {
+        grid-template-columns: 1fr;
+    }
+    
+    .config-actions {
+        flex-direction: column;
     }
 }
 
