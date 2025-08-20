@@ -353,9 +353,6 @@
                     }
                 }
                 
-                // Show the final result immediately
-                displayFinalResult(outputElement, data);
-                
                 // Show playlist results
                 displayPlaylistResults(data);
                 
@@ -485,6 +482,9 @@
         
         // Function to display playlist results
         function displayPlaylistResults(data) {
+            console.log('🎵 Displaying playlist results:', data);
+            console.log('🔍 All available fields:', Object.keys(data));
+            
             const playlistResults = document.getElementById('playlist_results');
             const playlistMeta = document.getElementById('playlist_meta');
             const tracksList = document.getElementById('tracks_list');
@@ -505,10 +505,31 @@
                 </div>
             `;
             
-            // Display tracks if available
+            // Check for tracks in different possible field names
+            let tracks = null;
             if (data.tracks_details && data.tracks_details.length > 0) {
+                tracks = data.tracks_details;
+                console.log('✅ Found tracks in tracks_details');
+            } else if (data.tracks && data.tracks.length > 0) {
+                tracks = data.tracks;
+                console.log('✅ Found tracks in tracks field');
+            } else if (data.created_in_services && data.created_in_services.navidrome && data.created_in_services.navidrome.track_count > 0) {
+                // If we have service creation info but no track details, create a basic track list
+                console.log('✅ Found service creation info, creating basic track display');
+                tracks = Array(data.created_in_services.navidrome.track_count).fill().map((_, i) => ({
+                    artist: 'Track from Navidrome',
+                    title: `Track ${i + 1}`,
+                    source: 'navidrome'
+                }));
+            }
+            
+            console.log('🔍 Final tracks data:', tracks);
+            
+            if (tracks && tracks.length > 0) {
+                console.log('✅ Displaying tracks...');
                 tracksList.innerHTML = '';
-                data.tracks_details.forEach(track => {
+                tracks.forEach((track, index) => {
+                    console.log(`📝 Track ${index + 1}:`, track);
                     const li = document.createElement('li');
                     li.className = 'list-group-item';
                     li.innerHTML = `
@@ -530,7 +551,18 @@
                 initializeServiceButtons();
                 
                 // Store playlist data for service integration
-                window.currentPlaylistData = data;
+                window.currentPlaylistData = { ...data, tracks_details: tracks };
+            } else {
+                console.log('❌ No tracks found in any field, showing fallback message');
+                tracksList.innerHTML = '<li class="list-group-item">No track details available</li>';
+                
+                // Still show export section if we have basic data
+                if (data.playlist_name) {
+                    exportSection.style.display = 'block';
+                    serviceSection.style.display = 'block';
+                    initializeServiceButtons();
+                    window.currentPlaylistData = data;
+                }
             }
         }
         

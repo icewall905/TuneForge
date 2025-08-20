@@ -538,18 +538,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 startBtn.style.display = 'inline-block';
                 stopBtn.style.display = 'none';
                 startBtn.disabled = false;
-                currentJobId = null;
                 
-                // Clean up the job
-                try {
-                    await fetch('/api/sonic/cleanup', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({job_id: job.id})
-                    });
-                } catch (e) {
-                    console.error('Cleanup failed:', e);
-                }
+                // Store the completed job data for service integration
+                window.currentSonicJob = job;
+                
+                // Don't clean up the job immediately - keep it for service integration
+                // The job will be cleaned up automatically by the backend after 1 hour
+                console.log('Job completed, keeping data for service integration');
             }
         } catch (e) {
             console.error('Progress poll error:', e);
@@ -678,7 +673,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     async function saveToService(serviceName) {
-        if (!currentJobId) {
+        if (!currentJobId && !window.currentSonicJob) {
             alert('No playlist generated yet. Please generate a playlist first.');
             return;
         }
@@ -700,12 +695,15 @@ document.addEventListener('DOMContentLoaded', function() {
             statusMessage.textContent = `Saving playlist to ${serviceName}...`;
             statusMessage.className = 'status-message loading';
             
+            // Use current job ID or completed job ID
+            const jobId = currentJobId || window.currentSonicJob.id;
+            
             // Make API call
             const response = await fetch(`/api/sonic/save-to-${serviceName}`, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    job_id: currentJobId,
+                    job_id: jobId,
                     playlist_name: playlistName
                 })
             });

@@ -579,6 +579,28 @@ def search_tracks_in_navidrome(navidrome_url, username, password, ollama_suggest
         st = t.replace('"', '\\"')
         sa = a.replace('"', '\\"')
         return f'"{st}" "{sa}"'
+    
+    def build_search_strategies(title, artist):
+        """Build multiple search strategies for better matching"""
+        strategies = []
+        
+        # Strategy 1: Artist + Title (often works best)
+        if title and artist:
+            strategies.append(('artist_title', f'"{artist}" "{title}"'))
+        
+        # Strategy 2: Title only (can find tracks when artist info is complex)
+        if title:
+            strategies.append(('title_only', f'"{title}"'))
+        
+        # Strategy 3: Artist only (fallback for artist-based search)
+        if artist:
+            strategies.append(('artist_only', f'"{artist}"'))
+        
+        # Strategy 4: Title + Artist (original strategy)
+        if title and artist:
+            strategies.append(('title_artist', f'"{title}" "{artist}"'))
+        
+        return strategies
 
     def evaluate_results(title, artist, results):
         best = None
@@ -600,9 +622,28 @@ def search_tracks_in_navidrome(navidrome_url, username, password, ollama_suggest
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_item = {}
         for track_key, suggested_track, title, artist in pending:
-            q = build_query(title, artist)
-            future = executor.submit(search_track_in_navidrome, q, navidrome_url, username, password)
-            future_to_item[future] = (track_key, suggested_track, title, artist)
+            # Try multiple search strategies for better matching
+            search_strategies = build_search_strategies(title, artist)
+            navidrome_tracks = []
+            used_strategy = None
+            
+            # Try each strategy until we find a match
+            for strategy_type, query in search_strategies:
+                try:
+                    navidrome_tracks = search_track_in_navidrome(query, navidrome_url, username, password)
+                    if navidrome_tracks:
+                        used_strategy = f"{strategy_type}: {query}"
+                        debug_log(f"Navidrome: Found match using strategy: {used_strategy}", 'DEBUG')
+                        break
+                except Exception as e:
+                    debug_log(f"Search strategy '{strategy_type}: {query}' failed: {e}", 'WARN')
+                    continue
+            
+            if navidrome_tracks:
+                future = executor.submit(lambda: navidrome_tracks, None)  # Return the found tracks directly
+                future_to_item[future] = (track_key, suggested_track, title, artist, used_strategy)
+            else:
+                debug_log(f"Navidrome: No matches found for '{title}' by '{artist}' with any strategy", 'DEBUG')
 
         # Process as results arrive
         # Optional: determine target to allow early stop
@@ -614,11 +655,17 @@ def search_tracks_in_navidrome(navidrome_url, username, password, ollama_suggest
                     break
 
         for future in as_completed(future_to_item):
-            track_key, suggested_track, title, artist = future_to_item[future]
-            try:
+            future_data = future_to_item[future]
+            if len(future_data) == 5:  # New format with strategy
+                track_key, suggested_track, title, artist, used_strategy = future_data
                 found_navidrome_tracks = future.result() or []
-            except Exception:
-                found_navidrome_tracks = []
+            else:  # Fallback for old format
+                track_key, suggested_track, title, artist = future_data
+                used_strategy = "legacy"
+                try:
+                    found_navidrome_tracks = future.result() or []
+                except Exception:
+                    found_navidrome_tracks = []
 
             if found_navidrome_tracks:
                 best_match = evaluate_results(title, artist, found_navidrome_tracks)
@@ -629,7 +676,8 @@ def search_tracks_in_navidrome(navidrome_url, username, password, ollama_suggest
                 match_details = {
                     'id': best_match['id'], 'title': best_match['title'], 'artist': best_match['artist'],
                     'album': best_match['album'], 'source': 'navidrome',
-                    'original_suggestion': {'title': title, 'artist': artist, 'album': suggested_track.get('album')}
+                    'original_suggestion': {'title': title, 'artist': artist, 'album': suggested_track.get('album')},
+                    'search_strategy': used_strategy
                 }
                 final_unique_matched_tracks_map[track_key] = match_details
                 newly_matched_for_batch.append(match_details)
@@ -851,16 +899,39 @@ def search_tracks_in_plex(plex_url, plex_token, ollama_suggested_tracks, final_u
         track_key = (title.lower(), artist.lower())
         if track_key in final_unique_matched_tracks_map: continue
 
-        found_plex_track = search_track_in_plex(plex_url, plex_token, title, artist, album, library_section_id)
+        # Try multiple search strategies for better matching
+        search_strategies = [
+            (title, artist, album),  # Full info (most accurate)
+            (title, artist, None),  # No album
+            (title, None, None),  # Title only
+            (None, artist, None),  # Artist only
+        ]
+        
+        found_plex_track = None
+        used_strategy = None
+        
+        for search_title, search_artist, search_album in search_strategies:
+            if not search_title and not search_artist: continue
+            try:
+                found_plex_track = search_track_in_plex(plex_url, plex_token, search_title or '', search_artist or '', search_album, library_section_id)
+                if found_plex_track:
+                    used_strategy = f"Title: {search_title or 'N/A'}, Artist: {search_artist or 'N/A'}"
+                    debug_log(f"Plex: Found match using strategy: {used_strategy}", 'DEBUG')
+                    break
+            except Exception as e:
+                debug_log(f"Plex search strategy failed: {e}", 'WARN')
+                continue
+        
         if found_plex_track:
             match_details = {
                 'id': found_plex_track['id'], 'title': found_plex_track['title'], 'artist': found_plex_track['artist'],
                 'album': found_plex_track['album'], 'source': 'plex',
-                'original_suggestion': {'title': title, 'artist': artist, 'album': album}
+                'original_suggestion': {'title': title, 'artist': artist, 'album': album},
+                'search_strategy': used_strategy
             }
             final_unique_matched_tracks_map[track_key] = match_details
             newly_matched_for_batch.append(match_details)
-            debug_log(f"Plex: Matched '{found_plex_track['title']}' by '{found_plex_track['artist']}' for suggestion '{title}' by '{artist}'.", "INFO")
+            debug_log(f"Plex: Matched '{found_plex_track['title']}' by '{found_plex_track['artist']}' for suggestion '{title}' by '{artist}' using strategy: {used_strategy}.", "INFO")
         # else:
             # debug_log(f"Plex: No match for '{title}' by '{artist}' (Album: '{album}') in section {library_section_id}.", "DEBUG")
             
@@ -3557,9 +3628,50 @@ def api_save_sonic_to_navidrome():
         }
         
         for track in job.results:
-            # Search for track in Navidrome
-            search_query = f"{track['title']} {track['artist']}"
-            navidrome_tracks = search_track_in_navidrome(search_query, navidrome_url, navidrome_username, navidrome_password)
+            # Try multiple search strategies for better matching
+            search_strategies = []
+            
+            # Strategy 1: Direct filename search (most accurate for same NFS share)
+            try:
+                # Get the file path from the database
+                with sqlite3.connect('db/local_music.db') as conn:
+                    cur = conn.cursor()
+                    cur.execute('SELECT file_path FROM tracks WHERE id = ?', (track['id'],))
+                    result = cur.fetchone()
+                    if result and result[0]:
+                        file_path = result[0]
+                        # Extract just the filename (without path)
+                        filename = os.path.basename(file_path)
+                        # Remove file extension
+                        filename_without_ext = os.path.splitext(filename)[0]
+                        if filename_without_ext:
+                            search_strategies.append(('filename', filename_without_ext))
+                            debug_log(f"Added filename search strategy: {filename_without_ext}", 'DEBUG')
+            except Exception as e:
+                debug_log(f"Failed to get file path for track {track['id']}: {e}", 'WARN')
+            
+            # Add other search strategies
+            search_strategies.extend([
+                ('artist_title', f"{track['artist']} {track['title']}"),  # Artist first (often better)
+                ('title_only', track['title']),  # Title only
+                ('artist_only', track['artist']),  # Artist only
+                ('title_artist', f"{track['title']} {track['artist']}"),  # Title first (original strategy)
+            ])
+            
+            navidrome_tracks = []
+            used_strategy = None
+            
+            for strategy_type, strategy_query in search_strategies:
+                if not strategy_query or not strategy_query.strip(): continue
+                try:
+                    navidrome_tracks = search_track_in_navidrome(strategy_query, navidrome_url, navidrome_username, navidrome_password)
+                    if navidrome_tracks:
+                        used_strategy = f"{strategy_type}: {strategy_query}"
+                        debug_log(f"Found match using strategy: {used_strategy}", 'DEBUG')
+                        break
+                except Exception as e:
+                    debug_log(f"Search strategy '{strategy_type}: {strategy_query}' failed: {e}", 'WARN')
+                    continue
             
             if navidrome_tracks:
                 # Use the first (best) match
@@ -3567,7 +3679,8 @@ def api_save_sonic_to_navidrome():
                 navidrome_track_ids.append(best_match['id'])
                 mapping_results['found'].append({
                     'local': {'title': track['title'], 'artist': track['artist']},
-                    'navidrome': {'id': best_match['id'], 'title': best_match['title'], 'artist': best_match['artist']}
+                    'navidrome': {'id': best_match['id'], 'title': best_match['title'], 'artist': best_match['artist']},
+                    'search_strategy': used_strategy
                 })
             else:
                 mapping_results['not_found'].append({
@@ -3671,18 +3784,61 @@ def api_save_sonic_to_plex():
         }
         
         for track in job.results:
-            # Search for track in Plex
-            plex_track = search_track_in_plex(
-                plex_server_url, plex_token, 
-                track['title'], track['artist'], track.get('album'), 
-                plex_music_section_id
-            )
+            # Try multiple search strategies for better matching
+            search_strategies = []
+            
+            # Strategy 1: Direct filename search (most accurate for same NFS share)
+            try:
+                # Get the file path from the database
+                with sqlite3.connect('db/local_music.db') as conn:
+                    cur = conn.cursor()
+                    cur.execute('SELECT file_path FROM tracks WHERE id = ?', (track['id'],))
+                    result = cur.fetchone()
+                    if result and result[0]:
+                        file_path = result[0]
+                        # Extract just the filename (without path)
+                        filename = os.path.basename(file_path)
+                        # Remove file extension
+                        filename_without_ext = os.path.splitext(filename)[0]
+                        if filename_without_ext:
+                            search_strategies.append(('filename', filename_without_ext, None))
+                            debug_log(f"Added filename search strategy: {filename_without_ext}", 'DEBUG')
+            except Exception as e:
+                debug_log(f"Failed to get file path for track {track['id']}: {e}", 'WARN')
+            
+            # Add other search strategies
+            search_strategies.extend([
+                ('full_info', track['title'], track['artist'], track.get('album')),  # Full info
+                ('no_album', track['title'], track['artist'], None),  # No album
+                ('title_only', track['title'], None, None),  # Title only
+                ('artist_only', None, track['artist'], None),  # Artist only
+            ])
+            
+            plex_track = None
+            used_strategy = None
+            
+            for strategy_type, title, artist, album in search_strategies:
+                if not title and not artist: continue
+                try:
+                    plex_track = search_track_in_plex(
+                        plex_server_url, plex_token,
+                        title or '', artist or '', album,
+                        plex_music_section_id
+                    )
+                    if plex_track:
+                        used_strategy = f"{strategy_type}: Title: {title or 'N/A'}, Artist: {artist or 'N/A'}"
+                        debug_log(f"Found match using strategy: {used_strategy}", 'DEBUG')
+                        break
+                except Exception as e:
+                    debug_log(f"Plex search strategy failed: {e}", 'WARN')
+                    continue
             
             if plex_track:
                 plex_track_ids.append(plex_track['id'])
                 mapping_results['found'].append({
                     'local': {'title': track['title'], 'artist': track['artist']},
-                    'plex': {'id': plex_track['id'], 'title': plex_track['title'], 'artist': plex_track['artist']}
+                    'plex': {'id': plex_track['id'], 'title': plex_track['title'], 'artist': plex_track['artist']},
+                    'search_strategy': used_strategy
                 })
             else:
                 mapping_results['not_found'].append({
