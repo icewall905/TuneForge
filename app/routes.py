@@ -4565,9 +4565,8 @@ def api_save_history_to_plex():
 def api_get_problematic_files():
     """Get detailed report of problematic files causing stalls."""
     try:
-        monitor = get_audio_analysis_monitor()
-        if not monitor:
-            return jsonify({'error': 'Audio analysis monitoring not available'}), 500
+        from audio_analysis_monitor import AudioAnalysisMonitor
+        monitor = AudioAnalysisMonitor()
         
         report = monitor.get_problematic_files_report()
         return jsonify(report)

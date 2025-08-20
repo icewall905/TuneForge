@@ -434,13 +434,6 @@ class AudioAnalysisManager {
     }
 
     init() {
-        console.log('[AudioAnalysis] Initializing AudioAnalysisManager');
-        console.log('[AudioAnalysis] Global status manager available:', !!window.globalStatusManager);
-        console.log('[AudioAnalysis] Global status manager details:', window.globalStatusManager);
-        if (window.globalStatusManager) {
-            console.log('[AudioAnalysis] Global status manager methods:', Object.getOwnPropertyNames(window.globalStatusManager));
-        }
-        
         this.bindEvents();
         this.loadInitialStatus();
         this.startStatusPolling();
@@ -457,18 +450,11 @@ class AudioAnalysisManager {
         
         // Load problematic files on page load
         this.refreshProblematicFiles();
-        
-        console.log('[AudioAnalysis] AudioAnalysisManager initialization complete');
     }
 
     bindEvents() {
         // Control buttons
-        const startButton = document.getElementById('start-analysis');
-        console.log('[AudioAnalysis] Start button found:', startButton);
-        startButton.addEventListener('click', () => {
-            console.log('[AudioAnalysis] Start button clicked');
-            this.startAnalysis();
-        });
+        document.getElementById('start-analysis').addEventListener('click', () => this.startAnalysis());
         document.getElementById('stop-analysis').addEventListener('click', () => this.stopAnalysis());
         document.getElementById('refresh-status').addEventListener('click', () => this.refreshStatus());
         document.getElementById('cleanup-data').addEventListener('click', () => this.cleanupData());
@@ -489,39 +475,21 @@ class AudioAnalysisManager {
     }
 
     async startAnalysis() {
-        console.log('[AudioAnalysis] startAnalysis called');
         try {
             const batchSize = parseInt(document.getElementById('batch-size').value);
             const limit = document.getElementById('process-limit').value || null;
-            console.log('[AudioAnalysis] Batch size:', batchSize, 'Limit:', limit);
 
             // Add to global status manager immediately (same pattern as playlist generator)
             if (window.globalStatusManager) {
-                console.log('[AudioAnalysis] Global status manager available');
-                console.log('[AudioAnalysis] Global status manager state:', {
-                    hasInit: typeof window.globalStatusManager.init === 'function',
-                    hasAddAudioAnalysis: typeof window.globalStatusManager.addAudioAnalysis === 'function',
-                    activeAudioAnalysis: window.globalStatusManager.activeAudioAnalysis
-                });
-                
                 // Check if we should allow adding audio analysis
-                const shouldAllow = this.shouldAllowAudioAnalysis();
-                console.log('[AudioAnalysis] Should allow audio analysis:', shouldAllow);
-                if (!shouldAllow) {
-                    console.log('[AudioAnalysis] Preventing audio analysis from being added (recently stopped)');
+                if (!this.shouldAllowAudioAnalysis()) {
                     return;
                 }
                 
                 // Clear cache when starting new analysis
                 this.cachedProgress = null;
                 
-                console.log('[AudioAnalysis] Calling globalStatusManager.addAudioAnalysis()');
-                try {
-                    window.globalStatusManager.addAudioAnalysis();
-                    console.log('[AudioAnalysis] addAudioAnalysis() called successfully');
-                } catch (error) {
-                    console.error('[AudioAnalysis] Error calling addAudioAnalysis():', error);
-                }
+                window.globalStatusManager.addAudioAnalysis();
                 
                 // Initialize with cached progress if available
                 if (this.cachedProgress && this.cachedProgress.progress_percentage > 0) {
@@ -538,17 +506,13 @@ class AudioAnalysisManager {
                 console.warn('Global status manager not available to add audio analysis immediately');
             }
 
-            console.log('[AudioAnalysis] Proceeding to API call...');
-            console.log('[AudioAnalysis] Making API call to /api/audio-analysis/start');
             const response = await fetch('/api/audio-analysis/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ max_workers: 1, batch_size: batchSize, limit: limit })
             });
-            console.log('[AudioAnalysis] API response received:', response.status);
 
             const result = await response.json();
-            console.log('[AudioAnalysis] API result:', result);
 
             if (result.success) {
                 this.showMessage(result.message, 'success');
@@ -867,9 +831,7 @@ class AudioAnalysisManager {
     shouldAllowAudioAnalysis() {
         // Prevent re-adding audio analysis if it was recently stopped (within 10 seconds)
         const timeSinceLastCheck = Date.now() - this.lastStatusCheck;
-        const shouldAllow = timeSinceLastCheck > 10000;
-        console.log('[AudioAnalysis] shouldAllowAudioAnalysis - lastStatusCheck:', this.lastStatusCheck, 'timeSinceLastCheck:', timeSinceLastCheck, 'shouldAllow:', shouldAllow, 'Date.now():', Date.now());
-        return shouldAllow; // 10 seconds
+        return timeSinceLastCheck > 10000; // 10 seconds
     }
     
     startHealthPolling() {
@@ -1883,7 +1845,6 @@ class AudioAnalysisManager {
 document.addEventListener('DOMContentLoaded', () => {
     // Wait a bit for globalStatusManager to be ready
     setTimeout(() => {
-        console.log('[AudioAnalysis] Creating AudioAnalysisManager after delay');
         window.audioAnalysisManager = new AudioAnalysisManager();
     }, 100);
 });
