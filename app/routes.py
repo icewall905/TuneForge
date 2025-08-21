@@ -4636,3 +4636,78 @@ def api_force_reset_file():
     except Exception as e:
         logger.error(f"Error force resetting file: {e}")
         return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/audio-analysis/emergency-reset', methods=['POST'])
+def api_emergency_reset():
+    """Emergency reset - clear all stuck analysis states"""
+    try:
+        data = request.get_json() or {}
+        reason = data.get('reason', 'Emergency reset by user')
+        
+        # Stop any running processor
+        if hasattr(api_start_audio_analysis, 'processor') and api_start_audio_analysis.processor:
+            try:
+                api_start_audio_analysis.processor.stop_processing()
+                api_start_audio_analysis.processor = None
+                debug_log("Stopped running audio analysis for emergency reset", "INFO")
+            except Exception as e:
+                debug_log(f"Error stopping current analysis: {e}", "WARNING")
+        
+        # Move stuck files to ignored status instead of resetting them
+        with sqlite3.connect(get_db_path()) as conn:
+            # Get files that have been analyzing for more than 1 hour
+            cursor = conn.execute("""
+                SELECT file_path, analysis_attempts 
+                FROM tracks 
+                WHERE analysis_status = 'analyzing' 
+                AND analysis_started_at < datetime('now', '-1 hour')
+            """)
+            
+            stuck_files = cursor.fetchall()
+            ignored_count = 0
+            
+            for file_path, attempts in stuck_files:
+                # If file has been attempted multiple times, mark as permanently ignored
+                if attempts >= 3:
+                    conn.execute("""
+                        UPDATE tracks 
+                        SET analysis_status = 'ignored', 
+                            analysis_started_at = NULL,
+                            analysis_completed_at = NULL,
+                            analysis_error = 'Permanently ignored due to repeated analysis failures',
+                            analysis_attempts = attempts
+                        WHERE file_path = ?
+                    """, (file_path,))
+                    ignored_count += 1
+                else:
+                    # Reset files with fewer attempts back to pending for retry
+                    conn.execute("""
+                        UPDATE tracks 
+                        SET analysis_status = 'pending', 
+                            analysis_started_at = NULL,
+                            analysis_completed_at = NULL,
+                            analysis_error = NULL,
+                            analysis_attempts = 0
+                        WHERE file_path = ?
+                    """, (file_path,))
+            
+            # Log the emergency reset
+            conn.execute("""
+                INSERT INTO analysis_log (timestamp, action, file_path, details)
+                VALUES (datetime('now'), 'emergency_reset', 'ALL', ?)
+            """, (f'Processed {len(stuck_files)} stuck files: {ignored_count} ignored, {len(stuck_files) - ignored_count} reset: {reason}',))
+            
+            conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Emergency reset completed. {ignored_count} corrupted files permanently ignored, {len(stuck_files) - ignored_count} files reset to pending.',
+            'ignored_count': ignored_count,
+            'reset_count': len(stuck_files) - ignored_count,
+            'total_processed': len(stuck_files),
+            'trigger_ui_update': True
+        })
+        
+    except Exception as e:
+        debug_log(f"Error during emergency reset: {e}", "ERROR")
+        return jsonify({'success': False, 'error': str(e)})

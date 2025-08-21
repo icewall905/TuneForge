@@ -150,6 +150,14 @@
                             <span class="btn-icon">🔄</span>
                             Force Restart
                         </button>
+                        <button id="force-skip-stuck" class="btn btn-danger btn-sm">
+                            <span class="btn-icon">⏭️</span>
+                            Skip Stuck File
+                        </button>
+                        <button id="nuclear-reset" class="btn btn-danger btn-sm" style="background: #dc3545; border-color: #dc3545;">
+                            <span class="btn-icon">💥</span>
+                            Nuclear Reset
+                        </button>
                     </div>
                 </div>
                 <div class="health-recommendations">
@@ -464,6 +472,8 @@ class AudioAnalysisManager {
         // Health monitoring buttons
         document.getElementById('refresh-health').addEventListener('click', () => this.refreshHealthStatus());
         document.getElementById('force-restart').addEventListener('click', () => this.forceRestart());
+        document.getElementById('force-skip-stuck').addEventListener('click', () => this.forceSkipStuckFile());
+        document.getElementById('nuclear-reset').addEventListener('click', () => this.nuclearReset());
         
         // Auto-recovery buttons
         document.getElementById('start-recovery-monitoring').addEventListener('click', () => this.startRecoveryMonitoring());
@@ -1478,8 +1488,24 @@ class AudioAnalysisManager {
     
     async forceRestart() {
         try {
+            // First try to stop any running analysis
+            try {
+                await fetch('/api/audio-analysis/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            } catch (stopError) {
+                console.log('Stop request failed (may not be running):', stopError);
+            }
+            
+            // Wait a moment for cleanup
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // Now restart with proper headers
             const response = await fetch('/api/audio-analysis/restart', {
-                method: 'POST'
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ max_workers: 1, batch_size: 100 })
             });
             const result = await response.json();
             
@@ -1492,6 +1518,100 @@ class AudioAnalysisManager {
             }
         } catch (error) {
             this.showMessage(`Error restarting analysis: ${error.message}`, 'error');
+        }
+    }
+    
+    async forceSkipStuckFile() {
+        try {
+            // Get the most problematic file and skip it
+            const response = await fetch('/api/audio-analysis/problematic-files');
+            const data = await response.json();
+            
+            if (data.error) {
+                this.showMessage('Could not fetch problematic files', 'error');
+                return;
+            }
+            
+            if (!data.problematic_files || data.problematic_files.length === 0) {
+                this.showMessage('No problematic files found to skip', 'info');
+                return;
+            }
+            
+            // Get the file with the most failures
+            const mostProblematic = data.problematic_files.reduce((prev, current) => 
+                (prev.failure_count > current.failure_count) ? prev : current
+            );
+            
+            if (confirm(`Skip the problematic file "${mostProblematic.filename}"?\n\nThis will mark it as permanently skipped to prevent future stalls.`)) {
+                const skipResponse = await fetch('/api/audio-analysis/force-skip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        file_path: mostProblematic.file_path,
+                        reason: 'Force skipped due to analysis stall'
+                    })
+                });
+                
+                const skipResult = await skipResponse.json();
+                
+                if (skipResult.success) {
+                    this.showMessage(`Skipped problematic file: ${mostProblematic.filename}`, 'success');
+                    this.refreshProblematicFiles();
+                    this.refreshHealthStatus();
+                } else {
+                    this.showMessage(`Failed to skip file: ${skipResult.error}`, 'error');
+                }
+            }
+        } catch (error) {
+            this.showMessage(`Error skipping stuck file: ${error.message}`, 'error');
+        }
+    }
+    
+    async nuclearReset() {
+        try {
+            if (!confirm('⚠️ NUCLEAR RESET WARNING ⚠️\n\nThis will:\n• Stop all analysis processes\n• Permanently ignore corrupted files (>3 attempts)\n• Reset less problematic files to pending\n• Require manual restart\n\nAre you absolutely sure you want to do this?')) {
+                return;
+            }
+            
+            // Use the emergency reset endpoint
+            const response = await fetch('/api/audio-analysis/emergency-reset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    reason: 'Nuclear reset initiated by user'
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                // Clear global status
+                if (window.globalStatusManager && window.globalStatusManager.activeAudioAnalysis) {
+                    window.globalStatusManager.removeAudioAnalysis();
+                }
+                
+                // Reset UI state
+                this.isRunning = false;
+                this.updateControlButtons();
+                this.stopProgressPolling();
+                this.stopStatusPolling();
+                
+                // Clear cached progress
+                this.cachedProgress = null;
+                this.lastKnownProgress = null;
+                
+                this.showMessage(`Nuclear reset completed: ${result.message}`, 'success');
+                
+                // Refresh displays
+                this.refreshStatus();
+                this.refreshHealthStatus();
+                this.refreshProblematicFiles();
+            } else {
+                this.showMessage(`Nuclear reset failed: ${result.error}`, 'error');
+            }
+            
+        } catch (error) {
+            this.showMessage(`Error during nuclear reset: ${error.message}`, 'error');
         }
     }
     
@@ -1757,10 +1877,59 @@ class AudioAnalysisManager {
             `;
         }
 
+        // Ignored files section
+        if (data.ignored_files && data.ignored_files.length > 0) {
+            html += `
+                <div class="mb-4">
+                    <h6 class="text-muted">
+                        <i class="fas fa-ban"></i>
+                        Permanently Ignored Files (${data.ignored_files.length})
+                    </h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Filename</th>
+                                    <th>Ignored At</th>
+                                    <th>Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+            `;
+            
+            data.ignored_files.forEach(file => {
+                const filename = file.filename || 'Unknown';
+                const shortPath = file.file_path ? file.file_path.substring(0, 50) + '...' : 'Unknown';
+                
+                html += `
+                    <tr>
+                        <td>
+                            <div class="fw-bold">${filename}</div>
+                            <small class="text-muted">${shortPath}</small>
+                        </td>
+                        <td>
+                            <small>${file.ignored_at || 'Unknown'}</small>
+                        </td>
+                        <td>
+                            <small class="text-muted">${file.reason ? file.reason.substring(0, 80) + '...' : 'No reason specified'}</small>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            html += `
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
         // No issues message
         if ((!data.problematic_files || data.problematic_files.length === 0) &&
             (!data.stuck_files || data.stuck_files.length === 0) &&
-            (!data.error_patterns || data.error_patterns.length === 0)) {
+            (!data.error_patterns || data.error_patterns.length === 0) &&
+            (!data.ignored_files || data.ignored_files.length === 0)) {
             html += `
                 <div class="text-center text-success py-4">
                     <i class="fas fa-check-circle fa-3x mb-3"></i>

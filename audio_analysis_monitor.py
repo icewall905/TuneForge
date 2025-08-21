@@ -668,6 +668,7 @@ class AudioAnalysisMonitor:
                     'summary': {},
                     'problematic_files': [],
                     'stuck_files': [],
+                    'ignored_files': [],
                     'error_patterns': [],
                     'recommendations': []
                 }
@@ -685,7 +686,8 @@ class AudioAnalysisMonitor:
                     'pending_tracks': status_counts.get('pending', 0),
                     'analyzing_tracks': status_counts.get('analyzing', 0),
                     'completed_tracks': status_counts.get('completed', 0),
-                    'error_tracks': status_counts.get('error', 0)
+                    'error_tracks': status_counts.get('error', 0),
+                    'ignored_tracks': status_counts.get('ignored', 0)
                 }
                 
                 # Get files with multiple failures
@@ -735,6 +737,26 @@ class AudioAnalysisMonitor:
                         'recommendation': 'force_reset' if minutes > 300 else 'monitor'
                     })
                 
+                # Get ignored files (permanently skipped)
+                cursor = conn.execute("""
+                    SELECT file_path, analysis_error, created_at
+                    FROM tracks 
+                    WHERE analysis_status = 'ignored'
+                    ORDER BY created_at DESC
+                    LIMIT 10
+                """)
+                
+                for row in cursor.fetchall():
+                    file_path, error_msg, created_at = row
+                    filename = os.path.basename(file_path) if file_path else "Unknown"
+                    report['ignored_files'].append({
+                        'filename': filename,
+                        'file_path': file_path,
+                        'ignored_at': created_at,
+                        'reason': error_msg or 'Permanently ignored due to analysis failures',
+                        'recommendation': 'permanently_ignored'
+                    })
+                
                 # Get error patterns
                 cursor = conn.execute("""
                     SELECT analysis_error, COUNT(*) as count,
@@ -766,6 +788,9 @@ class AudioAnalysisMonitor:
                     long_stuck_files = [f for f in report['stuck_files'] if f['minutes_stuck'] > 300]
                     if long_stuck_files:
                         report['recommendations'].append(f"Force reset {len(long_stuck_files)} files stuck for 5+ hours")
+                
+                if report['ignored_files']:
+                    report['recommendations'].append(f"{len(report['ignored_files'])} files are permanently ignored due to corruption")
                 
                 if report['error_patterns']:
                     high_freq_errors = [e for e in report['error_patterns'] if e['frequency'] == 'high']
