@@ -4067,7 +4067,7 @@ def api_save_sonic_to_navidrome():
             # Strategy 1: Direct filename search (most accurate for same NFS share)
             try:
                 # Get the file path from the database
-                with sqlite3.connect('db/local_music.db') as conn:
+                with sqlite3.connect(os.path.join(DB_DIR, 'local_music.db')) as conn:
                     cur = conn.cursor()
                     cur.execute('SELECT file_path FROM tracks WHERE id = ?', (track['id'],))
                     result = cur.fetchone()
@@ -4079,7 +4079,7 @@ def api_save_sonic_to_navidrome():
                         filename_without_ext = os.path.splitext(filename)[0]
                         if filename_without_ext:
                             search_strategies.append(('filename', filename_without_ext))
-                            debug_log(f"Added filename search strategy: {filename_without_ext}", 'DEBUG')
+                            debug_log(f"Auto-startup: Added filename search strategy: {filename_without_ext}", 'DEBUG')
             except Exception as e:
                 debug_log(f"Failed to get file path for track {track['id']}: {e}", 'WARN')
             
@@ -4223,7 +4223,7 @@ def api_save_sonic_to_plex():
             # Strategy 1: Direct filename search (most accurate for same NFS share)
             try:
                 # Get the file path from the database
-                with sqlite3.connect('db/local_music.db') as conn:
+                with sqlite3.connect(os.path.join(DB_DIR, 'local_music.db')) as conn:
                     cur = conn.cursor()
                     cur.execute('SELECT file_path FROM tracks WHERE id = ?', (track['id'],))
                     result = cur.fetchone()
@@ -4235,7 +4235,7 @@ def api_save_sonic_to_plex():
                         filename_without_ext = os.path.splitext(filename)[0]
                         if filename_without_ext:
                             search_strategies.append(('filename', filename_without_ext, None))
-                            debug_log(f"Added filename search strategy: {filename_without_ext}", 'DEBUG')
+                            debug_log(f"Auto-startup: Added filename search strategy: {filename_without_ext}", 'DEBUG')
             except Exception as e:
                 debug_log(f"Failed to get file path for track {track['id']}: {e}", 'WARN')
             
@@ -4835,16 +4835,44 @@ def wait_for_scan_completion(timeout_minutes: int = 10) -> bool:
 def check_database_ready() -> bool:
     """Check if the database is ready for new operations (not locked)"""
     try:
-        from app.routes import init_local_music_db
+        # Use the same database path as the main app
+        db_path = os.path.join(DB_DIR, 'local_music.db')
         
         # Try to perform a simple read operation
-        with sqlite3.connect('db/local_music.db') as conn:
+        with sqlite3.connect(db_path) as conn:
             cursor = conn.execute("SELECT COUNT(*) FROM tracks LIMIT 1")
             cursor.fetchone()
             return True
     except Exception as e:
         debug_log(f"Auto-startup: Database not ready: {e}", "WARNING")
         return False
+
+def get_database_track_counts() -> dict:
+    """Get current track counts from the database for debugging"""
+    try:
+        db_path = os.path.join(DB_DIR, 'local_music.db')
+        
+        with sqlite3.connect(db_path) as conn:
+            # Get total tracks
+            cursor = conn.execute("SELECT COUNT(*) FROM tracks")
+            total_tracks = cursor.fetchone()[0]
+            
+            # Get tracks by status
+            cursor = conn.execute("""
+                SELECT analysis_status, COUNT(*) 
+                FROM tracks 
+                GROUP BY analysis_status
+            """)
+            status_counts = dict(cursor.fetchall())
+            
+            return {
+                'total_tracks': total_tracks,
+                'status_counts': status_counts,
+                'database_path': db_path
+            }
+    except Exception as e:
+        debug_log(f"Auto-startup: Error getting track counts: {e}", "ERROR")
+        return {'error': str(e)}
 
 
 def start_audio_analysis():

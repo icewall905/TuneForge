@@ -74,6 +74,14 @@ def create_app():
                                             
                                             print("[Startup] Database ready, starting audio analysis...")
                                             
+                                            # Log database track counts for debugging
+                                            from .routes import get_database_track_counts
+                                            track_counts = get_database_track_counts()
+                                            if 'error' not in track_counts:
+                                                print(f"[Startup] Database track counts: {track_counts['total_tracks']} total, {track_counts['status_counts']}")
+                                            else:
+                                                print(f"[Startup] Error getting track counts: {track_counts['error']}")
+                                            
                                             from .routes import start_audio_analysis
                                             try:
                                                 result = start_audio_analysis()

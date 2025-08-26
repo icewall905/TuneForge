@@ -38,7 +38,13 @@ class AudioAnalysisService:
         """
         if db_path is None:
             # Use the same database as the main application
-            db_path = os.path.join(os.path.dirname(__file__), 'db', 'local_music.db')
+            try:
+                # Try to get the database path from the main app configuration
+                from app.routes import DB_DIR
+                db_path = os.path.join(DB_DIR, 'local_music.db')
+            except ImportError:
+                # Fallback to relative path if main app not available
+                db_path = os.path.join(os.path.dirname(__file__), 'db', 'local_music.db')
 
         # Ensure base DB and tracks table exist before altering columns
         try:
