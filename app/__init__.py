@@ -43,21 +43,27 @@ def create_app():
                             print("[Startup] Starting automatic library scan...")
                             # Import and start scan here
                             from .routes import start_library_scan
-                            result = start_library_scan()
-                            if result:
-                                print("[Startup] Library scan started successfully")
-                            else:
-                                print("[Startup] Library scan failed to start")
+                            try:
+                                result = start_library_scan()
+                                if result:
+                                    print("[Startup] Library scan started successfully")
+                                else:
+                                    print("[Startup] Library scan failed to start")
+                            except Exception as scan_error:
+                                print(f"[Startup] Library scan error: {scan_error}")
                         
                         if enable_auto_analysis:
                             print("[Startup] Starting automatic audio analysis...")
                             # Import and start analysis here
                             from .routes import start_audio_analysis
-                            result = start_audio_analysis()
-                            if result:
-                                print("[Startup] Audio analysis started successfully")
-                            else:
-                                print("[Startup] Audio analysis failed to start")
+                            try:
+                                result = start_audio_analysis()
+                                if result:
+                                    print("[Startup] Audio analysis started successfully")
+                                else:
+                                    print("[Startup] Audio analysis failed to start")
+                            except Exception as analysis_error:
+                                print(f"[Startup] Audio analysis error: {analysis_error}")
                             
                     except Exception as e:
                         print(f"[Startup] Error during auto-startup: {e}")
