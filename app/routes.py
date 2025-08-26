@@ -4797,13 +4797,14 @@ def start_audio_analysis():
         # Check if required libraries are available
         try:
             import librosa
+            debug_log("Auto-startup: librosa library available", "INFO")
         except ImportError:
-            debug_log("Auto-startup: Audio analysis libraries not available, skipping analysis", "WARNING")
+            debug_log("Auto-startup: librosa library not available, skipping analysis", "WARNING")
             return False
         
-        # Import and initialize the advanced batch processor
+        # Import and initialize the audio analysis service
         try:
-            from advanced_batch_analysis_service import AudioAnalysisService
+            from audio_analysis_service import AudioAnalysisService
         except ImportError as e:
             debug_log(f"Auto-startup: Failed to import audio analysis modules: {e}", "ERROR")
             return False
@@ -4830,8 +4831,21 @@ def start_audio_analysis():
         try:
             pending_tracks = service.get_pending_tracks(limit=1000)
             if not pending_tracks:
-                debug_log("Auto-startup: No tracks available for analysis", "INFO")
-                return False
+                # Check if there are tracks that might need re-analysis
+                with sqlite3.connect(service.db_path) as conn:
+                    cursor = conn.execute("""
+                        SELECT COUNT(*) FROM tracks 
+                        WHERE analysis_status IN ('analyzed', 'analyzing')
+                    """)
+                    total_tracks = cursor.fetchone()[0]
+                    
+                    if total_tracks > 0:
+                        debug_log(f"Auto-startup: Found {total_tracks} tracks, but none pending analysis. Tracks may already be analyzed.", "INFO")
+                        # Return True since the system is working correctly
+                        return True
+                    else:
+                        debug_log("Auto-startup: No tracks found in database", "INFO")
+                        return False
             
             debug_log(f"Auto-startup: Found {len(pending_tracks)} tracks pending analysis", "INFO")
         except Exception as e:
