@@ -1918,8 +1918,6 @@ def scan_music_folder_with_progress(folder_path, scan_id):
     
     supported_extensions = {'.mp3', '.flac', '.m4a', '.ogg', '.wav', '.aac'}
     db_path = init_local_music_db()
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
     
     stats = {'total_files': 0, 'indexed': 0, 'errors': 0, 'skipped': 0}
     
@@ -1957,10 +1955,14 @@ def scan_music_folder_with_progress(folder_path, scan_id):
         
         debug_log(f"Starting scanning phase: {music_files} music files to process", "INFO")
         
-        # Second pass: process files with progress updates
+        # Second pass: process files with batch processing and progress updates
         processed_count = 0
         progress_tracker['current_file'] = 'Starting to process music files...'
         debug_log(f"Entering scanning loop for {music_files} music files", "INFO")
+        
+        # Batch processing to reduce database locks
+        batch_size = 50
+        batch_data = []
         
         for root, dirs, files in os.walk(folder_path):
             debug_log(f"Processing directory: {root} with {len(files)} files", "INFO")
@@ -1976,47 +1978,11 @@ def scan_music_folder_with_progress(folder_path, scan_id):
                 progress_tracker['files_processed'] = processed_count
                 progress_tracker['current_file'] = f'Processing {processed_count}/{music_files}: {os.path.basename(file_path)}'
                 
-                # Update progress every 100 files for good balance
-                if processed_count % 100 == 0:
-                    debug_log(f"Processed {processed_count}/{music_files} files", "INFO")
-                    progress_tracker['files_processed'] = processed_count
-                
                 try:
                     # Extract metadata using mutagen
                     metadata = extract_track_metadata(file_path)
                     if metadata:
-                        # Check if track already exists
-                        cursor.execute('SELECT id FROM tracks WHERE file_path = ?', (file_path,))
-                        existing = cursor.fetchone()
-                        
-                        if existing:
-                            # Update existing track
-                            cursor.execute('''
-                                UPDATE tracks SET 
-                                    title = ?, artist = ?, album = ?, genre = ?, 
-                                    year = ?, track_number = ?, duration = ?, 
-                                    file_size = ?, last_modified = ?
-                                WHERE file_path = ?
-                            ''', (
-                                metadata.get('title'), metadata.get('artist'), metadata.get('album'),
-                                metadata.get('genre'), metadata.get('year'), metadata.get('track_number'),
-                                metadata.get('duration'), metadata.get('file_size'), metadata.get('last_modified'),
-                                file_path
-                            ))
-                        else:
-                            # Insert new track
-                            cursor.execute('''
-                                INSERT INTO tracks (file_path, title, artist, album, genre, 
-                                                  year, track_number, duration, file_size, last_modified)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (
-                                file_path, metadata.get('title'), metadata.get('artist'), metadata.get('album'),
-                                metadata.get('genre'), metadata.get('year'), metadata.get('track_number'),
-                                metadata.get('duration'), metadata.get('file_size'), metadata.get('last_modified')
-                            ))
-                        
-                        stats['indexed'] += 1
-                        progress_tracker['indexed'] = stats['indexed']
+                        batch_data.append((file_path, metadata))
                     else:
                         stats['errors'] += 1
                         progress_tracker['errors'] = stats['errors']
@@ -2026,23 +1992,87 @@ def scan_music_folder_with_progress(folder_path, scan_id):
                     stats['errors'] += 1
                     progress_tracker['errors'] = stats['errors']
                 
+                # Process batch when it reaches batch_size or at the end
+                if len(batch_data) >= batch_size or processed_count == music_files:
+                    try:
+                        _process_batch(batch_data, db_path)
+                        stats['indexed'] += len(batch_data)
+                        progress_tracker['indexed'] = stats['indexed']
+                        batch_data = []  # Clear batch
+                    except Exception as e:
+                        debug_log(f"Error processing batch: {str(e)}", "ERROR")
+                        stats['errors'] += len(batch_data)
+                        progress_tracker['errors'] = stats['errors']
+                        batch_data = []  # Clear batch even on error
+                
                 # Update progress every 100 files for good balance
                 if processed_count % 100 == 0:
                     progress_tracker['files_processed'] = processed_count
+                    debug_log(f"Processed {processed_count}/{music_files} files", "INFO")
         
         # Final progress update
         progress_tracker['files_processed'] = processed_count
         progress_tracker['current_file'] = f'Completed! Processed {processed_count} music files'
         debug_log(f"Scanning completed: {processed_count} files processed, {stats['indexed']} indexed, {stats['errors']} errors", "INFO")
         
-        conn.commit()
-        conn.close()
-        
         return {'success': True, 'stats': stats}
         
     except Exception as e:
-        conn.close()
+        debug_log(f"Error in scan_music_folder_with_progress: {str(e)}", "ERROR")
         return {'success': False, 'error': str(e)}
+
+def _process_batch(batch_data, db_path):
+    """Process a batch of files to reduce database locks"""
+    try:
+        with sqlite3.connect(db_path, timeout=30.0) as conn:
+            # Enable WAL mode for better concurrency
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=10000")
+            
+            cursor = conn.cursor()
+            
+            for file_path, metadata in batch_data:
+                try:
+                    # Check if track already exists
+                    cursor.execute('SELECT id FROM tracks WHERE file_path = ?', (file_path,))
+                    existing = cursor.fetchone()
+                    
+                    if existing:
+                        # Update existing track
+                        cursor.execute('''
+                            UPDATE tracks SET 
+                                title = ?, artist = ?, album = ?, genre = ?, 
+                                year = ?, track_number = ?, duration = ?, 
+                                file_size = ?, last_modified = ?
+                            WHERE file_path = ?
+                        ''', (
+                            metadata.get('title'), metadata.get('artist'), metadata.get('album'),
+                            metadata.get('genre'), metadata.get('year'), metadata.get('track_number'),
+                            metadata.get('duration'), metadata.get('file_size'), metadata.get('last_modified'),
+                            file_path
+                        ))
+                    else:
+                        # Insert new track
+                        cursor.execute('''
+                            INSERT INTO tracks (file_path, title, artist, album, genre, 
+                                              year, track_number, duration, file_size, last_modified)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            file_path, metadata.get('title'), metadata.get('artist'), metadata.get('album'),
+                            metadata.get('genre'), metadata.get('year'), metadata.get('track_number'),
+                            metadata.get('duration'), metadata.get('file_size'), metadata.get('last_modified')
+                        ))
+                        
+                except Exception as e:
+                    debug_log(f"Error processing file {file_path} in batch: {str(e)}", "ERROR")
+                    raise
+            
+            conn.commit()
+            
+    except Exception as e:
+        debug_log(f"Error in batch processing: {str(e)}", "ERROR")
+        raise
 
 def extract_track_metadata(file_path):
     """Extract metadata from a music file"""
@@ -2839,6 +2869,26 @@ def api_audio_analysis_cleanup():
 def api_audio_analysis_health():
     """Get comprehensive health status of audio analysis system"""
     try:
+        # Check if database is busy with intensive operations
+        if is_database_busy():
+            return jsonify({
+                'success': True,
+                'timestamp': datetime.now().isoformat(),
+                'health': {
+                    'current_status': 'scanning',
+                    'stalled': False,
+                    'processing_rate': 0.0,
+                    'anomalies': [],
+                    'recommendations': ['Database is busy with library scan. Health check temporarily unavailable.']
+                },
+                'stall_analysis': {
+                    'stall_probability': 'low',
+                    'stall_indicators': []
+                },
+                'auto_recovery_available': True,
+                'recommendations': ['Database is busy with library scan. Health check temporarily unavailable.']
+            })
+        
         from audio_analysis_monitor import AudioAnalysisMonitor
         
         # Initialize monitor
@@ -4740,6 +4790,21 @@ def start_library_scan():
         
         debug_log(f"Auto-startup: Starting library scan for {local_music_folder}", "INFO")
         
+        # Optimize database for scan operations
+        try:
+            db_path = os.path.join(DB_DIR, 'local_music.db')
+            with sqlite3.connect(db_path, timeout=60.0) as conn:
+                # Enable WAL mode for better concurrency during scans
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute("PRAGMA cache_size=50000")
+                conn.execute("PRAGMA temp_store=MEMORY")
+                conn.execute("PRAGMA mmap_size=268435456")  # 256MB
+                conn.execute("PRAGMA page_size=4096")
+                debug_log("Auto-startup: Database optimized for scan operations", "INFO")
+        except Exception as e:
+            debug_log(f"Auto-startup: Warning - could not optimize database: {e}", "WARNING")
+        
         # Start the scan in background
         import threading
         import time
@@ -4838,11 +4903,30 @@ def check_database_ready() -> bool:
         # Use the same database path as the main app
         db_path = os.path.join(DB_DIR, 'local_music.db')
         
-        # Try to perform a simple read operation
-        with sqlite3.connect(db_path) as conn:
-            cursor = conn.execute("SELECT COUNT(*) FROM tracks LIMIT 1")
-            cursor.fetchone()
-            return True
+        # Try to perform a simple read operation with timeout and retry
+        max_retries = 3
+        retry_delay = 1
+        
+        for attempt in range(max_retries):
+            try:
+                with sqlite3.connect(db_path, timeout=20.0) as conn:
+                    # Enable WAL mode for better concurrency
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute("PRAGMA synchronous=NORMAL")
+                    conn.execute("PRAGMA cache_size=10000")
+                    conn.execute("PRAGMA temp_store=MEMORY")
+                    
+                    cursor = conn.execute("SELECT COUNT(*) FROM tracks LIMIT 1")
+                    cursor.fetchone()
+                    return True
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < max_retries - 1:
+                    debug_log(f"Auto-startup: Database locked, retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})", "WARNING")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                    continue
+                else:
+                    raise
     except Exception as e:
         debug_log(f"Auto-startup: Database not ready: {e}", "WARNING")
         return False
@@ -4852,7 +4936,11 @@ def get_database_track_counts() -> dict:
     try:
         db_path = os.path.join(DB_DIR, 'local_music.db')
         
-        with sqlite3.connect(db_path) as conn:
+        with sqlite3.connect(db_path, timeout=30.0) as conn:
+            # Enable WAL mode for better concurrency
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            
             # Get total tracks
             cursor = conn.execute("SELECT COUNT(*) FROM tracks")
             total_tracks = cursor.fetchone()[0]
@@ -4873,6 +4961,18 @@ def get_database_track_counts() -> dict:
     except Exception as e:
         debug_log(f"Auto-startup: Error getting track counts: {e}", "ERROR")
         return {'error': str(e)}
+
+def is_database_busy() -> bool:
+    """Check if the database is currently busy with intensive operations"""
+    try:
+        # Check if any scan is currently running
+        if hasattr(api_scan_music_folder, 'scan_progress'):
+            active_scans = [scan_id for scan_id, progress in api_scan_music_folder.scan_progress.items() 
+                          if progress.get('status') in ['starting', 'running']]
+            return len(active_scans) > 0
+        return False
+    except Exception:
+        return False
 
 
 def start_audio_analysis():
