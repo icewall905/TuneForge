@@ -4786,7 +4786,7 @@ def start_library_scan():
 
 
 def start_audio_analysis():
-    """Start audio analysis automatically at startup"""
+    """Start audio analysis automatically at startup with enhanced recovery"""
     try:
         # Get configuration values
         max_workers = int(get_config_value('AUDIO_ANALYSIS', 'MaxWorkers', '1'))
@@ -4803,7 +4803,7 @@ def start_audio_analysis():
         
         # Import and initialize the advanced batch processor
         try:
-            from advanced_batch_processor import AdvancedBatchProcessor
+            from advanced_batch_analysis_service import AudioAnalysisService
         except ImportError as e:
             debug_log(f"Auto-startup: Failed to import audio analysis modules: {e}", "ERROR")
             return False
@@ -4818,44 +4818,104 @@ def start_audio_analysis():
             except Exception:
                 pass
         
-        # Initialize processor
-        processor = AdvancedBatchProcessor(
-            max_workers=max_workers,
-            batch_size=batch_size
-        )
-        
-        # Initialize queue
-        jobs_added = processor.initialize_queue(limit=None)  # Process all pending tracks
-        
-        if jobs_added == 0:
-            debug_log("Auto-startup: No tracks available for analysis", "INFO")
+        # Initialize the audio analysis service
+        try:
+            service = AudioAnalysisService()
+            debug_log("Auto-startup: Audio analysis service initialized", "INFO")
+        except Exception as e:
+            debug_log(f"Auto-startup: Failed to initialize audio analysis service: {e}", "ERROR")
             return False
         
-        # Store processor instance
-        api_start_audio_analysis.processor = processor
+        # Check if there are tracks to analyze
+        try:
+            pending_tracks = service.get_pending_tracks(limit=1000)
+            if not pending_tracks:
+                debug_log("Auto-startup: No tracks available for analysis", "INFO")
+                return False
+            
+            debug_log(f"Auto-startup: Found {len(pending_tracks)} tracks pending analysis", "INFO")
+        except Exception as e:
+            debug_log(f"Auto-startup: Error checking pending tracks: {e}", "WARNING")
+            # Continue anyway, the service will handle it
         
-        # Start processing in background thread
-        def start_processing():
-            try:
-                processor.start_processing()
-                debug_log("Auto-startup: Audio analysis processing started successfully", "INFO")
-            except Exception as e:
-                debug_log(f"Auto-startup: Error in audio analysis processing: {e}", "ERROR")
-        
-        import threading
-        thread = threading.Thread(target=start_processing, daemon=True)
-        thread.start()
-        
-        # Start auto-recovery monitoring if available
+        # Start auto-recovery monitoring with enhanced restart callback
         auto_recovery = get_auto_recovery()
         if auto_recovery:
             try:
+                # Set up enhanced restart callback that handles stuck files
+                def enhanced_restart_callback():
+                    try:
+                        debug_log("Auto-startup: Enhanced restart callback triggered", "INFO")
+                        
+                        # First, try to identify and skip stuck files
+                        stuck_files = service.get_stuck_files()
+                        if stuck_files:
+                            debug_log(f"Auto-startup: Found {len(stuck_files)} stuck files, attempting to skip", "INFO")
+                            
+                            for file_info in stuck_files[:5]:  # Limit to 5 files at a time
+                                try:
+                                    # Mark as skipped with reason
+                                    service.mark_track_as_skipped(
+                                        file_info['file_path'], 
+                                        f"Auto-skipped due to being stuck for {file_info.get('stuck_duration', 'unknown')} seconds"
+                                    )
+                                    debug_log(f"Auto-startup: Skipped stuck file: {file_info['file_path']}", "INFO")
+                                except Exception as skip_error:
+                                    debug_log(f"Auto-startup: Failed to skip file {file_info['file_path']}: {skip_error}", "WARNING")
+                        
+                        # Now restart the analysis
+                        try:
+                            # Stop current processing if running
+                            if hasattr(api_start_audio_analysis, 'processor') and api_start_audio_analysis.processor:
+                                api_start_audio_analysis.processor.stop_processing()
+                                debug_log("Auto-startup: Stopped current processing", "INFO")
+                            
+                            # Wait a moment
+                            import time
+                            time.sleep(2)
+                            
+                            # Start fresh processing
+                            processor = service.start_analysis(max_workers=max_workers, batch_size=batch_size)
+                            if processor:
+                                api_start_audio_analysis.processor = processor
+                                debug_log("Auto-startup: Restarted audio analysis successfully", "INFO")
+                                return True
+                            else:
+                                debug_log("Auto-startup: Failed to restart audio analysis", "WARNING")
+                                return False
+                                
+                        except Exception as restart_error:
+                            debug_log(f"Auto-startup: Error during restart: {restart_error}", "ERROR")
+                            return False
+                            
+                    except Exception as callback_error:
+                        debug_log(f"Auto-startup: Enhanced restart callback error: {callback_error}", "ERROR")
+                        return False
+                
+                # Set the enhanced callback
+                auto_recovery.restart_callback = enhanced_restart_callback
+                
+                # Start monitoring
                 auto_recovery.start_monitoring()
-                debug_log("Auto-startup: Auto-recovery monitoring started", "INFO")
+                debug_log("Auto-startup: Enhanced auto-recovery monitoring started", "INFO")
+                
             except Exception as e:
-                debug_log(f"Auto-startup: Failed to start auto-recovery monitoring: {e}", "WARNING")
+                debug_log(f"Auto-startup: Failed to start enhanced auto-recovery monitoring: {e}", "WARNING")
         
-        debug_log(f"Auto-startup: Audio analysis started with {jobs_added} jobs queued", "INFO")
+        # Start the initial analysis
+        try:
+            processor = service.start_analysis(max_workers=max_workers, batch_size=batch_size)
+            if processor:
+                api_start_audio_analysis.processor = processor
+                debug_log("Auto-startup: Initial audio analysis started successfully", "INFO")
+            else:
+                debug_log("Auto-startup: Failed to start initial audio analysis", "WARNING")
+                return False
+        except Exception as e:
+            debug_log(f"Auto-startup: Error starting initial analysis: {e}", "ERROR")
+            return False
+        
+        debug_log(f"Auto-startup: Audio analysis started with enhanced recovery", "INFO")
         return True
         
     except Exception as e:

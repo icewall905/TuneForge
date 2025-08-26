@@ -490,6 +490,193 @@ class AudioAnalysisService:
             logger.error(f"Error cleaning up old analysis data: {e}")
             return 0
 
+    def get_pending_tracks(self, limit: int = None) -> List[Dict[str, Any]]:
+        """
+        Get tracks that are pending analysis.
+        
+        Args:
+            limit: Maximum number of tracks to return (None for all)
+            
+        Returns:
+            List of pending track information
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                query = """
+                    SELECT 
+                        id, file_path, title, artist, album, 
+                        analysis_status, analysis_attempts
+                    FROM tracks 
+                    WHERE analysis_status = 'pending'
+                    ORDER BY analysis_attempts ASC, id ASC
+                """
+                
+                if limit:
+                    query += f" LIMIT {limit}"
+                
+                cursor = conn.execute(query)
+                
+                pending_tracks = []
+                for row in cursor.fetchall():
+                    pending_tracks.append({
+                        'id': row[0],
+                        'file_path': row[1],
+                        'title': row[2],
+                        'artist': row[3],
+                        'album': row[4],
+                        'analysis_status': row[5],
+                        'analysis_attempts': row[6] or 0
+                    })
+                
+                return pending_tracks
+                
+        except Exception as e:
+            logger.error(f"Error getting pending tracks: {e}")
+            return []
+
+    def get_stuck_files(self, stuck_threshold_seconds: int = 300) -> List[Dict[str, Any]]:
+        """
+        Get files that appear to be stuck in analysis.
+        
+        Args:
+            stuck_threshold_seconds: Consider files stuck after this many seconds
+            
+        Returns:
+            List of stuck file information
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Get files that have been in 'processing' status for too long
+                cursor = conn.execute("""
+                    SELECT 
+                        t.id,
+                        t.file_path,
+                        t.analysis_status,
+                        t.analysis_started_at,
+                        t.analysis_attempts,
+                        t.analysis_error,
+                        CASE 
+                            WHEN t.analysis_started_at IS NOT NULL 
+                            THEN (julianday('now') - julianday(t.analysis_started_at)) * 86400
+                            ELSE 0 
+                        END as stuck_duration
+                    FROM tracks t
+                    WHERE t.analysis_status = 'processing'
+                    AND t.analysis_started_at IS NOT NULL
+                    AND (julianday('now') - julianday(t.analysis_started_at)) * 86400 > ?
+                    ORDER BY stuck_duration DESC
+                """, (stuck_threshold_seconds,))
+                
+                stuck_files = []
+                for row in cursor.fetchall():
+                    stuck_files.append({
+                        'id': row[0],
+                        'file_path': row[1],
+                        'analysis_status': row[2],
+                        'analysis_started_at': row[3],
+                        'analysis_attempts': row[4],
+                        'analysis_error': row[5],
+                        'stuck_duration': int(row[6])
+                    })
+                
+                if stuck_files:
+                    logger.warning(f"Found {len(stuck_files)} stuck files (stuck for >{stuck_threshold_seconds}s)")
+                
+                return stuck_files
+                
+        except Exception as e:
+            logger.error(f"Error getting stuck files: {e}")
+            return []
+
+    def mark_track_as_skipped(self, file_path: str, reason: str = "Auto-skipped") -> bool:
+        """
+        Mark a track as skipped with a reason.
+        
+        Args:
+            file_path: Path to the file to mark as skipped
+            reason: Reason for skipping
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Update the track status
+                cursor = conn.execute("""
+                    UPDATE tracks 
+                    SET 
+                        analysis_status = 'skipped',
+                        analysis_error = ?,
+                        analysis_attempts = COALESCE(analysis_attempts, 0) + 1,
+                        analysis_completed_at = datetime('now')
+                    WHERE file_path = ?
+                """, (reason, file_path))
+                
+                if cursor.rowcount > 0:
+                    # Log the skip action
+                    conn.execute("""
+                        INSERT INTO analysis_log (timestamp, action, file_path, details)
+                        VALUES (datetime('now'), 'auto_skip', ?, ?)
+                    """, (file_path, reason))
+                    
+                    conn.commit()
+                    logger.info(f"Marked track as skipped: {file_path} - {reason}")
+                    return True
+                else:
+                    logger.warning(f"Track not found for skipping: {file_path}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error marking track as skipped: {e}")
+            return False
+
+    def start_analysis(self, max_workers: int = 1, batch_size: int = 100):
+        """
+        Start audio analysis processing.
+        
+        Args:
+            max_workers: Number of worker threads
+            batch_size: Size of each batch
+            
+        Returns:
+            Processor instance or None if failed
+        """
+        try:
+            # Import here to avoid circular imports
+            from advanced_batch_processor import AdvancedBatchProcessor
+            
+            # Initialize processor
+            processor = AdvancedBatchProcessor(
+                max_workers=max_workers,
+                batch_size=batch_size
+            )
+            
+            # Initialize queue
+            jobs_added = processor.initialize_queue(limit=None)  # Process all pending tracks
+            
+            if jobs_added == 0:
+                logger.info("No tracks available for analysis")
+                return None
+            
+            # Start processing in background thread
+            def start_processing():
+                try:
+                    processor.start_processing()
+                    logger.info("Audio analysis processing started successfully")
+                except Exception as e:
+                    logger.error(f"Error in audio analysis processing: {e}")
+            
+            import threading
+            thread = threading.Thread(target=start_processing, daemon=True)
+            thread.start()
+            
+            logger.info(f"Audio analysis started with {jobs_added} jobs queued")
+            return processor
+            
+        except Exception as e:
+            logger.error(f"Error starting audio analysis: {e}")
+            return None
+
 
 def main():
     """Test function for the AudioAnalysisService"""
