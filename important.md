@@ -71,11 +71,13 @@ The Sonic Traveller AI-powered playlist generation system is now **production-re
 ## 🚀 **Auto-Startup System**
 - **Library Scan**: Automatically scan music folder on app start
 - **Audio Analysis**: Automatically start analysis processing on app start (with intelligent status checking)
+- **Sequential Processing**: Library scan completes before audio analysis starts (prevents database locking)
 - **Configurable Delay**: Set startup delay (10-300 seconds) to ensure app is ready
 - **Background Processing**: All auto-startup processes run in background threads
 - **Full Monitoring**: Auto-recovery and health monitoring for background processes
 - **Enhanced Recovery**: Stuck file detection and automatic recovery mechanisms
 - **Smart Detection**: Recognizes when tracks are already analyzed vs. truly pending
+- **Database Safety**: Waits for database to be ready before starting analysis
 
 ## 🔮 **Future Enhancements** (Optional)
 - Advanced candidate filtering (genre awareness, artist diversity)

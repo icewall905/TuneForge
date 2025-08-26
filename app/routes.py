@@ -4785,6 +4785,68 @@ def start_library_scan():
         return False
 
 
+def wait_for_scan_completion(timeout_minutes: int = 10) -> bool:
+    """Wait for the library scan to complete before proceeding with audio analysis"""
+    try:
+        import time
+        start_time = time.time()
+        timeout_seconds = timeout_minutes * 60
+        
+        debug_log(f"Auto-startup: Waiting for scan completion (timeout: {timeout_minutes} minutes)", "INFO")
+        
+        while time.time() - start_time < timeout_seconds:
+            # Check if any scan is still running
+            if hasattr(api_scan_music_folder, 'scan_progress'):
+                active_scans = [scan_id for scan_id, progress in api_scan_music_folder.scan_progress.items() 
+                              if progress.get('status') in ['starting', 'running']]
+                
+                if not active_scans:
+                    debug_log("Auto-startup: No active scans found, scan may have completed", "INFO")
+                    # Add a longer delay to ensure database operations are complete and locks are released
+                    debug_log("Auto-startup: Waiting additional 10 seconds for database to stabilize...", "INFO")
+                    time.sleep(10)
+                    return True
+                
+                # Check if any scan has been running for too long (stuck)
+                current_time = time.time()
+                for scan_id in active_scans:
+                    progress = api_scan_music_folder.scan_progress[scan_id]
+                    if 'start_time' in progress:
+                        scan_duration = current_time - progress['start_time']
+                        if scan_duration > 300:  # 5 minutes
+                            debug_log(f"Auto-startup: Scan {scan_id} appears stuck (running for {scan_duration:.0f}s)", "WARNING")
+                            # Mark as completed to prevent infinite waiting
+                            progress['status'] = 'completed'
+                            progress['result'] = {'success': False, 'error': 'Scan appeared stuck'}
+                
+                debug_log(f"Auto-startup: Waiting for {len(active_scans)} active scans to complete...", "INFO")
+                time.sleep(5)  # Check every 5 seconds
+            else:
+                debug_log("Auto-startup: No scan progress tracking available", "WARNING")
+                time.sleep(5)
+        
+        debug_log(f"Auto-startup: Scan completion timeout reached ({timeout_minutes} minutes)", "WARNING")
+        return False
+        
+    except Exception as e:
+        debug_log(f"Auto-startup: Error waiting for scan completion: {e}", "ERROR")
+        return False
+
+def check_database_ready() -> bool:
+    """Check if the database is ready for new operations (not locked)"""
+    try:
+        from app.routes import init_local_music_db
+        
+        # Try to perform a simple read operation
+        with sqlite3.connect('db/local_music.db') as conn:
+            cursor = conn.execute("SELECT COUNT(*) FROM tracks LIMIT 1")
+            cursor.fetchone()
+            return True
+    except Exception as e:
+        debug_log(f"Auto-startup: Database not ready: {e}", "WARNING")
+        return False
+
+
 def start_audio_analysis():
     """Start audio analysis automatically at startup with enhanced recovery"""
     try:

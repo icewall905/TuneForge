@@ -47,14 +47,53 @@ def create_app():
                                 result = start_library_scan()
                                 if result:
                                     print("[Startup] Library scan started successfully")
+                                    
+                                    # Wait for library scan to complete before starting audio analysis
+                                    if enable_auto_analysis:
+                                        print("[Startup] Waiting for library scan to complete...")
+                                        from .routes import wait_for_scan_completion
+                                        
+                                        # Wait up to 10 minutes for scan to complete
+                                        scan_completed = wait_for_scan_completion(timeout_minutes=10)
+                                        if scan_completed:
+                                            print("[Startup] Library scan completed, starting audio analysis...")
+                                            
+                                            # Check if database is ready before proceeding
+                                            from .routes import check_database_ready
+                                            db_ready_attempts = 0
+                                            max_db_attempts = 6  # Try for up to 30 seconds
+                                            
+                                            while not check_database_ready() and db_ready_attempts < max_db_attempts:
+                                                print(f"[Startup] Database not ready, waiting 5 seconds... (attempt {db_ready_attempts + 1}/{max_db_attempts})")
+                                                time.sleep(5)
+                                                db_ready_attempts += 1
+                                            
+                                            if not check_database_ready():
+                                                print("[Startup] Database still not ready after 30 seconds, skipping audio analysis")
+                                                return
+                                            
+                                            print("[Startup] Database ready, starting audio analysis...")
+                                            
+                                            from .routes import start_audio_analysis
+                                            try:
+                                                result = start_audio_analysis()
+                                                if result:
+                                                    print("[Startup] Audio analysis started successfully")
+                                                else:
+                                                    print("[Startup] Audio analysis failed to start")
+                                            except Exception as analysis_error:
+                                                print(f"[Startup] Audio analysis error: {analysis_error}")
+                                        else:
+                                            print("[Startup] Library scan did not complete within timeout, skipping audio analysis")
+                                    else:
+                                        print("[Startup] Audio analysis disabled, skipping")
                                 else:
                                     print("[Startup] Library scan failed to start")
                             except Exception as scan_error:
                                 print(f"[Startup] Library scan error: {scan_error}")
-                        
-                        if enable_auto_analysis:
-                            print("[Startup] Starting automatic audio analysis...")
-                            # Import and start analysis here
+                        elif enable_auto_analysis:
+                            # If only audio analysis is enabled (no scan), start it directly
+                            print("[Startup] Starting automatic audio analysis (no scan)...")
                             from .routes import start_audio_analysis
                             try:
                                 result = start_audio_analysis()
