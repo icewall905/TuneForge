@@ -1287,6 +1287,13 @@ def settings():
         current_config.set('APP', 'LocalMusicFolder', request.form.get('local_music_folder', get_config_value('APP', 'LocalMusicFolder', '')))
 
 
+        # AUTO_STARTUP section
+        if not current_config.has_section('AUTO_STARTUP'): current_config.add_section('AUTO_STARTUP')
+        current_config.set('AUTO_STARTUP', 'EnableAutoScan', 'yes' if request.form.get('enable_auto_scan') else 'no')
+        current_config.set('AUTO_STARTUP', 'EnableAutoAnalysis', 'yes' if request.form.get('enable_auto_analysis') else 'no')
+        current_config.set('AUTO_STARTUP', 'StartupDelaySeconds', request.form.get('startup_delay_seconds', get_config_value('AUTO_STARTUP', 'StartupDelaySeconds', '30')))
+
+
         # NAVIDROME section
         if not current_config.has_section('NAVIDROME'): current_config.add_section('NAVIDROME')
         current_config.set('NAVIDROME', 'URL', request.form.get('navidrome_url', get_config_value('NAVIDROME', 'URL', '')))
@@ -1335,7 +1342,11 @@ def settings():
         'plex_token': get_config_value('PLEX', 'Token', ''),
         'plex_machine_id': get_config_value('PLEX', 'MachineID', ''),
         'plex_playlist_type': get_config_value('PLEX', 'PlaylistType', 'audio'), 
-        'plex_music_section_id': get_config_value('PLEX', 'MusicSectionID', '')
+        'plex_music_section_id': get_config_value('PLEX', 'MusicSectionID', ''),
+
+        'enable_auto_scan': get_config_value('AUTO_STARTUP', 'EnableAutoScan', 'no'),
+        'enable_auto_analysis': get_config_value('AUTO_STARTUP', 'EnableAutoAnalysis', 'no'),
+        'startup_delay_seconds': get_config_value('AUTO_STARTUP', 'StartupDelaySeconds', '30')
     }
     
     # Add local music statistics
@@ -4711,3 +4722,142 @@ def api_emergency_reset():
     except Exception as e:
         debug_log(f"Error during emergency reset: {e}", "ERROR")
         return jsonify({'success': False, 'error': str(e)})
+
+# Auto-startup functions for automatic startup configuration
+def start_library_scan():
+    """Start a library scan automatically at startup"""
+    try:
+        # Get the configured local music folder
+        local_music_folder = get_config_value('APP', 'LocalMusicFolder', '')
+        if not local_music_folder:
+            debug_log("Auto-startup: No local music folder configured, skipping scan", "INFO")
+            return False
+        
+        # Check if folder exists
+        if not os.path.exists(local_music_folder):
+            debug_log(f"Auto-startup: Local music folder does not exist: {local_music_folder}", "WARNING")
+            return False
+        
+        debug_log(f"Auto-startup: Starting library scan for {local_music_folder}", "INFO")
+        
+        # Start the scan in background
+        import threading
+        import time
+        
+        # Create a unique scan ID for this operation
+        scan_id = f"auto_scan_{int(time.time())}"
+        
+        # Initialize scan progress in the same place the scan function expects it
+        if not hasattr(api_scan_music_folder, 'scan_progress'):
+            api_scan_music_folder.scan_progress = {}
+        
+        api_scan_music_folder.scan_progress[scan_id] = {
+            'status': 'starting',
+            'current_file': '',
+            'files_processed': 0,
+            'total_files': 0,
+            'indexed': 0,
+            'errors': 0,
+            'skipped': 0,
+            'start_time': time.time()
+        }
+        
+        def scan_with_progress():
+            try:
+                result = scan_music_folder_with_progress(local_music_folder, scan_id)
+                api_scan_music_folder.scan_progress[scan_id]['status'] = 'completed'
+                api_scan_music_folder.scan_progress[scan_id]['result'] = result
+                debug_log(f"Auto-startup: Library scan completed successfully", "INFO")
+            except Exception as e:
+                api_scan_music_folder.scan_progress[scan_id]['status'] = 'error'
+                api_scan_music_folder.scan_progress[scan_id]['error'] = str(e)
+                debug_log(f"Auto-startup: Library scan failed: {e}", "ERROR")
+        
+        # Start scanning in background thread
+        thread = threading.Thread(target=scan_with_progress)
+        thread.daemon = True
+        thread.start()
+        
+        return True
+        
+    except Exception as e:
+        debug_log(f"Auto-startup: Error starting library scan: {e}", "ERROR")
+        return False
+
+
+def start_audio_analysis():
+    """Start audio analysis automatically at startup"""
+    try:
+        # Get configuration values
+        max_workers = int(get_config_value('AUDIO_ANALYSIS', 'MaxWorkers', '1'))
+        batch_size = int(get_config_value('AUDIO_ANALYSIS', 'BatchSize', '100'))
+        
+        debug_log(f"Auto-startup: Starting audio analysis with {max_workers} workers, batch size {batch_size}", "INFO")
+        
+        # Check if required libraries are available
+        try:
+            import librosa
+        except ImportError:
+            debug_log("Auto-startup: Audio analysis libraries not available, skipping analysis", "WARNING")
+            return False
+        
+        # Import and initialize the advanced batch processor
+        try:
+            from advanced_batch_processor import AdvancedBatchProcessor
+        except ImportError as e:
+            debug_log(f"Auto-startup: Failed to import audio analysis modules: {e}", "ERROR")
+            return False
+        
+        # Check if processing is already running
+        if hasattr(api_start_audio_analysis, 'processor') and api_start_audio_analysis.processor:
+            try:
+                current_status = api_start_audio_analysis.processor.get_status()
+                if current_status and current_status.get('status') in ['running', 'stopping']:
+                    debug_log("Auto-startup: Audio analysis already running, skipping", "INFO")
+                    return False
+            except Exception:
+                pass
+        
+        # Initialize processor
+        processor = AdvancedBatchProcessor(
+            max_workers=max_workers,
+            batch_size=batch_size
+        )
+        
+        # Initialize queue
+        jobs_added = processor.initialize_queue(limit=None)  # Process all pending tracks
+        
+        if jobs_added == 0:
+            debug_log("Auto-startup: No tracks available for analysis", "INFO")
+            return False
+        
+        # Store processor instance
+        api_start_audio_analysis.processor = processor
+        
+        # Start processing in background thread
+        def start_processing():
+            try:
+                processor.start_processing()
+                debug_log("Auto-startup: Audio analysis processing started successfully", "INFO")
+            except Exception as e:
+                debug_log(f"Auto-startup: Error in audio analysis processing: {e}", "ERROR")
+        
+        import threading
+        thread = threading.Thread(target=start_processing, daemon=True)
+        thread.start()
+        
+        # Start auto-recovery monitoring if available
+        auto_recovery = get_auto_recovery()
+        if auto_recovery:
+            try:
+                auto_recovery.start_monitoring()
+                debug_log("Auto-startup: Auto-recovery monitoring started", "INFO")
+            except Exception as e:
+                debug_log(f"Auto-startup: Failed to start auto-recovery monitoring: {e}", "WARNING")
+        
+        debug_log(f"Auto-startup: Audio analysis started with {jobs_added} jobs queued", "INFO")
+        return True
+        
+    except Exception as e:
+        debug_log(f"Auto-startup: Error starting audio analysis: {e}", "ERROR")
+        return False

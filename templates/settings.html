@@ -176,6 +176,36 @@
                 </div>
             </div>
             
+            <div class="settings-section">
+                <h2>Auto-Startup Configuration</h2>
+                <p class="section-description">Configure automatic processes when TuneForge starts</p>
+                
+                <div class="settings-group">
+                    <h3>Automatic Library Scan</h3>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="enable_auto_scan" name="enable_auto_scan" {% if enable_auto_scan in ['yes','true','1'] %}checked{% endif %}>
+                            Automatically scan music library on startup
+                        </label>
+                        <p class="help-text">When enabled, TuneForge will automatically scan your configured music folder when the application starts.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="enable_auto_analysis" name="enable_auto_analysis" {% if enable_auto_analysis in ['yes','true','1'] %}checked{% endif %}>
+                            Automatically start audio analysis on startup
+                        </label>
+                        <p class="help-text">When enabled, TuneForge will automatically start analyzing audio files when the application starts.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="startup_delay_seconds">Startup Delay (seconds):</label>
+                        <input type="number" id="startup_delay_seconds" name="startup_delay_seconds" value="{{ startup_delay_seconds }}" min="10" max="300" class="settings-input">
+                        <p class="help-text">Delay before starting automatic processes to ensure the application is fully loaded (10-300 seconds).</p>
+                    </div>
+                </div>
+            </div>
+            
             <div class="form-group">
                 <button type="submit" class="primary-button">Save Settings</button>
             </div>

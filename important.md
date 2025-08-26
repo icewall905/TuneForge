@@ -48,6 +48,7 @@ The Sonic Traveller AI-powered playlist generation system is now **production-re
 - **Ollama**: Configure URL and model in config.ini
 - **Audio Analysis**: Enable/disable in config.ini
 - **Debug Mode**: Set in config.ini for detailed logging
+- **Auto-Startup**: Configure automatic library scan and analysis on app start
 
 ## 🐛 **Recent Bug Fixes**
 - ✅ **Fixed SQLite column name issues** in feature fetching functions
@@ -66,6 +67,13 @@ The Sonic Traveller AI-powered playlist generation system is now **production-re
 - **Feedback loop**: Successfully improves suggestions across iterations
 - **Local history**: Generated playlists saved with rich metadata
 - **User experience**: Intuitive interface with clear progress indication
+
+## 🚀 **Auto-Startup System**
+- **Library Scan**: Automatically scan music folder on app start
+- **Audio Analysis**: Automatically start analysis processing on app start
+- **Configurable Delay**: Set startup delay (10-300 seconds) to ensure app is ready
+- **Background Processing**: All auto-startup processes run in background threads
+- **Full Monitoring**: Auto-recovery and health monitoring for background processes
 
 ## 🔮 **Future Enhancements** (Optional)
 - Advanced candidate filtering (genre awareness, artist diversity)
