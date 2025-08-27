@@ -1818,7 +1818,13 @@ def init_local_music_db():
             duration REAL,
             file_size INTEGER,
             last_modified REAL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            analysis_status TEXT DEFAULT 'pending',
+            analysis_date TIMESTAMP,
+            analysis_error TEXT,
+            analysis_attempts INTEGER DEFAULT 0,
+            analysis_started_at TIMESTAMP,
+            analysis_completed_at TIMESTAMP
         )
     ''')
     
@@ -1826,6 +1832,31 @@ def init_local_music_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_artist ON tracks(artist)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_album ON tracks(album)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_genre ON tracks(genre)')
+    
+    # Create audio analysis related tables
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS audio_features (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER NOT NULL,
+            mfcc_features TEXT,
+            spectral_features TEXT,
+            rhythm_features TEXT,
+            harmony_features TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (track_id) REFERENCES tracks (id)
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS analysis_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            track_id INTEGER NOT NULL,
+            priority INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (track_id) REFERENCES tracks (id)
+        )
+    ''')
     
     conn.commit()
     conn.close()
