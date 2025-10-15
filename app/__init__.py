@@ -19,10 +19,14 @@ def create_app():
         # Ensure the local music database (tracks table) exists at startup
         try:
             from .routes import init_local_music_db
-            init_local_music_db()
+            db_path = init_local_music_db()
+            print(f"[Startup] Database initialized successfully at: {db_path}")
         except Exception as e:
-            # Avoid hard failure at startup; routes that need DB will surface errors
-            print(f"[Startup] Warning: failed to initialize local music DB: {e}")
+            # Database initialization is critical - fail hard if it doesn't work
+            print(f"[Startup] CRITICAL ERROR: Failed to initialize local music DB: {e}")
+            import traceback
+            traceback.print_exc()
+            raise  # Re-raise to prevent app from starting with broken database
 
         # Check for auto-startup configuration
         try:

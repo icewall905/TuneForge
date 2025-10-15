@@ -28,24 +28,48 @@ import string
 
 # --- Timeout Protection for Mutagen Operations ---
 def timeout(seconds=10):
-    """Timeout decorator for mutagen operations"""
+    """Timeout decorator for mutagen operations - thread-safe version"""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            def timeout_handler(signum, frame):
-                raise TimeoutError(f"Operation timed out after {seconds} seconds")
-            
-            # Set the signal handler and a timeout alarm
-            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(seconds)
-            
-            try:
-                result = func(*args, **kwargs)
-                return result
-            finally:
-                # Disable the alarm and restore the old handler
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, old_handler)
+            # Check if we're in the main thread
+            if threading.current_thread() is threading.main_thread():
+                def timeout_handler(signum, frame):
+                    raise TimeoutError(f"Operation timed out after {seconds} seconds")
+                
+                old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(seconds)
+                
+                try:
+                    result = func(*args, **kwargs)
+                    return result
+                finally:
+                    signal.alarm(0)
+                    signal.signal(signal.SIGALRM, old_handler)
+            else:
+                # In worker thread - use threading.Timer instead
+                result_container = [None]
+                exception_container = [None]
+                
+                def worker():
+                    try:
+                        result_container[0] = func(*args, **kwargs)
+                    except Exception as e:
+                        exception_container[0] = e
+                
+                thread = threading.Thread(target=worker)
+                thread.daemon = True
+                thread.start()
+                thread.join(timeout=seconds)
+                
+                if thread.is_alive():
+                    raise TimeoutError(f"Operation timed out after {seconds} seconds")
+                
+                if exception_container[0]:
+                    raise exception_container[0]
+                
+                return result_container[0]
+        
         return wrapper
     return decorator
 
@@ -2906,6 +2930,48 @@ def api_search_local_tracks():
     
     results = search_local_tracks(query, limit, genre, year, sort_by, sort_order)
     return jsonify({'success': True, 'results': results})
+
+@main_bp.route('/api/database/health')
+def api_database_health():
+    """Check database health and table existence"""
+    try:
+        db_path = os.path.join(DB_DIR, 'local_music.db')
+        
+        with sqlite3.connect(db_path, timeout=10.0) as conn:
+            cursor = conn.cursor()
+            
+            # Check tables exist
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [row[0] for row in cursor.fetchall()]
+            
+            # Get record counts
+            stats = {}
+            if 'tracks' in tables:
+                cursor.execute("SELECT COUNT(*) FROM tracks")
+                stats['tracks_count'] = cursor.fetchone()[0]
+            
+            if 'audio_features' in tables:
+                cursor.execute("SELECT COUNT(*) FROM audio_features")
+                stats['audio_features_count'] = cursor.fetchone()[0]
+            
+            if 'analysis_queue' in tables:
+                cursor.execute("SELECT COUNT(*) FROM analysis_queue")
+                stats['analysis_queue_count'] = cursor.fetchone()[0]
+            
+            return jsonify({
+                'success': True,
+                'database_exists': os.path.exists(db_path),
+                'tables': tables,
+                'stats': stats,
+                'database_path': db_path
+            })
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'database_exists': os.path.exists(os.path.join(DB_DIR, 'local_music.db')) if 'DB_DIR' in globals() else False
+        })
 
 @main_bp.route('/api/local-music-stats')
 def api_local_music_stats():
