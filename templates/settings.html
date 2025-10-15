@@ -50,6 +50,10 @@
                         <input type="number" id="max_attempts" name="max_attempts" value="{{ max_attempts }}" min="1" max="20">
                         <p class="help-text">Number of times to retry generation if insufficient tracks are found.</p>
                     </div>
+                    
+                    <div class="form-group">
+                        <button type="button" class="btn btn-secondary section-save-btn" data-section="ollama">Save Ollama Settings</button>
+                    </div>
                 </div>
                 
                 <div class="settings-group">
@@ -70,6 +74,10 @@
                         <label for="favorite_artists">Favorite Artists:</label>
                         <textarea id="favorite_artists" name="favorite_artists" rows="3">{{ favorite_artists }}</textarea>
                         <p class="help-text">Your favorite artists (comma-separated).</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="button" class="btn btn-secondary section-save-btn" data-section="music">Save Music Preferences</button>
                     </div>
                 </div>
 
@@ -99,6 +107,10 @@
                             Use local library instead of remote server for matching (Plex/Navidrome)
                         </label>
                         <p class="help-text">When enabled, matches Ollama suggestions against your indexed local library. Remote services can remain enabled for other tasks.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="button" class="btn btn-secondary section-save-btn" data-section="app">Save Application Settings</button>
                     </div>
                 </div>
             </div>
@@ -146,6 +158,10 @@
                         <a href="{{ url_for('main.test_navidrome_page') }}" class="btn btn-secondary">Test Navidrome Connection</a>
                         <p class="help-text">Check if the Navidrome connection is working correctly.</p>
                     </div>
+                    
+                    <div class="form-group">
+                        <button type="button" class="btn btn-secondary section-save-btn" data-section="navidrome">Save Navidrome Settings</button>
+                    </div>
                 </div>
                 
                 <div class="settings-group" id="plexSettings">
@@ -183,6 +199,10 @@
                         <a href="{{ url_for('main.test_plex_page') }}" class="btn btn-secondary">Test Plex Connection</a>
                         <p class="help-text">Check if the Plex connection is working correctly.</p>
                     </div>
+                    
+                    <div class="form-group">
+                        <button type="button" class="btn btn-secondary section-save-btn" data-section="plex">Save Plex Settings</button>
+                    </div>
                 </div>
             </div>
             
@@ -212,6 +232,10 @@
                         <label for="startup_delay_seconds">Startup Delay (seconds):</label>
                         <input type="number" id="startup_delay_seconds" name="startup_delay_seconds" value="{{ startup_delay_seconds }}" min="10" max="300" class="settings-input">
                         <p class="help-text">Delay before starting automatic processes to ensure the application is fully loaded (10-300 seconds).</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="button" class="btn btn-secondary section-save-btn" data-section="startup">Save Auto-Startup Settings</button>
                     </div>
                 </div>
             </div>
@@ -817,6 +841,51 @@
     border-top: 1px solid var(--border-color);
 }
 
+/* Section Save Buttons */
+.section-save-btn {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    padding: 0.5rem 1rem;
+}
+
+.section-save-btn:hover {
+    background-color: var(--accent-color);
+    color: white;
+    border-color: var(--accent-color);
+}
+
+.section-save-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.section-save-btn:disabled:hover {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+}
+
+/* Section-specific save feedback */
+.section-feedback {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.section-feedback.success {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.section-feedback.error {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .stats-grid {
@@ -973,6 +1042,71 @@
         
         // Load models on page load
         loadOllamaModels();
+        
+        // Section-specific save functionality
+        function saveSectionSettings(buttonElement) {
+            const section = buttonElement.dataset.section;
+            const form = document.getElementById('settingsForm');
+            const formData = new FormData(form);
+            
+            // Disable button and show loading state
+            buttonElement.disabled = true;
+            buttonElement.textContent = 'Saving...';
+            
+            // Remove any existing feedback for this section
+            const existingFeedback = document.querySelector(`[data-section="${section}"] .section-feedback`);
+            if (existingFeedback) {
+                existingFeedback.remove();
+            }
+            
+            fetch('/settings', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (response.ok) {
+                    // Show success message
+                    showSectionFeedback(buttonElement, 'Settings saved successfully!', 'success');
+                } else {
+                    showSectionFeedback(buttonElement, 'Error saving settings', 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error saving settings:', error);
+                showSectionFeedback(buttonElement, 'Error saving settings: ' + error.message, 'error');
+            })
+            .finally(() => {
+                // Re-enable button
+                buttonElement.disabled = false;
+                buttonElement.textContent = buttonElement.dataset.originalText || 'Save Settings';
+            });
+        }
+        
+        function showSectionFeedback(buttonElement, message, type) {
+            const feedback = document.createElement('div');
+            feedback.className = `section-feedback ${type}`;
+            feedback.textContent = message;
+            
+            // Insert feedback after the button
+            buttonElement.parentNode.insertBefore(feedback, buttonElement.nextSibling);
+            
+            // Remove feedback after 3 seconds
+            setTimeout(() => {
+                if (feedback.parentNode) {
+                    feedback.remove();
+                }
+            }, 3000);
+        }
+        
+        // Add event listeners to section save buttons
+        document.querySelectorAll('.section-save-btn').forEach(button => {
+            // Store original text
+            button.dataset.originalText = button.textContent;
+            
+            button.addEventListener('click', function() {
+                saveSectionSettings(this);
+            });
+        });
     });
 </script>
 
