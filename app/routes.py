@@ -1398,6 +1398,47 @@ def api_test_plex_connection():
     result = test_plex_connection(plex_server_url, plex_token)
     return jsonify(result)
 
+@main_bp.route('/api/test-ollama-connection', methods=['POST'])
+def test_ollama_connection():
+    """Test if Ollama server is reachable and responding"""
+    data = request.get_json()
+    ollama_url = data.get('ollama_url') or get_config_value('OLLAMA', 'URL', '')
+    
+    if not ollama_url:
+        return jsonify({'success': False, 'error': 'No Ollama URL provided'}), 400
+    
+    try:
+        response = requests.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=5)
+        if response.status_code == 200:
+            return jsonify({'success': True, 'message': 'Connected to Ollama successfully'})
+        else:
+            return jsonify({'success': False, 'error': f'Server returned status {response.status_code}'}), 400
+    except requests.exceptions.Timeout:
+        return jsonify({'success': False, 'error': 'Connection timeout - server not responding'}), 400
+    except requests.exceptions.ConnectionError:
+        return jsonify({'success': False, 'error': 'Cannot connect to Ollama server'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
+@main_bp.route('/api/ollama-models', methods=['GET'])
+def get_ollama_models():
+    """Fetch list of available models from Ollama server"""
+    ollama_url = request.args.get('ollama_url') or get_config_value('OLLAMA', 'URL', '')
+    
+    if not ollama_url:
+        return jsonify({'success': False, 'error': 'No Ollama URL configured'}), 400
+    
+    try:
+        response = requests.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            models = [model['name'] for model in data.get('models', [])]
+            return jsonify({'success': True, 'models': models})
+        else:
+            return jsonify({'success': False, 'error': 'Failed to fetch models'}), 400
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+
 @main_bp.route('/api/generate-playlist', methods=['POST'])
 def api_generate_playlist():
     debug_log("Playlist generation API called", "INFO")

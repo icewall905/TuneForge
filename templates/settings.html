@@ -24,9 +24,19 @@
                     </div>
                     
                     <div class="form-group">
+                        <button type="button" id="test-ollama-btn" class="btn btn-secondary">Test Ollama Connection</button>
+                        <span id="ollama-test-result" class="test-result"></span>
+                    </div>
+                    
+                    <div class="form-group">
                         <label for="ollama_model">Ollama Model:</label>
-                        <input type="text" id="ollama_model" name="ollama_model" value="{{ ollama_model }}" placeholder="llama3">
-                        <p class="help-text">The language model to use (e.g. llama3, mistral). Use "auto" to detect.</p>
+                        <div class="model-selector-group">
+                            <select id="ollama_model" name="ollama_model" class="settings-select">
+                                <option value="">Loading models...</option>
+                            </select>
+                            <button type="button" id="refresh-models-btn" class="secondary-button">🔄</button>
+                        </div>
+                        <p class="help-text">Select a model from your Ollama server. Click refresh to update the list.</p>
                     </div>
                     
                     <div class="form-group">
@@ -331,6 +341,40 @@
     font-size: 0.85rem;
     margin: 0.5rem 0 0 0;
     font-style: italic;
+}
+
+/* Ollama Configuration Styles */
+.model-selector-group {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.model-selector-group select {
+    flex: 1;
+}
+
+.model-selector-group .secondary-button {
+    padding: 0.5rem 0.75rem;
+    white-space: nowrap;
+}
+
+.test-result {
+    margin-left: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.test-result.success {
+    color: #28a745;
+}
+
+.test-result.error {
+    color: #dc3545;
+}
+
+.test-result.warning {
+    color: #ffc107;
 }
 
 /* Message Display */
@@ -853,6 +897,82 @@
                 }, 5000);
             });
         });
+        
+        // Ollama Configuration Functions
+        async function loadOllamaModels() {
+            const ollamaUrl = document.getElementById('ollama_url').value;
+            const modelSelect = document.getElementById('ollama_model');
+            const currentValue = modelSelect.dataset.currentValue || '{{ ollama_model }}';
+            
+            if (!ollamaUrl) {
+                modelSelect.innerHTML = '<option value="">Enter Ollama URL first</option>';
+                return;
+            }
+            
+            modelSelect.innerHTML = '<option value="">Loading...</option>';
+            
+            try {
+                const response = await fetch(`/api/ollama-models?ollama_url=${encodeURIComponent(ollamaUrl)}`);
+                const data = await response.json();
+                
+                if (data.success && data.models.length > 0) {
+                    modelSelect.innerHTML = data.models.map(model => 
+                        `<option value="${model}" ${model === currentValue ? 'selected' : ''}>${model}</option>`
+                    ).join('');
+                } else {
+                    modelSelect.innerHTML = '<option value="">No models found</option>';
+                }
+            } catch (error) {
+                modelSelect.innerHTML = '<option value="">Error loading models</option>';
+            }
+        }
+        
+        async function testOllamaConnection() {
+            const ollamaUrl = document.getElementById('ollama_url').value;
+            const resultSpan = document.getElementById('ollama-test-result');
+            const testBtn = document.getElementById('test-ollama-btn');
+            
+            if (!ollamaUrl) {
+                resultSpan.textContent = '⚠️ Enter URL first';
+                resultSpan.className = 'test-result warning';
+                return;
+            }
+            
+            testBtn.disabled = true;
+            resultSpan.textContent = 'Testing...';
+            resultSpan.className = 'test-result';
+            
+            try {
+                const response = await fetch('/api/test-ollama-connection', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ollama_url: ollamaUrl})
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultSpan.textContent = '✓ ' + data.message;
+                    resultSpan.className = 'test-result success';
+                    loadOllamaModels(); // Auto-load models on successful connection
+                } else {
+                    resultSpan.textContent = '✗ ' + data.error;
+                    resultSpan.className = 'test-result error';
+                }
+            } catch (error) {
+                resultSpan.textContent = '✗ Connection failed';
+                resultSpan.className = 'test-result error';
+            } finally {
+                testBtn.disabled = false;
+            }
+        }
+        
+        // Ollama event listeners
+        document.getElementById('test-ollama-btn').addEventListener('click', testOllamaConnection);
+        document.getElementById('refresh-models-btn').addEventListener('click', loadOllamaModels);
+        document.getElementById('ollama_url').addEventListener('blur', loadOllamaModels);
+        
+        // Load models on page load
+        loadOllamaModels();
     });
 </script>
 
