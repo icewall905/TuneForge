@@ -18,11 +18,49 @@ from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC
 from collections import OrderedDict
 import hashlib
+import signal
+from functools import wraps
 import threading
 import queue
 import uuid
 from datetime import datetime
 import string
+
+# --- Timeout Protection for Mutagen Operations ---
+def timeout(seconds=10):
+    """Timeout decorator for mutagen operations"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            def timeout_handler(signum, frame):
+                raise TimeoutError(f"Operation timed out after {seconds} seconds")
+            
+            # Set the signal handler and a timeout alarm
+            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(seconds)
+            
+            try:
+                result = func(*args, **kwargs)
+                return result
+            finally:
+                # Disable the alarm and restore the old handler
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old_handler)
+        return wrapper
+    return decorator
+
+@timeout(15)  # 15 second timeout for mutagen operations
+def safe_mutagen_file(file_path, easy=True):
+    """Safely load mutagen file with timeout protection"""
+    try:
+        audio = mutagen.File(file_path, easy=easy)
+        if audio is None and easy:
+            # Try without easy=True for FLAC files
+            audio = mutagen.File(file_path, easy=False)
+        return audio
+    except Exception as e:
+        debug_log(f"Mutagen error reading {file_path}: {str(e)}", "WARNING")
+        return None
 
 # --- Logger Setup ---
 LOG_DIR = 'logs'  # This will be relative to the project root (TuneForge/)
@@ -1910,12 +1948,17 @@ def scan_music_folder(folder_path):
     
     supported_extensions = {'.mp3', '.flac', '.m4a', '.ogg', '.wav', '.aac'}
     db_path = init_local_music_db()
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
     
     stats = {'total_files': 0, 'indexed': 0, 'errors': 0, 'skipped': 0}
     
     try:
+        with sqlite3.connect(db_path, timeout=30.0) as conn:
+            # Enable WAL mode for better concurrency
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=10000")
+            
+            cursor = conn.cursor()
         for root, dirs, files in os.walk(folder_path):
             for file in files:
                 file_path = os.path.join(root, file)
@@ -1940,7 +1983,7 @@ def scan_music_folder(folder_path):
                             cursor.execute('''
                                 UPDATE tracks SET 
                                     title = ?, artist = ?, album = ?, genre = ?, 
-                                    year = ?, track_number, duration = ?, 
+                                    year = ?, track_number = ?, duration = ?, 
                                     file_size = ?, last_modified = ?
                                 WHERE file_path = ?
                             ''', (
@@ -1969,13 +2012,11 @@ def scan_music_folder(folder_path):
                     debug_log(f"Error indexing {file_path}: {str(e)}", "ERROR")
                     stats['errors'] += 1
         
-        conn.commit()
-        conn.close()
-        
-        return {'success': True, 'stats': stats}
-        
+            conn.commit()
+            
+            return {'success': True, 'stats': stats}
+            
     except Exception as e:
-        conn.close()
         return {'success': False, 'error': str(e)}
 
 def scan_music_folder_with_progress(folder_path, scan_id):
@@ -2015,8 +2056,9 @@ def scan_music_folder_with_progress(folder_path, scan_id):
                 
                 # Update counting progress every 1000 files or every file if < 1000
                 if files_checked % max(1, min(1000, max(1, files_checked // 20))) == 0:
-                    progress_tracker['files_processed'] = files_checked
-                    progress_tracker['current_file'] = f'Counting... {files_checked} files checked, {music_files} music files found'
+                    with scan_progress_lock:
+                        progress_tracker['files_processed'] = files_checked
+                        progress_tracker['current_file'] = f'Counting... {files_checked} files checked, {music_files} music files found'
         
         # Update stats and progress tracker
         stats['total_files'] = music_files
@@ -2037,8 +2079,18 @@ def scan_music_folder_with_progress(folder_path, scan_id):
         batch_data = []
         
         for root, dirs, files in os.walk(folder_path):
+            # Check for cancellation
+            if progress_tracker.get('cancelled', False):
+                debug_log(f"Scan {scan_id} was cancelled", "INFO")
+                return {'success': False, 'error': 'Scan was cancelled'}
+            
             debug_log(f"Processing directory: {root} with {len(files)} files", "INFO")
             for file in files:
+                # Check for cancellation
+                if progress_tracker.get('cancelled', False):
+                    debug_log(f"Scan {scan_id} was cancelled", "INFO")
+                    return {'success': False, 'error': 'Scan was cancelled'}
+                
                 file_path = os.path.join(root, file)
                 file_ext = os.path.splitext(file)[1].lower()
                 
@@ -2047,8 +2099,9 @@ def scan_music_folder_with_progress(folder_path, scan_id):
                     continue
                 
                 processed_count += 1
-                progress_tracker['files_processed'] = processed_count
-                progress_tracker['current_file'] = f'Processing {processed_count}/{music_files}: {os.path.basename(file_path)}'
+                with scan_progress_lock:
+                    progress_tracker['files_processed'] = processed_count
+                    progress_tracker['current_file'] = f'Processing {processed_count}/{music_files}: {os.path.basename(file_path)}'
                 
                 try:
                     # Extract metadata using mutagen
@@ -2064,8 +2117,8 @@ def scan_music_folder_with_progress(folder_path, scan_id):
                     stats['errors'] += 1
                     progress_tracker['errors'] = stats['errors']
                 
-                # Process batch when it reaches batch_size or at the end
-                if len(batch_data) >= batch_size or processed_count == music_files:
+                # Process batch when it reaches batch_size
+                if len(batch_data) >= batch_size:
                     try:
                         _process_batch(batch_data, db_path)
                         stats['indexed'] += len(batch_data)
@@ -2081,6 +2134,17 @@ def scan_music_folder_with_progress(folder_path, scan_id):
                 if processed_count % 100 == 0:
                     progress_tracker['files_processed'] = processed_count
                     debug_log(f"Processed {processed_count}/{music_files} files", "INFO")
+        
+        # Process any remaining files in the final batch
+        if batch_data:
+            try:
+                _process_batch(batch_data, db_path)
+                stats['indexed'] += len(batch_data)
+                progress_tracker['indexed'] = stats['indexed']
+            except Exception as e:
+                debug_log(f"Error processing final batch: {str(e)}", "ERROR")
+                stats['errors'] += len(batch_data)
+                progress_tracker['errors'] = stats['errors']
         
         # Final progress update
         progress_tracker['files_processed'] = processed_count
@@ -2147,18 +2211,37 @@ def _process_batch(batch_data, db_path):
         raise
 
 def extract_track_metadata(file_path):
-    """Extract metadata from a music file"""
+    """Extract metadata from a music file with improved error handling"""
     try:
+        # Check if file exists and is readable
+        if not os.path.exists(file_path):
+            debug_log(f"File does not exist: {file_path}", "WARNING")
+            return None
+        
+        if not os.access(file_path, os.R_OK):
+            debug_log(f"File is not readable (permission denied): {file_path}", "WARNING")
+            return None
+        
         file_stat = os.stat(file_path)
         file_size = file_stat.st_size
         last_modified = file_stat.st_mtime
         
-        # Try to load metadata
-        audio = mutagen.File(file_path, easy=True)
+        # Check for empty files
+        if file_size == 0:
+            debug_log(f"File is empty: {file_path}", "WARNING")
+            return None
         
-        if audio is None:
-            # Try without easy=True for FLAC files
-            audio = mutagen.File(file_path)
+        # Try to load metadata with timeout protection
+        audio = None
+        try:
+            audio = safe_mutagen_file(file_path, easy=True)
+        except TimeoutError:
+            debug_log(f"Timeout reading metadata from {file_path}", "WARNING")
+            audio = None
+        except Exception as mutagen_error:
+            debug_log(f"Mutagen error reading {file_path}: {str(mutagen_error)}", "WARNING")
+            # Continue with basic metadata even if mutagen fails
+            audio = None
         
         metadata = {
             'title': None,
@@ -2174,7 +2257,7 @@ def extract_track_metadata(file_path):
         
         if audio:
             # Extract common metadata fields
-            if hasattr(audio, 'tags'):
+            if hasattr(audio, 'tags') and audio.tags:
                 tags = audio.tags
                 
                 # Handle different tag formats
@@ -2211,8 +2294,14 @@ def extract_track_metadata(file_path):
         
         return metadata
         
+    except PermissionError as e:
+        debug_log(f"Permission denied accessing {file_path}: {str(e)}", "WARNING")
+        return None
+    except OSError as e:
+        debug_log(f"OS error accessing {file_path}: {str(e)}", "WARNING")
+        return None
     except Exception as e:
-        debug_log(f"Error extracting metadata from {file_path}: {str(e)}", "ERROR")
+        debug_log(f"Unexpected error extracting metadata from {file_path}: {str(e)}", "ERROR")
         return None
 
 def search_local_tracks(query, limit=50, genre=None, year=None, sort_by='title', sort_order='asc'):
@@ -2479,47 +2568,52 @@ def get_local_track_stats():
     if not os.path.exists(db_path):
         return {'total_tracks': 0, 'total_size': 0, 'genres': [], 'artists': 0, 'genre_counts': {}}
     
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    # Total tracks
-    cursor.execute('SELECT COUNT(*) FROM tracks')
-    total_tracks = cursor.fetchone()[0]
-    
-    # Total size
-    cursor.execute('SELECT SUM(file_size) FROM tracks')
-    total_size = cursor.fetchone()[0] or 0
-    
-    # Unique genres
-    cursor.execute('SELECT DISTINCT genre FROM tracks WHERE genre IS NOT NULL')
-    genres = [row[0] for row in cursor.fetchall()]
-    
-    # Genre counts
-    genre_counts = {}
-    for genre in genres:
-        cursor.execute('SELECT COUNT(*) FROM tracks WHERE genre = ?', (genre,))
-        count = cursor.fetchone()[0]
-        genre_counts[genre] = count
-    
-    # Unique artists
-    cursor.execute('SELECT COUNT(DISTINCT artist) FROM tracks WHERE artist IS NOT NULL')
-    unique_artists = cursor.fetchone()[0]
-    
-    conn.close()
-    
-    return {
-        'total_tracks': total_tracks,
-        'total_size': total_size,
-        'genres': genres,
-        'artists': unique_artists,
-        'genre_counts': genre_counts
-    }
+    try:
+        with sqlite3.connect(db_path, timeout=30.0) as conn:
+            cursor = conn.cursor()
+            
+            # Total tracks
+            cursor.execute('SELECT COUNT(*) FROM tracks')
+            total_tracks = cursor.fetchone()[0]
+            
+            # Total size
+            cursor.execute('SELECT SUM(file_size) FROM tracks')
+            total_size = cursor.fetchone()[0] or 0
+            
+            # Unique genres
+            cursor.execute('SELECT DISTINCT genre FROM tracks WHERE genre IS NOT NULL')
+            genres = [row[0] for row in cursor.fetchall()]
+            
+            # Genre counts
+            genre_counts = {}
+            for genre in genres:
+                cursor.execute('SELECT COUNT(*) FROM tracks WHERE genre = ?', (genre,))
+                count = cursor.fetchone()[0]
+                genre_counts[genre] = count
+            
+            # Unique artists
+            cursor.execute('SELECT COUNT(DISTINCT artist) FROM tracks WHERE artist IS NOT NULL')
+            unique_artists = cursor.fetchone()[0]
+            
+            return {
+                'total_tracks': total_tracks,
+                'total_size': total_size,
+                'genres': genres,
+                'artists': unique_artists,
+                'genre_counts': genre_counts
+            }
+    except Exception as e:
+        debug_log(f"Error getting local track stats: {str(e)}", "ERROR")
+        return {'total_tracks': 0, 'total_size': 0, 'genres': [], 'artists': 0, 'genre_counts': {}}
 
 @main_bp.route('/local-music')
 def local_music_page():
     """Local music management page"""
     stats = get_local_track_stats()
     return render_template('local_music.html', stats=stats)
+
+# Add thread lock for progress tracker
+scan_progress_lock = threading.Lock()
 
 @main_bp.route('/api/scan-music-folder', methods=['POST'])
 def api_scan_music_folder():
@@ -2530,6 +2624,21 @@ def api_scan_music_folder():
     
     folder_path = data['folder_path']
     
+    # Check for active scans to prevent concurrent scanning
+    with scan_progress_lock:
+        if not hasattr(api_scan_music_folder, 'scan_progress'):
+            api_scan_music_folder.scan_progress = {}
+        
+        # Check if any scans are currently running
+        active_scans = [scan_id for scan_id, progress in api_scan_music_folder.scan_progress.items() 
+                       if progress.get('status') in ['starting', 'counting', 'scanning']]
+        
+        if active_scans:
+            return jsonify({
+                'success': False, 
+                'error': f'Another scan is already running (ID: {active_scans[0]}). Please wait for it to complete.'
+            })
+    
     # Start scanning in background with progress tracking
     import threading
     import time
@@ -2537,20 +2646,18 @@ def api_scan_music_folder():
     # Create a unique scan ID for this operation
     scan_id = f"scan_{int(time.time())}"
     
-    # Initialize scan progress in a simple in-memory store
-    if not hasattr(api_scan_music_folder, 'scan_progress'):
-        api_scan_music_folder.scan_progress = {}
-    
-    api_scan_music_folder.scan_progress[scan_id] = {
-        'status': 'starting',
-        'current_file': '',
-        'files_processed': 0,
-        'total_files': 0,
-        'indexed': 0,
-        'errors': 0,
-        'skipped': 0,
-        'start_time': time.time()
-    }
+        # Initialize scan progress in a simple in-memory store
+        api_scan_music_folder.scan_progress[scan_id] = {
+            'status': 'starting',
+            'current_file': '',
+            'files_processed': 0,
+            'total_files': 0,
+            'indexed': 0,
+            'errors': 0,
+            'skipped': 0,
+            'start_time': time.time(),
+            'cancelled': False  # Add cancellation flag
+        }
     
     def scan_with_progress():
         try:
@@ -2571,6 +2678,26 @@ def api_scan_music_folder():
         'scan_id': scan_id,
         'message': 'Scan started in background'
     })
+
+@main_bp.route('/api/scan-cancel/<scan_id>', methods=['POST'])
+def api_cancel_scan(scan_id):
+    """API endpoint to cancel a running scan"""
+    if not hasattr(api_scan_music_folder, 'scan_progress'):
+        return jsonify({'error': 'No scan progress available'})
+    
+    progress = api_scan_music_folder.scan_progress.get(scan_id)
+    if not progress:
+        return jsonify({'error': 'Scan ID not found'})
+    
+    if progress['status'] in ['completed', 'error', 'cancelled']:
+        return jsonify({'error': 'Scan is not running'})
+    
+    # Mark scan as cancelled
+    progress['status'] = 'cancelled'
+    progress['cancelled'] = True
+    progress['current_file'] = 'Cancelling scan...'
+    
+    return jsonify({'success': True, 'message': 'Scan cancellation requested'})
 
 @main_bp.route('/api/scan-progress/<scan_id>')
 def api_scan_progress(scan_id):
