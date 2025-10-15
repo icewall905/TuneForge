@@ -155,7 +155,8 @@
                     </div>
                     
                     <div class="form-group">
-                        <a href="{{ url_for('main.test_navidrome_page') }}" class="btn btn-secondary">Test Navidrome Connection</a>
+                        <button type="button" id="test-navidrome-inline-btn" class="btn btn-secondary">Test Navidrome Connection</button>
+                        <span id="navidrome-test-result" class="test-result"></span>
                         <p class="help-text">Check if the Navidrome connection is working correctly.</p>
                     </div>
                     
@@ -1042,6 +1043,65 @@
         
         // Load models on page load
         loadOllamaModels();
+        
+        // Inline Navidrome test functionality
+        async function testNavidromeConnectionInline() {
+            const navidromeUrl = document.getElementById('navidrome_url').value;
+            const navidromeUsername = document.getElementById('navidrome_username').value;
+            const navidromePassword = document.getElementById('navidrome_password').value;
+            const resultSpan = document.getElementById('navidrome-test-result');
+            const testBtn = document.getElementById('test-navidrome-inline-btn');
+            
+            if (!navidromeUrl || !navidromeUsername || !navidromePassword) {
+                resultSpan.textContent = '⚠️ Please fill in URL, username, and password first';
+                resultSpan.className = 'test-result warning';
+                return;
+            }
+            
+            testBtn.disabled = true;
+            resultSpan.textContent = 'Testing...';
+            resultSpan.className = 'test-result';
+            
+            try {
+                const response = await fetch('/api/test-navidrome-connection', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        navidrome_url: navidromeUrl,
+                        username: navidromeUsername,
+                        password: navidromePassword
+                    })
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultSpan.textContent = '✓ Connection successful';
+                    resultSpan.className = 'test-result success';
+                } else {
+                    // Provide more specific error messages
+                    let errorMessage = '✗ Connection failed';
+                    if (data.error) {
+                        if (data.error.toLowerCase().includes('password') || data.error.toLowerCase().includes('username') || data.error.toLowerCase().includes('auth')) {
+                            errorMessage = '✗ Wrong username or password';
+                        } else if (data.error.toLowerCase().includes('connect') || data.error.toLowerCase().includes('network') || data.error.toLowerCase().includes('timeout')) {
+                            errorMessage = '✗ Could not connect to server';
+                        } else {
+                            errorMessage = '✗ ' + data.error;
+                        }
+                    }
+                    resultSpan.textContent = errorMessage;
+                    resultSpan.className = 'test-result error';
+                }
+            } catch (error) {
+                resultSpan.textContent = '✗ Could not connect to server';
+                resultSpan.className = 'test-result error';
+            } finally {
+                testBtn.disabled = false;
+            }
+        }
+        
+        // Add event listener for inline Navidrome test
+        document.getElementById('test-navidrome-inline-btn').addEventListener('click', testNavidromeConnectionInline);
         
         // Section-specific save functionality
         function saveSectionSettings(buttonElement) {
