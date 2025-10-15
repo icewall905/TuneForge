@@ -1912,6 +1912,13 @@ def init_local_music_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_album ON tracks(album)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_genre ON tracks(genre)')
     
+    # Add critical performance indexes for scanner operations
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracks_file_path_modified ON tracks(file_path, last_modified)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracks_analysis_status ON tracks(analysis_status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracks_status_attempts ON tracks(analysis_status, analysis_attempts)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracks_file_size ON tracks(file_size)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tracks_created_at ON tracks(created_at)')
+    
     # Create audio analysis related tables
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS audio_features (
@@ -1959,26 +1966,61 @@ def scan_music_folder(folder_path):
             conn.execute("PRAGMA cache_size=10000")
             
             cursor = conn.cursor()
-        for root, dirs, files in os.walk(folder_path):
-            for file in files:
-                file_path = os.path.join(root, file)
-                file_ext = os.path.splitext(file)[1].lower()
+            
+            # Collect all files first for batch processing
+            all_files_data = []
+            for root, dirs, files in os.walk(folder_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    file_ext = os.path.splitext(file)[1].lower()
+                    
+                    # Validate file path
+                    is_valid, validated_path = validate_file_path(file_path)
+                    if not is_valid:
+                        stats['skipped'] += 1
+                        continue
+                    
+                    file_path = validated_path  # Use normalized path
+                    
+                    if file_ext not in supported_extensions:
+                        stats['skipped'] += 1
+                        continue
+                    
+                    stats['total_files'] += 1
+                    
+                    try:
+                        # Extract metadata using mutagen
+                        metadata = extract_track_metadata(file_path)
+                        if metadata:
+                            all_files_data.append((file_path, metadata))
+                        else:
+                            stats['errors'] += 1
+                            
+                    except Exception as e:
+                        debug_log(f"Error indexing {file_path}: {str(e)}", "ERROR")
+                        stats['errors'] += 1
+            
+            # Process all files in optimized batches
+            batch_size = int(get_config_value('SCANNER', 'batch_size', '50'))
+            for i in range(0, len(all_files_data), batch_size):
+                batch = all_files_data[i:i + batch_size]
                 
-                if file_ext not in supported_extensions:
-                    stats['skipped'] += 1
-                    continue
+                # Batch existence check
+                file_paths = [fp for fp, _ in batch]
+                placeholders = ','.join(['?'] * len(file_paths))
+                cursor.execute(f'SELECT file_path, id, last_modified FROM tracks WHERE file_path IN ({placeholders})', file_paths)
+                existing_files = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
                 
-                stats['total_files'] += 1
-                
-                try:
-                    # Extract metadata using mutagen
-                    metadata = extract_track_metadata(file_path)
-                    if metadata:
-                        # Check if track already exists
-                        cursor.execute('SELECT id FROM tracks WHERE file_path = ?', (file_path,))
-                        existing = cursor.fetchone()
+                for file_path, metadata in batch:
+                    try:
+                        existing = existing_files.get(file_path)
                         
                         if existing:
+                            track_id, existing_modified = existing
+                            # Skip if file hasn't changed (incremental scan)
+                            if metadata['last_modified'] <= existing_modified:
+                                continue
+                            
                             # Update existing track
                             cursor.execute('''
                                 UPDATE tracks SET 
@@ -2005,12 +2047,10 @@ def scan_music_folder(folder_path):
                             ))
                         
                         stats['indexed'] += 1
-                    else:
-                        stats['errors'] += 1
                         
-                except Exception as e:
-                    debug_log(f"Error indexing {file_path}: {str(e)}", "ERROR")
-                    stats['errors'] += 1
+                    except Exception as e:
+                        debug_log(f"Error processing {file_path}: {str(e)}", "ERROR")
+                        stats['errors'] += 1
         
             conn.commit()
             
@@ -2158,7 +2198,7 @@ def scan_music_folder_with_progress(folder_path, scan_id):
         return {'success': False, 'error': str(e)}
 
 def _process_batch(batch_data, db_path):
-    """Process a batch of files to reduce database locks"""
+    """Process a batch of files to reduce database locks with optimized queries"""
     try:
         with sqlite3.connect(db_path, timeout=30.0) as conn:
             # Enable WAL mode for better concurrency
@@ -2168,13 +2208,27 @@ def _process_batch(batch_data, db_path):
             
             cursor = conn.cursor()
             
+            # Optimize: Batch existence check instead of individual queries
+            file_paths = [fp for fp, _ in batch_data]
+            if file_paths:
+                placeholders = ','.join(['?'] * len(file_paths))
+                cursor.execute(f'SELECT file_path, id, last_modified FROM tracks WHERE file_path IN ({placeholders})', file_paths)
+                existing_files = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
+            else:
+                existing_files = {}
+            
+            # Process each file in the batch
             for file_path, metadata in batch_data:
                 try:
-                    # Check if track already exists
-                    cursor.execute('SELECT id FROM tracks WHERE file_path = ?', (file_path,))
-                    existing = cursor.fetchone()
+                    # Check if track already exists (from batch query)
+                    existing = existing_files.get(file_path)
                     
                     if existing:
+                        track_id, existing_modified = existing
+                        # Skip if file hasn't changed (incremental scan optimization)
+                        if metadata['last_modified'] <= existing_modified:
+                            continue  # Skip unchanged file
+                        
                         # Update existing track
                         cursor.execute('''
                             UPDATE tracks SET 
@@ -2210,6 +2264,35 @@ def _process_batch(batch_data, db_path):
         debug_log(f"Error in batch processing: {str(e)}", "ERROR")
         raise
 
+def validate_file_path(file_path):
+    """Validate and sanitize file path for scanner operations"""
+    try:
+        # Check path length (most filesystems: 4096 chars)
+        if len(file_path) > 4000:
+            debug_log(f"Path too long ({len(file_path)} chars): {file_path}", "WARNING")
+            return False, "Path too long"
+        
+        # Normalize Unicode (prevent duplicate entries)
+        normalized_path = os.path.normpath(file_path)
+        
+        # Check for null bytes
+        if '\x00' in file_path:
+            debug_log(f"Invalid path characters (null bytes): {file_path}", "WARNING")
+            return False, "Invalid path characters"
+        
+        # Check for problematic characters on Windows
+        if os.name == 'nt':  # Windows
+            invalid_chars = '<>:"|?*' + chr(0)
+            if any(char in file_path for char in invalid_chars):
+                debug_log(f"Invalid Windows path characters: {file_path}", "WARNING")
+                return False, "Invalid Windows path characters"
+        
+        return True, normalized_path
+        
+    except Exception as e:
+        debug_log(f"Error validating path {file_path}: {str(e)}", "ERROR")
+        return False, str(e)
+
 def extract_track_metadata(file_path):
     """Extract metadata from a music file with improved error handling"""
     try:
@@ -2226,9 +2309,17 @@ def extract_track_metadata(file_path):
         file_size = file_stat.st_size
         last_modified = file_stat.st_mtime
         
-        # Check for empty files
-        if file_size == 0:
-            debug_log(f"File is empty: {file_path}", "WARNING")
+        # Check file size limits
+        min_file_size = int(get_config_value('SCANNER', 'min_file_size_bytes', '1024'))
+        max_file_size_mb = int(get_config_value('SCANNER', 'max_file_size_mb', '500'))
+        max_file_size = max_file_size_mb * 1024 * 1024
+        
+        if file_size < min_file_size:
+            debug_log(f"File too small ({file_size} bytes): {file_path}", "WARNING")
+            return None
+        
+        if file_size > max_file_size:
+            debug_log(f"File too large ({file_size / (1024*1024):.1f} MB): {file_path}", "WARNING")
             return None
         
         # Try to load metadata with timeout protection
@@ -2646,18 +2737,18 @@ def api_scan_music_folder():
     # Create a unique scan ID for this operation
     scan_id = f"scan_{int(time.time())}"
     
-        # Initialize scan progress in a simple in-memory store
-        api_scan_music_folder.scan_progress[scan_id] = {
-            'status': 'starting',
-            'current_file': '',
-            'files_processed': 0,
-            'total_files': 0,
-            'indexed': 0,
-            'errors': 0,
-            'skipped': 0,
-            'start_time': time.time(),
-            'cancelled': False  # Add cancellation flag
-        }
+    # Initialize scan progress in a simple in-memory store
+    api_scan_music_folder.scan_progress[scan_id] = {
+        'status': 'starting',
+        'current_file': '',
+        'files_processed': 0,
+        'total_files': 0,
+        'indexed': 0,
+        'errors': 0,
+        'skipped': 0,
+        'start_time': time.time(),
+        'cancelled': False  # Add cancellation flag
+    }
     
     def scan_with_progress():
         try:

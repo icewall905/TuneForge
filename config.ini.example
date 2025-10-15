@@ -5,6 +5,27 @@
 # Database configuration
 db_path = db/local_music.db
 
+[scanner]
+# File size limits
+max_file_size_mb = 500
+min_file_size_bytes = 1024
+
+# Performance tuning
+batch_size = 50
+db_timeout_seconds = 30
+metadata_timeout_seconds = 15
+
+# Incremental scanning
+enable_incremental_scan = yes
+skip_unchanged_files = yes
+
+# Symlink handling
+follow_symlinks = no
+detect_circular_symlinks = yes
+
+# Progress updates
+progress_update_interval = 100
+
 [audio_analysis]
 # Audio analysis settings
 max_workers = 1
