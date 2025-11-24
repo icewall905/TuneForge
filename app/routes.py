@@ -1295,6 +1295,10 @@ def _map_candidates_to_local_with_features(candidates):
         # If feature fetch fails, return matched rows without filtering to avoid hard failure
         return matched_rows
 
+@main_bp.route('/musical-agent')
+def musical_agent():
+    return render_template('musical_agent.html')
+
 @main_bp.route('/settings', methods=['GET', 'POST'])
 def settings():
     if request.method == 'POST':

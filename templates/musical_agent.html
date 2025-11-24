@@ -1,0 +1,351 @@
+{% extends 'layout.html' %}
+
+{% block title %}Musical Agent - TuneForge{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🎵 Musical Agent</h1>
+    <p>Your AI assistant for playlist management.</p>
+</div>
+
+<div class="content-container">
+    <div class="chat-container">
+        <div id="chat-window" class="chat-window">
+            <!-- Messages will appear here -->
+            <div class="message agent-message">
+                <div class="message-content">
+                    Hello! I'm your Musical Agent. How can I help you with your music today?
+                </div>
+            </div>
+        </div>
+        <div class="chat-input-area">
+            <input type="text" id="user-input" placeholder="Type your request here..." autocomplete="off">
+            <button id="send-btn" class="primary-button">Send</button>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* Custom styles for chat */
+    .chat-container {
+        max-width: 2400px;
+        margin: 0 auto;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        display: flex;
+        flex-direction: column;
+        height: 600px;
+        overflow: hidden;
+        border: 1px solid #dee2e6;
+    }
+
+    .chat-window {
+        flex: 1;
+        padding: 20px;
+        overflow-y: auto;
+        background-color: #f8f9fa;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+    }
+
+    .message {
+        display: flex;
+        margin-bottom: 10px;
+        animation: fadeIn 0.3s ease;
+    }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .user-message {
+        justify-content: flex-end;
+    }
+
+    .agent-message {
+        justify-content: flex-start;
+    }
+
+    .message-content {
+        max-width: 75%;
+        padding: 12px 16px;
+        border-radius: 18px;
+        font-size: 15px;
+        line-height: 1.5;
+        word-wrap: break-word;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+
+    .user-message .message-content {
+        background-color: #007bff;
+        color: white;
+        border-bottom-right-radius: 4px;
+    }
+
+    .agent-message .message-content {
+        background-color: #fff;
+        color: #333;
+        border-bottom-left-radius: 4px;
+        border: 1px solid #e9ecef;
+    }
+
+    .chat-input-area {
+        padding: 20px;
+        border-top: 1px solid #dee2e6;
+        background-color: #fff;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+    }
+
+    #user-input {
+        flex: 1 1 0%;
+        min-width: 0;
+        padding: 12px 16px;
+        border: 1px solid #ced4da;
+        border-radius: 24px;
+        outline: none;
+        transition: all 0.2s;
+        font-size: 18px;
+    }
+
+    #user-input:focus {
+        border-color: #007bff;
+        box-shadow: 0 0 0 3px rgba(0,123,255,0.15);
+    }
+
+    #send-btn {
+        flex: 0 0 auto;
+        width: auto !important;
+        min-width: 80px;
+        border-radius: 20px;
+        padding: 8px 16px;
+        height: 40px;
+        font-weight: 500;
+        font-size: 13px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        transition: background-color 0.2s;
+        white-space: nowrap;
+    }
+    
+    #send-btn:hover {
+        background-color: #0069d9;
+    }
+
+    /* Loading animation dots */
+    .typing-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 16px 20px;
+        background-color: #fff;
+        border-radius: 18px;
+        border-bottom-left-radius: 4px;
+        width: fit-content;
+        border: 1px solid #e9ecef;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+
+    .dot {
+        width: 8px;
+        height: 8px;
+        background-color: #adb5bd;
+        border-radius: 50%;
+        animation: bounce 1.4s infinite ease-in-out both;
+    }
+
+    .dot:nth-child(1) { animation-delay: -0.32s; }
+    .dot:nth-child(2) { animation-delay: -0.16s; }
+
+    @keyframes bounce {
+        0%, 80%, 100% { transform: scale(0); }
+        40% { transform: scale(1); }
+    }
+    
+    /* Dark mode support */
+    [data-bs-theme="dark"] .chat-container {
+        background: #2b3035;
+        border-color: #495057;
+    }
+    
+    [data-bs-theme="dark"] .chat-window {
+        background-color: #212529;
+    }
+    
+    [data-bs-theme="dark"] .chat-input-area {
+        background-color: #2b3035;
+        border-top-color: #495057;
+    }
+    
+    [data-bs-theme="dark"] #user-input {
+        background-color: #212529;
+        border-color: #495057;
+        color: #fff;
+    }
+    
+    [data-bs-theme="dark"] #user-input:focus {
+        border-color: #0d6efd;
+        box-shadow: 0 0 0 3px rgba(13,110,253,0.25);
+    }
+    
+    [data-bs-theme="dark"] .agent-message .message-content {
+        background-color: #343a40;
+        color: #e9ecef;
+        border-color: #495057;
+    }
+    
+    [data-bs-theme="dark"] .typing-indicator {
+        background-color: #343a40;
+        border-color: #495057;
+    }
+    
+    [data-bs-theme="dark"] .dot {
+        background-color: #6c757d;
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const chatWindow = document.getElementById('chat-window');
+        const userInput = document.getElementById('user-input');
+        const sendBtn = document.getElementById('send-btn');
+        const webhookUrl = 'https://n8n.lan/webhook/4284d2aa-27d6-4d8a-806b-2001c5361e15';
+        
+        // Generate a session UID that persists for this page session
+        const sessionUID = (typeof crypto !== 'undefined' && crypto.randomUUID) 
+            ? crypto.randomUUID() 
+            : 'uid-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        
+        console.log('Session UID:', sessionUID);
+
+        function appendMessage(text, sender) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = `message ${sender}-message`;
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            
+            // Simple formatting: handle newlines
+            // If you expect markdown or HTML, you might need a parser, 
+            // but for safety I'll use textContent and convert newlines to <br>
+            
+            // For now, just text content to avoid XSS
+            contentDiv.innerText = text; 
+            
+            msgDiv.appendChild(contentDiv);
+            chatWindow.appendChild(msgDiv);
+            scrollToBottom();
+        }
+        
+        function scrollToBottom() {
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        function showTypingIndicator() {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message agent-message typing-msg';
+            msgDiv.id = 'typing-indicator';
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'typing-indicator';
+            
+            for (let i = 0; i < 3; i++) {
+                const dot = document.createElement('div');
+                dot.className = 'dot';
+                contentDiv.appendChild(dot);
+            }
+            
+            msgDiv.appendChild(contentDiv);
+            chatWindow.appendChild(msgDiv);
+            scrollToBottom();
+        }
+
+        function removeTypingIndicator() {
+            const indicator = document.getElementById('typing-indicator');
+            if (indicator) {
+                indicator.remove();
+            }
+        }
+
+        async function handleSend() {
+            const text = userInput.value.trim();
+            if (!text) return;
+
+            // Add user message
+            appendMessage(text, 'user');
+            userInput.value = '';
+            userInput.focus();
+
+            // Show typing
+            showTypingIndicator();
+
+            try {
+                // Create AbortController for timeout handling (120 seconds)
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 seconds
+                
+                const response = await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        input: text,
+                        uid: sessionUID
+                    }),
+                    signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                // Remove typing indicator
+                removeTypingIndicator();
+                
+                // Display response
+                // The expected format is { "answer": ... }
+                if (data && data.answer) {
+                    appendMessage(data.answer, 'agent');
+                } else {
+                    // Fallback if answer key is missing but we got JSON
+                    appendMessage("Received a response, but couldn't find the 'answer' field.", 'agent');
+                    console.log("Full response:", data);
+                }
+                
+            } catch (error) {
+                removeTypingIndicator();
+                if (error.name === 'AbortError') {
+                    appendMessage('Request timed out after 120 seconds. The request may still be processing. Please try again or check if the request completed.', 'agent');
+                } else {
+                    appendMessage(`Error: ${error.message}. Please try again later.`, 'agent');
+                }
+                console.error('Error:', error);
+            }
+        }
+
+        sendBtn.addEventListener('click', handleSend);
+        
+        userInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                handleSend();
+            }
+        });
+        
+        // Focus input on load
+        userInput.focus();
+    });
+</script>
+{% endblock %}
+

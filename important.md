@@ -1,8 +1,8 @@
 # TuneForge - Critical Information
 
-## 🎯 **CURRENT STATUS: SONIC TRAVELLER IS FULLY FUNCTIONAL** ✅
+## 🎯 **CURRENT STATUS: MUSICAL AGENT INTEGRATED** ✅
 
-The Sonic Traveller AI-powered playlist generation system is now **production-ready** and successfully generates playlists using audio feature similarity analysis.
+The "Musical Agent" chat interface has been added, allowing natural language interaction with an AI agent via n8n webhook integration.
 
 ## 🚀 **Core Features**
 
@@ -12,14 +12,20 @@ The Sonic Traveller AI-powered playlist generation system is now **production-re
 - Progress tracking and real-time updates
 
 ### **Sonic Traveller (AI + Audio Analysis)**
-- **NEW**: Enhanced iterative generation with feedback loop
-- **NEW**: Random seed integration to prevent stale results
-- **NEW**: Adaptive prompting using successful candidates as examples
-- **NEW**: Local playlist history integration with metadata
-- **NEW**: Audio feature similarity matching with weighted Euclidean distance
-- **NEW**: Background processing with progress tracking
-- **NEW**: Export to JSON and M3U formats
-- **NEW**: Performance optimized with database indexes and caching
+- Enhanced iterative generation with feedback loop
+- Random seed integration to prevent stale results
+- Adaptive prompting using successful candidates as examples
+- Local playlist history integration with metadata
+- Audio feature similarity matching with weighted Euclidean distance
+- Background processing with progress tracking
+- Export to JSON and M3U formats
+- Performance optimized with database indexes and caching
+
+### **Musical Agent (NEW)**
+- **Chat Interface**: Modern, slick chat UI for conversational interaction.
+- **n8n Integration**: Directly communicates with n8n webhook (`https://n8n.lan/webhook/...`) to process user requests.
+- **Interactive**: Real-time "typing" feedback and JSON-based response handling.
+- **Menu Integration**: Accessible directly from the sidebar under "Sonic Traveller".
 
 ## 🔧 **API Endpoints**
 
