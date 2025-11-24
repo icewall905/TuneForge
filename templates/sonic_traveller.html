@@ -1,0 +1,798 @@
+{% extends 'layout.html' %}
+
+{% block title %}Sonic Traveller - TuneForge{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🎵 Sonic Traveller</h1>
+    <p>AI-powered playlist generation based on track audio features.</p>
+</div>
+
+<div class="content-container">
+
+    <div class="playlist-container">
+        <div class="settings-section">
+            <div class="form-group">
+                <label for="seed_search">Search Local Library for Seed:</label>
+                <input type="text" id="seed_search" class="form-control" placeholder="Type title or artist...">
+                <div id="seed_results" class="list-group" style="max-height: 220px; overflow:auto; margin-top:8px;"></div>
+                <div id="seed_selected" class="help-text" style="margin-top:6px; display:none;"></div>
+                <div id="seed_feature_box" class="list-group" style="display:none; margin-top:8px;">
+                    <div class="list-group-item" id="seed_feature_summary">Features: loading...</div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="num_songs">Target Playlist Size (N):</label>
+                <select id="num_songs" class="form-control">
+                    <option value="10">10</option>
+                    <option value="15">15</option>
+                    <option value="20" selected>20</option>
+                    <option value="25">25</option>
+                    <option value="30">30</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="threshold">Similarity Threshold (T): <span id="t_val">0.5</span></label>
+                <input type="range" id="threshold" min="0.10" max="2.00" step="0.01" value="0.5">
+                <p class="help-text">Lower is stricter (normalized distance). Suggested: 0.30–1.00 depending on desired similarity.</p>
+            </div>
+
+
+
+            <div class="form-group">
+                <button id="start_btn" class="primary-button" disabled>Generate</button>
+                <button id="stop_btn" class="secondary-button" style="display:none;">Stop</button>
+            </div>
+        </div>
+
+        <div id="progress_section" style="display:none;" class="progress-section">
+            <h3>Generation Progress</h3>
+            <div class="progress-bar-container">
+                <div class="progress-bar">
+                    <div id="progress_fill" class="progress-fill" style="width: 0%"></div>
+                </div>
+                <div id="progress_text" class="progress-text">0%</div>
+            </div>
+            <div id="progress_step" class="progress-step">Initializing...</div>
+            <div id="progress_stats" class="progress-stats">
+                <span id="attempts_text">Iterations: 0/10</span>
+                <span id="candidates_text">Candidates: 0</span>
+                <span id="accepted_text">Accepted: 0</span>
+                <span id="random_seed_text" style="display:none;">Seed: <span id="seed_value"></span></span>
+            </div>
+            <div id="feedback_info" class="feedback-info" style="display:none;">
+                <h4>Feedback Loop Status</h4>
+                <div id="feedback_details">Building feedback from iterations...</div>
+            </div>
+        </div>
+
+        <div class="results-container">
+            <h2>Results</h2>
+            <div id="result_meta" class="help-text" style="margin-bottom:8px;"></div>
+            <ul id="results_list" class="list-group"></ul>
+            <div id="export_section" style="display:none; margin-top:16px;">
+                <button id="export_json_btn" class="secondary-button">Export JSON</button>
+                <button id="export_m3u_btn" class="secondary-button">Export M3U</button>
+            </div>
+            
+            <!-- Service Integration Section -->
+            <div id="service_integration_section" style="display:none; margin-top:20px;">
+                <h3>🎵 Save to Music Services</h3>
+                <div class="service-integration-container">
+                    <!-- Playlist Naming -->
+                    <div class="playlist-naming">
+                        <label for="playlist_name">Playlist Name:</label>
+                        <input type="text" id="playlist_name" class="form-control" placeholder="Enter custom playlist name (optional)">
+                        <small class="help-text">Leave empty to use auto-generated name</small>
+                    </div>
+                    
+                    <!-- Service Buttons -->
+                    <div class="service-buttons">
+                        <button id="save_to_navidrome_btn" class="service-button navidrome" style="display:none;">
+                            <span class="service-icon">🎧</span>
+                            <span class="service-text">Save to Navidrome</span>
+                        </button>
+                        <button id="save_to_plex_btn" class="service-button plex" style="display:none;">
+                            <span class="service-icon">🎬</span>
+                            <span class="service-text">Save to Plex</span>
+                        </button>
+                    </div>
+                    
+                    <!-- Service Status -->
+                    <div id="service_status" class="service-status" style="display:none;">
+                        <div class="status-message"></div>
+                        <div class="mapping-results" style="display:none;">
+                            <h4>Track Mapping Results</h4>
+                            <div class="mapping-summary"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.progress-section {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+}
+
+.progress-bar-container {
+    position: relative;
+    margin: 15px 0;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 20px;
+    background-color: #e9ecef;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #007bff, #0056b3);
+    transition: width 0.3s ease;
+    border-radius: 10px;
+}
+
+.progress-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-weight: bold;
+    color: #495057;
+    font-size: 12px;
+}
+
+.progress-step {
+    font-weight: 500;
+    color: #495057;
+    margin: 10px 0;
+    text-align: center;
+}
+
+.progress-stats {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 15px;
+    font-size: 14px;
+    color: #6c757d;
+}
+
+.progress-stats span {
+    background: white;
+    padding: 5px 10px;
+    border-radius: 15px;
+    border: 1px solid #dee2e6;
+}
+
+.feedback-info {
+    background: #e8f4fd;
+    border: 1px solid #bee5eb;
+    border-radius: 8px;
+    padding: 15px;
+    margin-top: 15px;
+}
+
+.feedback-info h4 {
+    margin: 0 0 10px 0;
+    color: #0c5460;
+    font-size: 14px;
+}
+
+.feedback-details {
+    font-size: 12px;
+    color: #0c5460;
+    line-height: 1.4;
+}
+
+/* Service Integration Styles */
+.service-integration-container {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+}
+
+.playlist-naming {
+    margin-bottom: 20px;
+}
+
+.playlist-naming label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: #495057;
+}
+
+.playlist-naming input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.playlist-naming .help-text {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.service-buttons {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.service-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    min-width: 160px;
+}
+
+.service-button.navidrome {
+    background: linear-gradient(135deg, #28a745, #20c997);
+    color: white;
+}
+
+.service-button.navidrome:hover {
+    background: linear-gradient(135deg, #218838, #1ea085);
+    transform: translateY(-1px);
+}
+
+.service-button.plex {
+    background: linear-gradient(135deg, #fd7e14, #e83e8c);
+    color: white;
+}
+
+.service-button.plex:hover {
+    background: linear-gradient(135deg, #e8690b, #d63384);
+    transform: translateY(-1px);
+}
+
+.service-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+.service-icon {
+    font-size: 16px;
+}
+
+.service-status {
+    background: #e8f4fd;
+    border: 1px solid #bee5eb;
+    border-radius: 6px;
+    padding: 15px;
+}
+
+.status-message {
+    font-weight: 500;
+    margin-bottom: 15px;
+}
+
+.status-message.success {
+    color: #155724;
+}
+
+.status-message.error {
+    color: #721c24;
+}
+
+.status-message.loading {
+    color: #0c5460;
+}
+
+.mapping-results h4 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    color: #0c5460;
+}
+
+.mapping-summary {
+    font-size: 12px;
+    color: #0c5460;
+    line-height: 1.4;
+}
+
+.secondary-button {
+    background-color: #6c757d;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 10px;
+}
+
+.secondary-button:hover {
+    background-color: #5a6268;
+}
+
+.secondary-button:disabled {
+    background-color: #adb5bd;
+    cursor: not-allowed;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const seedInput = document.getElementById('seed_search');
+    const seedResults = document.getElementById('seed_results');
+    const seedSelected = document.getElementById('seed_selected');
+    const startBtn = document.getElementById('start_btn');
+    const stopBtn = document.getElementById('stop_btn');
+    const list = document.getElementById('results_list');
+    const progressSection = document.getElementById('progress_section');
+    const progressFill = document.getElementById('progress_fill');
+    const progressText = document.getElementById('progress_text');
+    const progressStep = document.getElementById('progress_step');
+    const attemptsText = document.getElementById('attempts_text');
+    const candidatesText = document.getElementById('candidates_text');
+    const acceptedText = document.getElementById('accepted_text');
+    const tSlider = document.getElementById('threshold');
+    const tVal = document.getElementById('t_val');
+    const exportSection = document.getElementById('export_section');
+
+    let seedTrack = null; // {id,title,artist,album}
+    let searchTimer = null;
+    let currentJobId = null;
+    let progressTimer = null;
+
+    tSlider.addEventListener('input', () => { tVal.textContent = tSlider.value; });
+
+    async function setSeed(track) {
+        seedTrack = track;
+        seedSelected.style.display = 'block';
+        seedSelected.textContent = `Seed: ${track.artist} - ${track.title}`;
+        startBtn.disabled = false;
+        seedResults.innerHTML = '';
+        // fetch features for seed and show a small summary
+        try {
+            const resp = await fetch(`/api/sonic/seed-info?track_id=${track.id}`);
+            const data = await resp.json();
+            const box = document.getElementById('seed_feature_box');
+            const summ = document.getElementById('seed_feature_summary');
+            if (!data || !data.success) {
+                summ.textContent = 'No features yet for this track';
+                box.style.display = 'block';
+                return;
+            }
+            if (data.schema_ok === false) {
+                summ.textContent = `Audio features schema incomplete (missing: ${(data.missing||[]).join(', ')})`;
+                box.style.display = 'block';
+                return;
+            }
+            const f = data.features || {};
+            const parts = [];
+            if (f.energy !== undefined) parts.push(`energy: ${Number(f.energy).toFixed(2)}`);
+            if (f.valence !== undefined) parts.push(`valence: ${Number(f.valence).toFixed(2)}`);
+            if (f.tempo !== undefined) parts.push(`tempo: ${Math.round(f.tempo)} bpm`);
+            summ.textContent = parts.length ? parts.join('  ·  ') : 'No features yet for this track';
+            box.style.display = 'block';
+        } catch (e) {
+            const box = document.getElementById('seed_feature_box');
+            const summ = document.getElementById('seed_feature_summary');
+            summ.textContent = 'Error loading features';
+            box.style.display = 'block';
+        }
+    }
+
+    seedInput.addEventListener('input', () => {
+        const q = seedInput.value.trim();
+        console.log('Search input:', q, 'length:', q.length);
+        if (searchTimer) clearTimeout(searchTimer);
+        if (q.length < 2) { 
+            seedResults.innerHTML = '';
+            console.log('Query too short, clearing results');
+            return; 
+        }
+        searchTimer = setTimeout(async () => {
+            try {
+                console.log('Starting search for:', q);
+                const resp = await fetch(`/api/local-search?q=${encodeURIComponent(q)}`);
+                console.log('Search response status:', resp.status);
+                
+                if (!resp.ok) {
+                    throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+                }
+                
+                const rows = await resp.json();
+                console.log('Search results:', rows);
+                console.log('Number of results:', rows ? rows.length : 0);
+                
+                seedResults.innerHTML = '';
+                if (rows && rows.length > 0) {
+                    rows.forEach((r, index) => {
+                        console.log(`Creating result item ${index + 1}:`, r);
+                        const item = document.createElement('div');
+                        item.className = 'list-group-item search-result';
+                        item.innerHTML = `<strong>${r.artist || 'Unknown Artist'}</strong> - ${r.title || 'Unknown Title'}<br><span class="help-text">${r.album || 'Unknown Album'}</span>`;
+                        item.style.cursor = 'pointer';
+                        item.onclick = () => setSeed(r);
+                        seedResults.appendChild(item);
+                        console.log(`Added item ${index + 1} to DOM`);
+                    });
+                    console.log(`Displayed ${rows.length} results`);
+                    
+                    // Visual feedback that results are shown
+                    seedResults.style.border = '2px solid #28a745';
+                    seedResults.style.backgroundColor = '#1e1e1e';
+                } else {
+                    console.log('No results to display');
+                    seedResults.innerHTML = '<div class="list-group-item search-result">No results found</div>';
+                    seedResults.style.border = '2px solid #dc3545';
+                }
+            } catch(e) {
+                console.error('Search failed:', e);
+            }
+        }, 300);
+    });
+
+    function updateProgress(job) {
+        progressFill.style.width = `${job.progress}%`;
+        progressText.textContent = `${Math.round(job.progress)}%`;
+        progressStep.textContent = job.current_step;
+        attemptsText.textContent = `Iterations: ${job.attempts}/${job.max_attempts}`;
+        candidatesText.textContent = `Candidates: ${job.total_candidates}`;
+        acceptedText.textContent = `Accepted: ${job.accepted_tracks}`;
+        
+        // Show random seed if available
+        if (job.random_seed) {
+            document.getElementById('random_seed_text').style.display = 'inline-block';
+            document.getElementById('seed_value').textContent = job.random_seed;
+        }
+        
+        // Show feedback loop information
+        if (job.accepted_examples && job.accepted_examples.length > 0) {
+            document.getElementById('feedback_info').style.display = 'block';
+            const feedbackDetails = document.getElementById('feedback_details');
+            
+            const lastExamples = job.accepted_examples.slice(-3);
+            const exampleText = lastExamples.map(ex => `${ex.artist} - ${ex.title}`).join(', ');
+            
+            feedbackDetails.innerHTML = `
+                <div class="feedback-details">
+                    <strong>Learning from successful tracks:</strong><br>
+                    ${exampleText}<br>
+                    <strong>Total examples collected:</strong> ${job.accepted_examples.length}<br>
+                    <strong>Iteration history:</strong> ${job.iteration_history ? job.iteration_history.length : 0} iterations completed
+                </div>
+            `;
+        }
+    }
+
+    function showResults(job) {
+        const meta = document.getElementById('result_meta');
+        if (job.status === 'completed') {
+            const acceptanceRate = job.total_candidates > 0 ? ((job.accepted_tracks / job.total_candidates) * 100).toFixed(1) : 0;
+            meta.innerHTML = `
+                Generated <strong>${job.accepted_tracks}</strong> tracks from <strong>${job.total_candidates}</strong> candidates in <strong>${job.attempts}</strong> iterations.<br>
+                <strong>Acceptance rate:</strong> ${acceptanceRate}% | <strong>Random seed:</strong> ${job.random_seed || 'N/A'}<br>
+                <strong>Feedback loop:</strong> Used ${job.accepted_examples ? job.accepted_examples.length : 0} successful examples to improve suggestions
+            `;
+            exportSection.style.display = 'block';
+        } else if (job.status === 'failed') {
+            meta.textContent = `Generation failed: ${job.error}`;
+            exportSection.style.display = 'none';
+        } else if (job.status === 'stopped') {
+            const acceptanceRate = job.total_candidates > 0 ? ((job.accepted_tracks / job.total_candidates) * 100).toFixed(1) : 0;
+            meta.innerHTML = `
+                Generation stopped. Generated <strong>${job.accepted_tracks}</strong> tracks from <strong>${job.total_candidates}</strong> candidates.<br>
+                <strong>Acceptance rate:</strong> ${acceptanceRate}% | <strong>Random seed:</strong> ${job.random_seed || 'N/A'}
+            `;
+            exportSection.style.display = 'block';
+        }
+
+        list.innerHTML = '';
+        (job.results || []).forEach(tr => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item';
+            const dist = (tr.distance !== undefined) ? `  ·  d=${tr.distance}` : '';
+            li.textContent = `${tr.artist} - ${tr.title}${dist}`;
+            list.appendChild(li);
+        });
+    }
+
+    async function pollProgress() {
+        if (!currentJobId) return;
+        
+        try {
+            const resp = await fetch(`/api/sonic/status?job_id=${currentJobId}`);
+            const data = await resp.json();
+            
+            if (!data.success) {
+                console.error('Progress poll failed:', data.error);
+                return;
+            }
+            
+            const job = data.job;
+            updateProgress(job);
+            
+            if (job.status === 'running') {
+                // Continue polling
+                progressTimer = setTimeout(pollProgress, 1000);
+            } else {
+                // Job completed, failed, or stopped
+                showResults(job);
+                progressSection.style.display = 'none';
+                startBtn.style.display = 'inline-block';
+                stopBtn.style.display = 'none';
+                startBtn.disabled = false;
+                
+                // Store the completed job data for service integration
+                window.currentSonicJob = job;
+                
+                // Don't clean up the job immediately - keep it for service integration
+                // The job will be cleaned up automatically by the backend after 1 hour
+                console.log('Job completed, keeping data for service integration');
+            }
+        } catch (e) {
+            console.error('Progress poll error:', e);
+            // Continue polling on error
+            progressTimer = setTimeout(pollProgress, 2000);
+        }
+    }
+
+    startBtn.addEventListener('click', async () => {
+        if (!seedTrack) return;
+        
+        list.innerHTML = '';
+        progressSection.style.display = 'block';
+        startBtn.style.display = 'none';
+        stopBtn.style.display = 'inline-block';
+        startBtn.disabled = true;
+        
+        const payload = {
+            seed_track_id: seedTrack.id,
+            num_songs: parseInt(document.getElementById('num_songs').value) || 20,
+            threshold: parseFloat(tSlider.value) || 0.5
+        };
+        
+        try {
+            const resp = await fetch('/api/sonic/start', { 
+                method: 'POST', 
+                headers: {'Content-Type': 'application/json'}, 
+                body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to start generation');
+            }
+            
+            currentJobId = data.job_id;
+            
+            // Start progress polling
+            pollProgress();
+            
+        } catch (e) {
+            console.error('Start failed:', e);
+            alert(`Failed to start generation: ${e.message}`);
+            progressSection.style.display = 'none';
+            startBtn.style.display = 'inline-block';
+            stopBtn.style.display = 'none';
+            startBtn.disabled = false;
+        }
+    });
+
+    stopBtn.addEventListener('click', async () => {
+        if (!currentJobId) return;
+        
+        try {
+            const resp = await fetch('/api/sonic/stop', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({job_id: currentJobId})
+            });
+            
+            if (resp.ok) {
+                // Progress polling will handle the final state update
+                console.log('Stop request sent');
+            }
+        } catch (e) {
+            console.error('Stop failed:', e);
+        }
+    });
+
+    // Export functionality
+    document.getElementById('export_json_btn').addEventListener('click', () => {
+        if (!currentJobId) return;
+        
+        // Download JSON file
+        const url = `/api/sonic/export-json?job_id=${currentJobId}`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    });
+
+    document.getElementById('export_m3u_btn').addEventListener('click', () => {
+        if (!currentJobId) return;
+        
+        // Download M3U file
+        const url = `/api/sonic/export-m3u?job_id=${currentJobId}`;
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = '';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    });
+
+    // Service Integration Functionality
+    let serviceButtonsInitialized = false;
+
+    async function initializeServiceButtons() {
+        if (serviceButtonsInitialized) return;
+        
+        try {
+            // Check which services are enabled
+            const response = await fetch('/api/sonic/service-config');
+            if (response.ok) {
+                const config = await response.json();
+                
+                if (config.success) {
+                    // Show Navidrome button if enabled
+                    if (config.navidrome_enabled) {
+                        document.getElementById('save_to_navidrome_btn').style.display = 'inline-flex';
+                    }
+                    
+                    // Show Plex button if enabled
+                    if (config.plex_enabled) {
+                        document.getElementById('save_to_plex_btn').style.display = 'inline-flex';
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Failed to check service settings:', e);
+        }
+        
+        serviceButtonsInitialized = true;
+    }
+
+    async function saveToService(serviceName) {
+        if (!currentJobId && !window.currentSonicJob) {
+            alert('No playlist generated yet. Please generate a playlist first.');
+            return;
+        }
+        
+        const playlistName = document.getElementById('playlist_name').value.trim();
+        const button = document.getElementById(`save_to_${serviceName}_btn`);
+        const originalText = button.innerHTML;
+        
+        try {
+            // Disable button and show loading state
+            button.disabled = true;
+            button.innerHTML = '<span class="service-icon">⏳</span><span class="service-text">Saving...</span>';
+            
+            // Show service status section
+            const serviceStatus = document.getElementById('service_status');
+            serviceStatus.style.display = 'block';
+            
+            const statusMessage = serviceStatus.querySelector('.status-message');
+            statusMessage.textContent = `Saving playlist to ${serviceName}...`;
+            statusMessage.className = 'status-message loading';
+            
+            // Use current job ID or completed job ID
+            const jobId = currentJobId || window.currentSonicJob.id;
+            
+            // Make API call
+            const response = await fetch(`/api/sonic/save-to-${serviceName}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    job_id: jobId,
+                    playlist_name: playlistName
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                // Success
+                statusMessage.textContent = result.message;
+                statusMessage.className = 'status-message success';
+                
+                // Show mapping results
+                if (result.mapping_results) {
+                    const mappingResults = serviceStatus.querySelector('.mapping-results');
+                    const mappingSummary = serviceStatus.querySelector('.mapping-summary');
+                    
+                    const found = result.mapping_results.found.length;
+                    const notFound = result.mapping_results.not_found.length;
+                    const total = result.mapping_results.total_processed;
+                    
+                    mappingSummary.innerHTML = `
+                        <strong>Successfully mapped:</strong> ${found}/${total} tracks<br>
+                        <strong>Not found in ${serviceName}:</strong> ${notFound} tracks<br>
+                        <strong>Playlist ID:</strong> ${result.playlist_id}<br>
+                        <strong>Playlist Name:</strong> ${result.playlist_name}
+                    `;
+                    
+                    mappingResults.style.display = 'block';
+                }
+                
+                // Clear playlist name input
+                document.getElementById('playlist_name').value = '';
+                
+            } else {
+                // Error
+                statusMessage.textContent = `Error: ${result.error}`;
+                statusMessage.className = 'status-message error';
+                
+                // Show mapping results if available
+                if (result.mapping_results) {
+                    const mappingResults = serviceStatus.querySelector('.mapping-results');
+                    const mappingSummary = serviceStatus.querySelector('.mapping-summary');
+                    
+                    const found = result.mapping_results.found.length;
+                    const notFound = result.mapping_results.not_found.length;
+                    const total = result.mapping_results.total_processed;
+                    
+                    mappingSummary.innerHTML = `
+                        <strong>Successfully mapped:</strong> ${found}/${total} tracks<br>
+                        <strong>Not found in ${serviceName}:</strong> ${notFound} tracks<br>
+                        <strong>Error:</strong> ${result.error}
+                    `;
+                    
+                    mappingResults.style.display = 'block';
+                }
+            }
+            
+        } catch (e) {
+            console.error(`Error saving to ${serviceName}:`, e);
+            const statusMessage = serviceStatus.querySelector('.status-message');
+            statusMessage.textContent = `Network error: ${e.message}`;
+            statusMessage.className = 'status-message error';
+        } finally {
+            // Re-enable button
+            button.disabled = false;
+            button.innerHTML = originalText;
+        }
+    }
+
+    // Service button event listeners
+    document.getElementById('save_to_navidrome_btn').addEventListener('click', () => saveToService('navidrome'));
+    document.getElementById('save_to_plex_btn').addEventListener('click', () => saveToService('plex'));
+
+    // Initialize service buttons when results are shown
+    const originalShowResults = showResults;
+    showResults = function(job) {
+        originalShowResults(job);
+        
+        // Show service integration section and initialize buttons
+        if (job.status === 'completed' || job.status === 'stopped') {
+            document.getElementById('service_integration_section').style.display = 'block';
+            initializeServiceButtons();
+        }
+    };
+});
+</script>
+{% endblock %}
+
+

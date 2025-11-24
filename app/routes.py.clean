@@ -1,0 +1,466 @@
+from flask import Blueprint, render_template, request, jsonify, Response, current_app
+import requests
+import json
+import configparser
+import os
+import datetime
+import time
+import re
+import random
+import xml.etree.ElementTree as ET
+
+# --- Global Debug Flag ---
+DEBUG_OLLAMA_RESPONSE = False
+
+main_bp = Blueprint('main', __name__)
+
+CONFIG_FILE = 'config.ini'
+
+def load_config():
+    config = configparser.ConfigParser()
+    config.read(CONFIG_FILE)
+    return config
+
+def get_config_value(section, key, default=None):
+    """Get a value from the config, case-insensitive for keys"""
+    config = load_config()
+    if section in config:
+        # Find the key case-insensitively
+        for config_key in config[section]:
+            if config_key.lower() == key.lower():
+                return config[section][config_key]
+    return default
+
+@main_bp.route('/')
+def index():
+    return render_template('index.html')
+
+@main_bp.route('/history')
+def history():
+    return render_template('history.html')
+
+@main_bp.route('/settings')
+def settings():
+    return render_template('settings.html')
+
+@main_bp.route('/test-navidrome')
+def test_navidrome_page():
+    return render_template('test_navidrome.html')
+
+@main_bp.route('/api/test-navidrome-connection', methods=['POST'])
+def api_test_navidrome_connection():
+    data = request.json
+    navidrome_url = data.get('navidrome_url')
+    username = data.get('username')
+    password = data.get('password')
+    
+    result = test_navidrome_connection(navidrome_url, username, password)
+    return jsonify(result)
+
+def test_navidrome_connection(navidrome_url, username, password):
+    """Test connection to Navidrome and return diagnostic information"""
+    result = {
+        'success': False,
+        'error': None,
+        'details': {},
+        'server_info': None
+    }
+    
+    # Check for missing parameters
+    if not navidrome_url:
+        result['error'] = "Navidrome URL is missing"
+        return result
+    
+    if not username:
+        result['error'] = "Username is missing"
+        return result
+    
+    if not password:
+        result['error'] = "Password is missing"
+        return result
+    
+    # Process the URL to ensure it's correctly formatted
+    base_url = navidrome_url.rstrip('/')
+    
+    # Check if URL already has /rest path
+    result['details']['original_url'] = navidrome_url
+    result['details']['processed_url'] = base_url
+    
+    if '/rest' not in base_url:
+        base_url = f"{base_url}/rest"
+        result['details']['rest_path_added'] = True
+    else:
+        result['details']['rest_path_added'] = False
+    
+    result['details']['final_url'] = base_url
+    
+    # Try to ping the server
+    ping_url = f"{base_url}/ping.view"
+    params = {
+        'u': username,
+        'p': password,
+        'v': '1.16.1',
+        'c': 'flask-ollama-playlist',
+        'f': 'json'
+    }
+    
+    try:
+        # Test ping endpoint
+        result['details']['ping_url'] = ping_url
+        ping_response = requests.get(ping_url, params=params, timeout=10)
+        result['details']['ping_status_code'] = ping_response.status_code
+        
+        if ping_response.status_code == 200:
+            try:
+                ping_data = ping_response.json()
+                result['details']['ping_response'] = ping_data
+                
+                if ping_data.get('subsonic-response', {}).get('status') == 'ok':
+                    result['success'] = True
+                else:
+                    error = ping_data.get('subsonic-response', {}).get('error', {})
+                    result['error'] = f"API Error: {error.get('message')} (code {error.get('code')})"
+            except json.JSONDecodeError:
+                result['error'] = "Could not parse JSON response from server"
+                result['details']['ping_response_text'] = ping_response.text[:500]  # First 500 chars
+        else:
+            result['error'] = f"Server returned status code {ping_response.status_code}"
+            result['details']['ping_response_text'] = ping_response.text[:500]  # First 500 chars
+            
+        # Try to get server version info if ping was successful
+        if result['success']:
+            system_url = f"{base_url}/getSystemInfo.view"
+            system_response = requests.get(system_url, params=params, timeout=10)
+            
+            if system_response.status_code == 200:
+                try:
+                    system_data = system_response.json()
+                    if system_data.get('subsonic-response', {}).get('status') == 'ok':
+                        result['server_info'] = system_data.get('subsonic-response', {}).get('systemInfo', {})
+                except:
+                    pass  # Silently fail on system info
+            
+    except requests.exceptions.ConnectionError:
+        result['error'] = "Connection error - could not connect to server"
+    except requests.exceptions.Timeout:
+        result['error'] = "Connection timed out"
+    except requests.exceptions.RequestException as e:
+        result['error'] = f"Request error: {str(e)}"
+    
+    return result
+
+def search_track_in_navidrome(query, navidrome_url, username, password):
+    """Search for tracks in Navidrome using the search3 endpoint"""
+    if not navidrome_url:
+        print("Navidrome URL is not configured")
+        return []
+        
+    # Remove trailing slash if present
+    base_url = navidrome_url.rstrip('/')
+    
+    # Check if URL already has /rest path - don't add it if it's already there
+    if '/rest' not in base_url:
+        base_url = f"{base_url}/rest"
+    
+    # Setup the search endpoint URL with proper parameter encoding
+    url = f"{base_url}/search3.view"
+    params = {
+        'u': username,
+        'p': password,
+        'v': '1.16.1',
+        'c': 'flask-ollama-playlist',
+        'f': 'json',
+        'query': query,
+        'songCount': 40,  # Limit to 40 songs max
+        'artistCount': 0,  # No artists
+        'albumCount': 0    # No albums
+    }
+    
+    print(f"DEBUG: Searching Navidrome for query: '{query}'")
+    
+    try:
+        # Make the request using the params parameter which properly handles URL encoding
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        
+        # Print the actual URL that was requested (for debugging)
+        print(f"DEBUG: Full search URL: {response.url}")
+        
+        data = response.json()
+        
+        # Debug: print the raw API response
+        print(f"DEBUG: Navidrome search response: {json.dumps(data, indent=2)}")
+        
+        if data.get('subsonic-response', {}).get('status') == 'ok':
+            search_result = data.get('subsonic-response', {}).get('searchResult3', {})
+            songs = search_result.get('song', [])
+            print(f"DEBUG: Found {len(songs)} songs in Navidrome")
+            
+            # Format the results similar to how the Ollama response is processed
+            tracks = []
+            for song in songs:
+                track_id = song.get('id')
+                title = song.get('title', 'Unknown Title')
+                artist = song.get('artist', 'Unknown Artist')
+                album = song.get('album', 'Unknown Album')
+                
+                tracks.append({
+                    'id': track_id,
+                    'title': title,
+                    'artist': artist,
+                    'album': album,
+                    'source': 'navidrome'
+                })
+                
+            return tracks
+        else:
+            error_message = data.get('subsonic-response', {}).get('error', {}).get('message')
+            print(f"Error searching Navidrome: {error_message}")
+            return []
+    except requests.exceptions.RequestException as e:
+        print(f"Error searching Navidrome: {e}")
+        return []
+    except json.JSONDecodeError as e:
+        print(f"Error decoding Navidrome search JSON response: {e}")
+        return []
+
+def create_playlist_in_navidrome(playlist_name, track_ids, navidrome_url, username, password):
+    # Process the URL to ensure it's correctly formatted
+    if not navidrome_url:
+        print("Navidrome URL is not configured")
+        return None
+        
+    # Remove trailing slash if present
+    base_url = navidrome_url.rstrip('/')
+    
+    # Check if URL already has /rest path - don't add it if it's already there
+    if '/rest' not in base_url:
+        base_url = f"{base_url}/rest"
+    
+    # Start with the base URL and standard parameters
+    url = f"{base_url}/createPlaylist.view"
+    params = {
+        'u': username,
+        'p': password,
+        'v': '1.16.1',
+        'c': 'flask-ollama-playlist',
+        'f': 'json',
+        'name': playlist_name
+    }
+    
+    # Add songId parameters for each track
+    if track_ids:
+        # Use a list for multiple values with the same key
+        # requests will handle this correctly in the URL
+        if not isinstance(track_ids, list):
+            track_ids = [track_ids]
+            
+        params['songId'] = track_ids
+        
+    print(f"DEBUG: Creating Navidrome playlist '{playlist_name}' with {len(track_ids) if track_ids else 0} tracks")
+    
+    try:
+        # Use params argument instead of building URL manually
+        response = requests.get(url, params=params)
+        response.raise_for_status()
+        
+        print(f"DEBUG: Full playlist creation URL: {response.url}")
+        
+        data = response.json()
+        print(f"DEBUG: Navidrome create playlist response: {json.dumps(data, indent=2)}")
+        
+        if data.get('subsonic-response', {}).get('status') == 'ok':
+            playlist_id = data['subsonic-response'].get('playlist', {}).get('id')
+            print(f"DEBUG: Successfully created Navidrome playlist with ID: {playlist_id}")
+            return playlist_id
+        else:
+            error_message = data.get('subsonic-response', {}).get('error', {}).get('message')
+            print(f"Error creating Navidrome playlist: {error_message}")
+            return None
+    except requests.exceptions.RequestException as e:
+        print(f"Error creating Navidrome playlist: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        print(f"Error decoding Navidrome playlist JSON response: {e}")
+        return None
+
+@main_bp.route('/api/generate-playlist', methods=['POST'])
+def api_generate_playlist():
+    # Extract request data
+    data = request.json
+    prompt = data.get('prompt')
+    num_songs = data.get('num_songs', 10)
+    
+    # Load configuration
+    ollama_api = get_config_value('Ollama', 'api_url', 'http://localhost:11434/api')
+    ollama_model = get_config_value('Ollama', 'model', 'llama3')
+    navidrome_url = get_config_value('Navidrome', 'url')
+    navidrome_username = get_config_value('Navidrome', 'username')
+    navidrome_password = get_config_value('Navidrome', 'password')
+    
+    # Generate streaming response
+    def generate():
+        # Yield initial info
+        yield 'data: {"status": "start", "message": "Starting playlist generation..."}\n\n'
+        time.sleep(0.5)  # Small delay for UI feedback
+        
+        # Call Ollama to generate the playlist
+        yield 'data: {"status": "progress", "message": "Asking AI to create a playlist..."}\n\n'
+        
+        # Get tracks from Ollama
+        tracks = generate_playlist_with_ollama(prompt, num_songs, ollama_api, ollama_model)
+        
+        if not tracks:
+            yield 'data: {"status": "error", "message": "Failed to generate playlist with Ollama"}\n\n'
+            return
+            
+        # Format the track list for display
+        yield f'data: {{"status": "tracks", "tracks": {json.dumps(tracks)}}}\n\n'
+        
+        # Create the playlist in Navidrome if configured
+        if navidrome_url and navidrome_username and navidrome_password:
+            # Get timestamp for playlist name
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            playlist_name = f"AI: {prompt} ({timestamp})"
+            
+            # Get the track IDs
+            track_ids = []
+            
+            # Search Navidrome for each track
+            yield 'data: {"status": "progress", "message": "Searching tracks in Navidrome..."}\n\n'
+            
+            for i, track in enumerate(tracks):
+                track_title = track.get('title', '')
+                track_artist = track.get('artist', '')
+                
+                # Construct a search query
+                search_query = f"{track_title} {track_artist}"
+                
+                # Search in Navidrome
+                search_results = search_track_in_navidrome(
+                    search_query, 
+                    navidrome_url, 
+                    navidrome_username, 
+                    navidrome_password
+                )
+                
+                if search_results:
+                    # Take the first match
+                    match = search_results[0]
+                    track_ids.append(match['id'])
+                    
+                    # Update the track info with the actual match
+                    tracks[i]['matched'] = True
+                    tracks[i]['match_info'] = match
+                else:
+                    tracks[i]['matched'] = False
+                
+                # Update progress
+                progress = (i + 1) / len(tracks) * 100
+                yield f'data: {{"status": "search_progress", "current": {i+1}, "total": {len(tracks)}, "percent": {progress}, "track_index": {i}}}\n\n'
+                
+                # Small delay to avoid overloading the Navidrome server
+                time.sleep(0.2)
+            
+            # Create the playlist if we found any tracks
+            if track_ids:
+                yield f'data: {{"status": "progress", "message": "Creating playlist in Navidrome with {len(track_ids)} tracks..."}}\n\n'
+                
+                playlist_id = create_playlist_in_navidrome(
+                    playlist_name, 
+                    track_ids, 
+                    navidrome_url, 
+                    navidrome_username, 
+                    navidrome_password
+                )
+                
+                if playlist_id:
+                    yield f'data: {{"status": "success", "message": "Playlist created successfully!", "playlist_id": "{playlist_id}", "matched_tracks": {len(track_ids)}}}\n\n'
+                else:
+                    yield 'data: {"status": "error", "message": "Failed to create playlist in Navidrome. Check logs for details."}\n\n'
+            else:
+                yield 'data: {"status": "warning", "message": "No matching tracks found in Navidrome"}\n\n'
+        else:
+            yield 'data: {"status": "warning", "message": "Navidrome not configured, playlist was generated but not saved"}\n\n'
+        
+        # Final summary
+        yield f'data: {{"status": "complete", "tracks": {json.dumps(tracks)}}}\n\n'
+    
+    return Response(generate(), mimetype='text/event-stream')
+
+def generate_playlist_with_ollama(prompt, num_songs, ollama_api, ollama_model):
+    """Generate a playlist using Ollama API"""
+    # Construct the prompt for Ollama
+    full_prompt = f"""
+    You are a music expert. Create a playlist of {num_songs} songs based on this request: "{prompt}".
+    
+    Format your response as a valid JSON array, with ONLY THE JSON ARRAY AND NOTHING ELSE.
+    Each song should be an object with:
+    - title: The song title
+    - artist: The song artist
+    - album: The album (if you know it, or "Unknown Album" if not)
+    - comments: A brief comment about why this song fits the request
+    
+    Example format:
+    [
+      {{
+        "title": "Song Name",
+        "artist": "Artist Name",
+        "album": "Album Name",
+        "comments": "Brief reason this song fits the request"
+      }},
+      ...
+    ]
+    
+    Make sure the JSON is valid and properly formatted with no additional text before or after.
+    """
+    
+    # Prepare the request to Ollama
+    url = f"{ollama_api}/generate"
+    payload = {
+        "model": ollama_model,
+        "prompt": full_prompt,
+        "stream": False,
+        "options": {
+            "temperature": 0.8
+        }
+    }
+    
+    print(f"DEBUG: Calling Ollama API with model: {ollama_model}")
+    
+    try:
+        # Call the Ollama API
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        
+        data = response.json()
+        response_text = data.get('response', '')
+        
+        if DEBUG_OLLAMA_RESPONSE:
+            print(f"DEBUG: Raw Ollama response: {response_text}")
+        
+        # Extract JSON from the response
+        # First, try to parse the response as-is
+        try:
+            tracks = json.loads(response_text)
+            if isinstance(tracks, list):
+                return tracks
+        except json.JSONDecodeError:
+            pass
+            
+        # If that fails, try to extract JSON from the text
+        json_match = re.search(r'\[\s*{.*}\s*\]', response_text, re.DOTALL)
+        if json_match:
+            try:
+                tracks = json.loads(json_match.group(0))
+                if isinstance(tracks, list):
+                    return tracks
+            except json.JSONDecodeError:
+                pass
+                
+        print(f"ERROR: Could not parse JSON from Ollama response")
+        return []
+        
+    except requests.exceptions.RequestException as e:
+        print(f"Error calling Ollama API: {e}")
+        return []

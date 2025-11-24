@@ -1,0 +1,76 @@
+# TuneForge Configuration File
+# Copy this file to config.ini and modify as needed
+
+[database]
+# Database configuration
+db_path = db/local_music.db
+
+[scanner]
+# File size limits
+max_file_size_mb = 500
+min_file_size_bytes = 1024
+
+# Performance tuning
+batch_size = 50
+db_timeout_seconds = 30
+metadata_timeout_seconds = 15
+
+# Incremental scanning
+enable_incremental_scan = yes
+skip_unchanged_files = yes
+
+# Symlink handling
+follow_symlinks = no
+detect_circular_symlinks = yes
+
+# Progress updates
+progress_update_interval = 100
+
+[audio_analysis]
+# Audio analysis settings
+max_workers = 1
+batch_size = 100
+default_limit = 1000
+
+# Auto-startup configuration - automatically start processes when TuneForge starts
+[auto_startup]
+# Automatically scan music library on startup
+enable_auto_scan = no
+# Automatically start audio analysis on startup  
+enable_auto_analysis = no
+# Delay before starting automatic processes (10-300 seconds)
+startup_delay_seconds = 30
+
+[monitoring]
+# Monitoring and auto-recovery configuration
+enabled = true
+stall_detection_timeout = 300
+monitoring_interval = 60
+progress_history_retention_days = 7
+auto_recovery_enabled = true
+auto_recovery_check_interval = 60
+max_consecutive_failures = 3
+recovery_backoff_multiplier = 2.0
+recovery_max_delay = 1800
+
+[monitoring_alerts]
+# Alert and warning thresholds
+high_error_rate_threshold = 10.0
+stall_warning_threshold = 2
+escalation_threshold = 3
+critical_stall_threshold = 5
+progress_stagnation_hours = 2
+
+[monitoring_ui]
+# UI update intervals (in seconds)
+health_update_interval = 10
+stall_detection_interval = 5
+progress_update_interval = 2
+recovery_status_interval = 15
+
+[logging]
+# Logging configuration
+log_level = INFO
+log_file = logs/tuneforge.log
+max_log_size = 10MB
+backup_count = 5

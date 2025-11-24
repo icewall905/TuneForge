@@ -1,0 +1,325 @@
+{% extends 'layout.html' %}
+
+{% block title %}Navidrome Test - TuneForge{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🔗 Navidrome Connection Test</h1>
+    <p>Test and verify your Navidrome music server connection</p>
+</div>
+
+<div class="content-container">
+    
+    <div class="settings-form">
+        <form id="navidromeTestForm">
+            <div class="settings-section">
+                <div class="form-group">
+                    <label for="navidrome_url">Navidrome URL:</label>
+                    <input type="text" id="navidrome_url" name="navidrome_url" value="{{ navidrome_url }}" placeholder="http://localhost:4533">
+                    <p class="help-text">The URL of your Navidrome server including port, e.g. http://localhost:4533</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="navidrome_username">Navidrome Username:</label>
+                    <input type="text" id="navidrome_username" name="navidrome_username" value="{{ navidrome_username }}">
+                    <p class="help-text">Your Navidrome username.</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="navidrome_password">Navidrome Password:</label>
+                    <input type="password" id="navidrome_password" name="navidrome_password" value="{{ navidrome_password }}">
+                    <p class="help-text">Your Navidrome password.</p>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Test Connection</button>
+                </div>
+            </div>
+        </form>
+    </div>
+    
+    <div id="results" class="connection-results" style="display: none;">
+        <h2>Test Results</h2>
+        <div class="result-box">
+            <div id="result-status" class="result-status"></div>
+            <div id="result-message" class="result-message"></div>
+        </div>
+        
+        <div id="result-details-toggle" class="details-toggle" style="display: none;">
+            <a href="#" onclick="toggleDetails(); return false;">Show Technical Details</a>
+        </div>
+        <div id="result-details" class="result-details" style="display: none;">
+            <h3>Technical Details</h3>
+            <pre id="result-json"></pre>
+        </div>
+    </div>
+    
+    <div class="actions">
+        <a href="{{ url_for('main.settings') }}" class="btn btn-secondary">Back to Settings</a>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('navidromeTestForm');
+    const results = document.getElementById('results');
+    const resultStatus = document.getElementById('result-status');
+    const resultMessage = document.getElementById('result-message');
+    const resultDetailsToggle = document.getElementById('result-details-toggle');
+    const resultDetails = document.getElementById('result-details');
+    const resultJson = document.getElementById('result-json');
+    
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        // Get form values
+        const navidromeUrl = document.getElementById('navidrome_url').value;
+        const navidromeUsername = document.getElementById('navidrome_username').value;
+        const navidromePassword = document.getElementById('navidrome_password').value;
+        
+        // Prepare request
+        const requestData = {
+            navidrome_url: navidromeUrl,
+            username: navidromeUsername,
+            password: navidromePassword
+        };
+        
+        try {
+            // Show loading state
+            resultStatus.textContent = 'Testing...';
+            resultStatus.className = 'result-status loading';
+            resultMessage.textContent = 'Connecting to Navidrome server...';
+            results.style.display = 'block';
+            resultDetailsToggle.style.display = 'none';
+            resultDetails.style.display = 'none';
+            resultJson.textContent = ''; // Clear previous details
+            
+            // Make the request
+            const response = await fetch('/api/test-navidrome-connection', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            });
+            
+            const data = await response.json();
+            
+            // Update UI based on response
+            if (data.success) {
+                resultStatus.textContent = '✓ Connection Successful';
+                resultStatus.className = 'result-status success';
+                resultMessage.innerHTML = `
+                    <strong>Connection Details:</strong><br>
+                    URL: ${data.url_processed || navidromeUrl}<br>
+                    API Response: ${data.ping_success ? '✓ API responded correctly' : '✗ API response error'}<br>
+                    ${data.system_status ? `Navidrome Version: ${data.system_status.version}` : ''}
+                    ${data.api_version ? `<br>API Version: ${data.api_version}` : ''}
+                `;
+            } else {
+                resultStatus.textContent = '✗ Connection Failed';
+                resultStatus.className = 'result-status error';
+                resultMessage.textContent = data.error || 'Unknown error occurred';
+            }
+            
+            // Show technical details toggle if there's data
+            if (data) {
+                resultDetailsToggle.style.display = 'block';
+                resultJson.textContent = JSON.stringify(data, null, 2);
+            }
+            
+        } catch (error) {
+            resultStatus.textContent = '✗ Connection Error';
+            resultStatus.className = 'result-status error';
+            resultMessage.textContent = 'Failed to connect: ' + error.message;
+            resultDetailsToggle.style.display = 'block';
+            resultJson.textContent = JSON.stringify({error: error.message}, null, 2);
+        }
+    });
+});
+
+function toggleDetails() {
+    const details = document.getElementById('result-details');
+    const toggle = document.getElementById('result-details-toggle');
+    
+    if (details.style.display === 'none') {
+        details.style.display = 'block';
+        toggle.innerHTML = '<a href="#" onclick="toggleDetails(); return false;">Hide Technical Details</a>';
+    } else {
+        details.style.display = 'none';
+        toggle.innerHTML = '<a href="#" onclick="toggleDetails(); return false;">Show Technical Details</a>';
+    }
+}
+</script>
+
+<style>
+/* Connection Test Styles */
+.settings-form {
+    max-width: 600px;
+    margin: 0 auto 2rem auto;
+}
+
+.settings-section {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(var(--accent-color-rgb), 0.1);
+}
+
+.help-text {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin: 0.5rem 0 0 0;
+    font-style: italic;
+}
+
+.form-actions {
+    margin-top: 1.5rem;
+    text-align: center;
+}
+
+.btn {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.2s;
+}
+
+.btn-primary {
+    background-color: var(--accent-color);
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: var(--accent-hover);
+}
+
+.btn-secondary {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+    background-color: var(--bg-hover);
+    border-color: var(--accent-color);
+}
+
+/* Results Section */
+.connection-results {
+    max-width: 800px;
+    margin: 0 auto;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+}
+
+.connection-results h2 {
+    margin: 0 0 1rem 0;
+    color: var(--text-primary);
+}
+
+.result-box {
+    margin-bottom: 1rem;
+}
+
+.result-status {
+    font-size: 1.1rem;
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+}
+
+.result-status.loading {
+    color: var(--accent-color);
+}
+
+.result-status.success {
+    color: #28a745;
+}
+
+.result-status.error {
+    color: #dc3545;
+}
+
+.result-message {
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.details-toggle {
+    margin-top: 1rem;
+}
+
+.details-toggle a {
+    color: var(--accent-color);
+    text-decoration: none;
+    font-size: 0.9rem;
+}
+
+.details-toggle a:hover {
+    text-decoration: underline;
+}
+
+.result-details {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.result-details h3 {
+    margin: 0 0 0.5rem 0;
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+
+.result-details pre {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 1rem;
+    overflow-x: auto;
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+}
+
+.actions {
+    text-align: center;
+    margin-top: 2rem;
+}
+</style>
+{% endblock %}

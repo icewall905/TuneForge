@@ -1,0 +1,543 @@
+{% extends 'layout.html' %}
+
+{% block title %}Playlist History - TuneForge{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📚 Playlist History</h1>
+    <p>View and manage your generated playlist history</p>
+</div>
+
+<div class="content-container">
+    
+    {% if history %}
+        <div class="playlist-grid">
+            {% for playlist in history %}
+                <div class="playlist-card" data-playlist-index="{{ loop.index0 }}">
+                    <div class="playlist-header">
+                        <div class="playlist-icon">🎵</div>
+                        <div class="playlist-title">{{ playlist.name }}</div>
+                        <div class="playlist-date">{{ playlist.timestamp|replace('T', ' ')|truncate(16, true, '') }}</div>
+                    </div>
+                    
+                    <div class="playlist-preview">
+                        <div class="playlist-stats">
+                            <span class="stat-item">
+                                <strong>{{ playlist.tracks_details|length }}</strong> tracks
+                            </span>
+                            <span class="stat-item">
+                                Requested: <strong>{{ playlist.num_songs_requested }}</strong>
+                            </span>
+                            <span class="stat-item">
+                                Created: <strong>{{ playlist.timestamp|replace('T', ' ')|truncate(10, true, '') }}</strong>
+                            </span>
+                        </div>
+                        
+                        {% if playlist.prompt %}
+                        <div class="playlist-description">
+                            <strong>Description:</strong> {{ playlist.prompt|truncate(150, true, '...') }}
+                        </div>
+                        {% endif %}
+                        
+                        {% if playlist.tracks_details and playlist.tracks_details|length > 0 %}
+                        <div class="playlist-tracks-preview">
+                            <strong>Sample Tracks:</strong>
+                            <div class="tracks-list">
+                                {% set sample = playlist.tracks_details[0] %}
+                                <div class="art-and-tracks">
+                                    <img class="art-thumb" src="/art?artist={{ sample.artist|urlencode }}&album={{ sample.album|default('')|urlencode }}&title={{ sample.title|urlencode }}" onerror="this.style.display='none'" alt="art" />
+                                    <div class="tracks-col">
+                                        {% for track in playlist.tracks_details[:5] %}
+                                            <div class="track-item">
+                                                <span class="track-artist">{{ track.artist or 'Unknown Artist' }}</span>
+                                                <span class="track-separator">•</span>
+                                                <span class="track-title">{{ track.title or 'Unknown Title' }}</span>
+                                            </div>
+                                        {% endfor %}
+                                        {% if playlist.tracks_details|length > 5 %}
+                                            <div class="track-more">... and {{ playlist.tracks_details|length - 5 }} more</div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+                        
+                        {% if playlist.creation_results %}
+                        <div class="playlist-services">
+                            <strong>Created in:</strong>
+                            {% for service, result in playlist.creation_results.items() %}
+                                {% if result.status == 'success' %}
+                                    <span class="service-badge success">{{ service|title }}</span>
+                                {% else %}
+                                    <span class="service-badge failed">{{ service|title }}</span>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="playlist-actions">
+                        <div class="action-buttons">
+                            <button class="btn btn-primary" onclick="viewFullPlaylist({{ loop.index0 }})">
+                                View Full Playlist
+                            </button>
+                            
+                            <!-- Service Integration Buttons -->
+                            <div class="service-buttons-history">
+                                <button class="btn btn-service navidrome" onclick="saveToService('navidrome', {{ loop.index0 }})" 
+                                        data-playlist-index="{{ loop.index0 }}" title="Save to Navidrome" style="display:none;">
+                                    🎧
+                                </button>
+                                <button class="btn btn-service plex" onclick="saveToService('plex', {{ loop.index0 }})" 
+                                        data-playlist-index="{{ loop.index0 }}" title="Save to Plex" style="display:none;">
+                                    🎬
+                                </button>
+                            </div>
+                            
+                            <button class="btn btn-danger" onclick="deletePlaylist({{ loop.index0 }})" title="Delete this playlist">
+                                🗑️
+                            </button>
+                        </div>
+                        <div class="rating">
+                            {% for i in range(1, 6) %}
+                                <button class="rating-star {% if playlist.get('rating', i) == i %}active{% endif %}" 
+                                    data-playlist-index="{{ loop.index0 }}" data-rating="{{ i }}">
+                                    {% if playlist.get('rating', 0) >= i %}★{% else %}☆{% endif %}
+                                </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="message">
+            <p>No playlists have been generated yet. <a href="{{ url_for('main.index') }}">Ask a friend</a> to get started.</p>
+        </div>
+    {% endif %}
+
+    <!-- Modal for full playlist details -->
+    <div id="playlistDetailsModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h2 id="modalPlaylistName"></h2>
+            <p id="modalPlaylistDescription" class="playlist-description-modal"></p>
+            <p id="modalPlaylistInfo" class="playlist-info-modal"></p>
+            
+            <div class="playlist-actions-modal">
+                <button class="btn btn-primary" onclick="sharePlaylist()">Share Playlist</button>
+                <div id="share-link-container" style="display: none; margin-top: 10px;">
+                    <input type="text" id="share-link" class="form-control" readonly>
+                    <button class="btn btn-sm btn-secondary" onclick="copyShareLink()">Copy</button>
+                </div>
+                
+                <!-- Service Integration Modal Section -->
+                <div class="service-integration-modal">
+                    <h4>🎵 Save to Music Services</h4>
+                    <div class="playlist-naming-modal">
+                        <label for="modal_playlist_name">Playlist Name:</label>
+                        <input type="text" id="modal_playlist_name" class="form-control" placeholder="Enter custom playlist name (optional)">
+                        <small class="help-text">Leave empty to use current playlist name</small>
+                    </div>
+                    
+                    <div class="service-buttons-modal">
+                        <button id="modal_save_to_navidrome_btn" class="btn btn-service navidrome" onclick="saveToServiceFromModal('navidrome')" style="display:none;">
+                            <span class="service-icon">🎧</span>
+                            <span class="service-text">Save to Navidrome</span>
+                        </button>
+                        <button id="modal_save_to_plex_btn" class="btn btn-service plex" onclick="saveToServiceFromModal('plex')" style="display:none;">
+                            <span class="service-icon">🎬</span>
+                            <span class="service-text">Save to Plex</span>
+                        </button>
+                    </div>
+                    
+                    <!-- Service Status in Modal -->
+                    <div id="modal_service_status" class="service-status-modal" style="display:none;">
+                        <div class="status-message"></div>
+                        <div class="mapping-results" style="display:none;">
+                            <h4>Track Mapping Results</h4>
+                            <div class="mapping-summary"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="playlist-tracks-full">
+                <h3>All Tracks</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Artist</th>
+                            <th>Title</th>
+                            <th>Source</th>
+                        </tr>
+                    </thead>
+                    <tbody id="modalTracksList">
+                        <!-- Tracks will be inserted here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script type="text/javascript">
+    // Expose history data once (no JSON.parse needed)
+    const historyData = {{ history|tojson|safe }};
+
+    // Variables for sharing
+    let currentPlaylistId = null;
+    
+    // Add event listeners when the DOM is loaded
+    document.addEventListener('DOMContentLoaded', function() {
+        // Add event listeners for rating stars
+        document.querySelectorAll('.rating-star').forEach(star => {
+            star.addEventListener('click', function() {
+                const playlistIndex = this.getAttribute('data-playlist-index');
+                const rating = this.getAttribute('data-rating');
+                ratePlaylist(playlistIndex, rating);
+            });
+        });
+    });
+    
+    // Function to rate a playlist
+    function ratePlaylist(playlistIndex, rating) {
+        console.log(`Rating playlist ${playlistIndex} with ${rating} stars`);
+        const stars = document.querySelectorAll(`[data-playlist-index="${playlistIndex}"].rating-star`);
+        stars.forEach((star, index) => {
+            if (index < rating) {
+                star.textContent = '★';
+                star.classList.add('active');
+            } else {
+                star.textContent = '☆';
+                star.classList.remove('active');
+            }
+        });
+    }
+    
+    // Function to delete a playlist
+    function deletePlaylist(playlistIndex) {
+        const playlist = historyData[playlistIndex];
+        if (!playlist) {
+            console.error('Playlist not found at index:', playlistIndex);
+            return;
+        }
+        
+        const playlistName = playlist.name || 'Unknown Playlist';
+        if (!confirm(`Are you sure you want to delete "${playlistName}"?\n\nThis action cannot be undone.`)) {
+            return;
+        }
+        
+        try {
+            console.log('Deleting playlist:', playlistName);
+            
+            // Send delete request to backend
+            fetch('/api/history/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    playlist_index: playlistIndex,
+                    playlist_id: playlist.id || playlist.name
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Playlist deleted successfully');
+                    // Remove the playlist card from the UI
+                    const playlistCard = document.querySelector(`[data-playlist-index="${playlistIndex}"]`);
+                    if (playlistCard) {
+                        playlistCard.remove();
+                    }
+                    // Update the history data
+                    historyData.splice(playlistIndex, 1);
+                    // Update data attributes for remaining cards
+                    document.querySelectorAll('.playlist-card').forEach((card, index) => {
+                        card.setAttribute('data-playlist-index', index);
+                        // Update onclick handlers
+                        const viewBtn = card.querySelector('.btn-primary');
+                        const deleteBtn = card.querySelector('.btn-danger');
+                        if (viewBtn) viewBtn.onclick = () => viewFullPlaylist(index);
+                        if (deleteBtn) deleteBtn.onclick = () => deletePlaylist(index);
+                        // Update rating stars
+                        card.querySelectorAll('.rating-star').forEach(star => {
+                            star.setAttribute('data-playlist-index', index);
+                        });
+                    });
+                    
+                    // Check if no playlists remain
+                    if (historyData.length === 0) {
+                        // Reload the page to show "no playlists" message
+                        location.reload();
+                        return;
+                    }
+                    
+                    // Show success message
+                    alert('Playlist deleted successfully!');
+                } else {
+                    console.error('Failed to delete playlist:', data.error);
+                    alert('Failed to delete playlist: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error deleting playlist:', error);
+                alert('Error deleting playlist: ' + error.message);
+            });
+        } catch (err) {
+            console.error('Failed to delete playlist:', err);
+            alert('Failed to delete playlist: ' + err.message);
+        }
+    }
+    
+    // Function to view full playlist details
+    function viewFullPlaylist(playlistIndex) {
+        try {
+            console.log('Opening playlist details for index:', playlistIndex);
+            currentPlaylistId = playlistIndex;
+            const playlist = historyData[playlistIndex];
+            if (!playlist) {
+                console.error('Playlist not found at index:', playlistIndex);
+                return;
+            }
+            document.getElementById('modalPlaylistName').textContent = playlist.name || 'Untitled Playlist';
+            document.getElementById('modalPlaylistDescription').textContent = (playlist.prompt || playlist.description || '(No description)');
+            document.getElementById('share-link-container').style.display = 'none';
+            let infoText = '';
+            if (playlist.timestamp) {
+                infoText = `Created: ${playlist.timestamp.replace('T', ' ').substring(0, 16)}`;
+            }
+            if (typeof playlist.num_songs_added_total !== 'undefined' && typeof playlist.num_songs_requested !== 'undefined') {
+                infoText += (infoText ? ' • ' : '') + `${playlist.num_songs_added_total}/${playlist.num_songs_requested} tracks`;
+            }
+            document.getElementById('modalPlaylistInfo').textContent = infoText;
+            const tracksList = document.getElementById('modalTracksList');
+            tracksList.innerHTML = '';
+            const tracks = playlist.tracks_details || playlist.tracks || [];
+            if (tracks.length > 0) {
+                tracks.forEach(track => {
+                    const row = document.createElement('tr');
+                    const artistCell = document.createElement('td');
+                    artistCell.textContent = (track.artist || 'Unknown Artist');
+                    const titleCell = document.createElement('td');
+                    titleCell.textContent = (track.title || 'Unknown Title');
+                    const sourceCell = document.createElement('td');
+                    sourceCell.textContent = (track.source || track.found_on || 'Unknown');
+                    row.appendChild(artistCell);
+                    row.appendChild(titleCell);
+                    row.appendChild(sourceCell);
+                    tracksList.appendChild(row);
+                });
+            } else {
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.colSpan = 3;
+                cell.textContent = 'No tracks found';
+                cell.style.textAlign = 'center';
+                row.appendChild(cell);
+                tracksList.appendChild(row);
+            }
+            const modal = document.getElementById('playlistDetailsModal');
+            if (!modal) {
+                console.error('Modal element not found');
+                return;
+            }
+            modal.style.display = 'block';
+        } catch (err) {
+            console.error('Failed to open playlist details:', err);
+        }
+    }
+    // Ensure inline onclick can access it
+    window.viewFullPlaylist = viewFullPlaylist;
+
+    // Close the modal
+    function closeModal() { document.getElementById('playlistDetailsModal').style.display = 'none'; }
+
+    // Close modal when clicking outside of it
+    window.onclick = function(event) {
+        const modal = document.getElementById('playlistDetailsModal');
+        if (event.target === modal) { modal.style.display = 'none'; }
+    }
+
+    // Sharing helpers
+    function sharePlaylist() {
+        if (currentPlaylistId === null) return;
+        const shareLink = `${window.location.origin}/shared-playlist/${currentPlaylistId}`;
+        const container = document.getElementById('share-link-container');
+        container.style.display = 'block';
+        document.getElementById('share-link').value = shareLink;
+    }
+    function copyShareLink() {
+        const linkInput = document.getElementById('share-link');
+        linkInput.select(); linkInput.setSelectionRange(0, 99999);
+        (navigator.clipboard ? navigator.clipboard.writeText(linkInput.value) : document.execCommand('copy'))
+            .then?.(() => alert('Link copied to clipboard!'))
+            .catch?.(() => alert('Failed to copy link'));
+    }
+
+    // Service Integration Functionality
+    let serviceButtonsInitialized = false;
+
+    async function initializeServiceButtons() {
+        if (serviceButtonsInitialized) return;
+        
+        try {
+            // Check which services are enabled
+            const response = await fetch('/api/sonic/service-config');
+            if (response.ok) {
+                const config = await response.json();
+                
+                if (config.success) {
+                    // Show Navidrome button if enabled
+                    if (config.navidrome_enabled) {
+                        document.getElementById('modal_save_to_navidrome_btn').style.display = 'inline-flex';
+                    }
+                    
+                    // Show Plex button if enabled
+                    if (config.plex_enabled) {
+                        document.getElementById('modal_save_to_plex_btn').style.display = 'inline-flex';
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Failed to check service settings:', e);
+        }
+        
+        serviceButtonsInitialized = true;
+    }
+
+    async function saveToService(serviceName, playlistIndex) {
+        // For the card buttons, open the modal first
+        viewFullPlaylist(playlistIndex);
+        
+        // Initialize service buttons and wait a bit for modal to open
+        setTimeout(() => {
+            initializeServiceButtons();
+            // Focus on the service button in the modal
+            const modalButton = document.getElementById(`modal_save_to_${serviceName}_btn`);
+            if (modalButton) {
+                modalButton.focus();
+            }
+        }, 100);
+    }
+
+    async function saveToServiceFromModal(serviceName) {
+        if (currentPlaylistId === null) {
+            alert('No playlist selected.');
+            return;
+        }
+        
+        const playlist = historyData[currentPlaylistId];
+        if (!playlist) {
+            alert('Playlist not found.');
+            return;
+        }
+        
+        const playlistName = document.getElementById('modal_playlist_name').value.trim() || playlist.name;
+        const button = document.getElementById(`modal_save_to_${serviceName}_btn`);
+        const originalText = button.innerHTML;
+        
+        try {
+            // Disable button and show loading state
+            button.disabled = true;
+            button.innerHTML = '<span class="service-icon">⏳</span><span class="service-text">Saving...</span>';
+            
+            // Show service status section
+            const serviceStatus = document.getElementById('modal_service_status');
+            serviceStatus.style.display = 'block';
+            
+            const statusMessage = serviceStatus.querySelector('.status-message');
+            statusMessage.textContent = `Saving playlist to ${serviceName}...`;
+            statusMessage.className = 'status-message loading';
+            
+            // Make API call
+            const response = await fetch(`/api/history/save-to-${serviceName}`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    playlist_name: playlistName,
+                    tracks: playlist.tracks_details || playlist.tracks || []
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                // Success
+                statusMessage.textContent = result.message;
+                statusMessage.className = 'status-message success';
+                
+                // Show mapping results
+                if (result.mapping_results) {
+                    const mappingResults = serviceStatus.querySelector('.mapping-results');
+                    const mappingSummary = serviceStatus.querySelector('.mapping-summary');
+                    
+                    const found = result.mapping_results.found.length;
+                    const notFound = result.mapping_results.not_found.length;
+                    const total = result.mapping_results.total_processed;
+                    
+                    mappingSummary.innerHTML = `
+                        <strong>Successfully mapped:</strong> ${found}/${total} tracks<br>
+                        <strong>Not found in ${serviceName}:</strong> ${notFound} tracks<br>
+                        <strong>Playlist ID:</strong> ${result.playlist_id}<br>
+                        <strong>Playlist Name:</strong> ${result.playlist_name}
+                    `;
+                    
+                    mappingResults.style.display = 'block';
+                }
+                
+                // Clear playlist name input
+                document.getElementById('modal_playlist_name').value = '';
+                
+            } else {
+                // Error
+                statusMessage.textContent = `Error: ${result.error}`;
+                statusMessage.className = 'status-message error';
+                
+                // Show mapping results if available
+                if (result.mapping_results) {
+                    const mappingResults = serviceStatus.querySelector('.mapping-results');
+                    const mappingSummary = serviceStatus.querySelector('.mapping-summary');
+                    
+                    const found = result.mapping_results.found.length;
+                    const notFound = result.mapping_results.not_found.length;
+                    const total = result.mapping_results.total_processed;
+                    
+                    mappingSummary.innerHTML = `
+                        <strong>Successfully mapped:</strong> ${found}/${total} tracks<br>
+                        <strong>Not found in ${serviceName}:</strong> ${notFound} tracks<br>
+                        <strong>Error:</strong> ${result.error}
+                    `;
+                    
+                    mappingResults.style.display = 'block';
+                }
+            }
+            
+        } catch (e) {
+            console.error(`Error saving to ${serviceName}:`, e);
+            const statusMessage = serviceStatus.querySelector('.status-message');
+            statusMessage.textContent = `Network error: ${e.message}`;
+            statusMessage.className = 'status-message error';
+        } finally {
+            // Re-enable button
+            button.disabled = false;
+            button.innerHTML = originalText;
+        }
+    }
+
+    // Initialize service buttons when modal opens
+    const originalViewFullPlaylist = viewFullPlaylist;
+    viewFullPlaylist = function(playlistIndex) {
+        originalViewFullPlaylist(playlistIndex);
+        
+        // Initialize service buttons
+        setTimeout(() => {
+            initializeServiceButtons();
+        }, 100);
+    };
+</script>
+{% endblock %}

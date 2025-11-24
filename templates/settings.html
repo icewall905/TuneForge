@@ -1,0 +1,1499 @@
+{% extends 'layout.html' %}
+
+{% block title %}Settings - TuneForge{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>⚙️ Settings</h1>
+    <p>Configure TuneForge preferences and connections</p>
+</div>
+
+<div class="content-container">
+    
+    <div class="settings-form">
+        <form id="settingsForm" action="{{ url_for('main.settings') }}" method="post">
+            <div class="settings-section">
+                <h2>Core Settings</h2>
+                
+                <div class="settings-group">
+                    <h3>Ollama Configuration</h3>
+                    <div class="form-group">
+                        <label for="ollama_url">Ollama URL:</label>
+                        <input type="text" id="ollama_url" name="ollama_url" value="{{ ollama_url }}" placeholder="http://localhost:11434">
+                        <p class="help-text">The URL of your Ollama API server.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="button" id="test-ollama-btn" class="btn btn-secondary">Test Ollama Connection</button>
+                        <span id="ollama-test-result" class="test-result"></span>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="ollama_model">Ollama Model:</label>
+                        <div class="model-selector-group">
+                            <select id="ollama_model" name="ollama_model" class="settings-select">
+                                <option value="">Loading models...</option>
+                            </select>
+                            <button type="button" id="refresh-models-btn" class="secondary-button">🔄</button>
+                        </div>
+                        <p class="help-text">Select a model from your Ollama server. Click refresh to update the list.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="context_window">Context Window:</label>
+                        <input type="number" id="context_window" name="context_window" value="{{ context_window }}" min="512" max="32000">
+                        <p class="help-text">Size of the context window. Higher values may improve quality but use more memory.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="max_attempts">Max Retry Attempts:</label>
+                        <input type="number" id="max_attempts" name="max_attempts" value="{{ max_attempts }}" min="1" max="20">
+                        <p class="help-text">Number of times to retry generation if insufficient tracks are found.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="button" class="btn btn-secondary section-save-btn" data-section="ollama">Save Ollama Settings</button>
+                    </div>
+                </div>
+                
+                <div class="settings-group">
+                    <h3>Music Preferences</h3>
+                    <div class="form-group">
+                        <label for="likes">My Likes:</label>
+                        <textarea id="likes" name="likes" rows="3">{{ likes }}</textarea>
+                        <p class="help-text">Genres, artists, or moods that you like.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="dislikes">My Dislikes:</label>
+                        <textarea id="dislikes" name="dislikes" rows="3">{{ dislikes }}</textarea>
+                        <p class="help-text">Genres, artists, or moods that you dislike.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="favorite_artists">Favorite Artists:</label>
+                        <textarea id="favorite_artists" name="favorite_artists" rows="3">{{ favorite_artists }}</textarea>
+                        <p class="help-text">Your favorite artists (comma-separated).</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="button" class="btn btn-secondary section-save-btn" data-section="music">Save Music Preferences</button>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <h3>Application Settings</h3>
+                    <div class="form-group">
+                        <label for="app_debug_mode">Enable Debug Logging (to file):</label>
+                        <select id="app_debug_mode" name="app_debug_mode" class="settings-select">
+                            <option value="yes" {% if app_debug_mode == "yes" %}selected{% endif %}>Yes</option>
+                            <option value="no" {% if app_debug_mode == "no" %}selected{% endif %}>No</option>
+                        </select>
+                        <p class="help-text">Enable detailed logging to 'logs/tuneforge_app.log'.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="verbose_logging">Enable Verbose Live Logging:</label>
+                        <select id="verbose_logging" name="verbose_logging" class="settings-select">
+                            <option value="yes" {% if verbose_logging == "yes" %}selected{% endif %}>Yes</option>
+                            <option value="no" {% if verbose_logging == "no" %}selected{% endif %}>No</option>
+                        </select>
+                        <p class="help-text">Show detailed matching info in live logs (basic mode shows only playlist additions).</p>
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="use_local_matching" name="use_local_matching" {% if use_local_matching in ['yes','true','1'] %}checked{% endif %}>
+                            Use local library instead of remote server for matching (Plex/Navidrome)
+                        </label>
+                        <p class="help-text">When enabled, matches Ollama suggestions against your indexed local library. Remote services can remain enabled for other tasks.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="button" class="btn btn-secondary section-save-btn" data-section="app">Save Application Settings</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h2>Platform Settings</h2>
+                
+                <div class="settings-group">
+                    <h3>Platform Selection</h3>
+                    <div class="form-group">
+                        <label for="enable_navidrome">Enable Navidrome:</label>
+                        <select id="enable_navidrome" name="enable_navidrome" class="settings-select">
+                            <option value="yes" {% if enable_navidrome == "yes" %}selected{% endif %}>Yes</option>
+                            <option value="no" {% if enable_navidrome == "no" %}selected{% endif %}>No</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="enable_plex">Enable Plex:</label>
+                        <select id="enable_plex" name="enable_plex" class="settings-select">
+                            <option value="yes" {% if enable_plex == "yes" %}selected{% endif %}>Yes</option>
+                            <option value="no" {% if enable_plex == "no" %}selected{% endif %}>No</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="settings-group" id="navidromeSettings">
+                    <h3>Navidrome Configuration</h3>
+                    <div class="form-group">
+                        <label for="navidrome_url">Navidrome URL:</label>
+                        <input type="text" id="navidrome_url" name="navidrome_url" value="{{ navidrome_url }}" placeholder="http://localhost:4533">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="navidrome_username">Navidrome Username:</label>
+                        <input type="text" id="navidrome_username" name="navidrome_username" value="{{ navidrome_username }}">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="navidrome_password">Navidrome Password:</label>
+                        <input type="password" id="navidrome_password" name="navidrome_password" value="{{ navidrome_password }}">
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="button" id="test-navidrome-inline-btn" class="btn btn-secondary">Test Navidrome Connection</button>
+                        <span id="navidrome-test-result" class="test-result"></span>
+                        <p class="help-text">Check if the Navidrome connection is working correctly.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="button" class="btn btn-secondary section-save-btn" data-section="navidrome">Save Navidrome Settings</button>
+                    </div>
+                </div>
+                
+                <div class="settings-group" id="plexSettings">
+                    <h3>Plex Configuration</h3>
+                    <div class="form-group">
+                        <label for="plex_server_url">Plex Server URL:</label>
+                        <input type="text" id="plex_server_url" name="plex_server_url" value="{{ plex_server_url }}" placeholder="http://localhost:32400">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="plex_token">Plex Token:</label>
+                        <input type="text" id="plex_token" name="plex_token" value="{{ plex_token }}">
+                        <p class="help-text">Your Plex authentication token.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="plex_machine_id">Plex Machine ID:</label>
+                        <input type="text" id="plex_machine_id" name="plex_machine_id" value="{{ plex_machine_id }}">
+                        <p class="help-text">The machine identifier for your Plex server.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="plex_playlist_type">Plex Playlist Type:</label>
+                        <input type="text" id="plex_playlist_type" name="plex_playlist_type" value="{{ plex_playlist_type }}" placeholder="audio">
+                        <p class="help-text">The type of playlist to create (usually 'audio').</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="plex_music_section_id">Plex Music Library Section ID:</label>
+                        <input type="text" id="plex_music_section_id" name="plex_music_section_id" value="{{ plex_music_section_id }}">
+                        <p class="help-text">The ID of your Plex music library section.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <a href="{{ url_for('main.test_plex_page') }}" class="btn btn-secondary">Test Plex Connection</a>
+                        <p class="help-text">Check if the Plex connection is working correctly.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="button" class="btn btn-secondary section-save-btn" data-section="plex">Save Plex Settings</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="settings-section">
+                <h2>Auto-Startup Configuration</h2>
+                <p class="section-description">Configure automatic processes when TuneForge starts</p>
+                
+                <div class="settings-group">
+                    <h3>Automatic Library Scan</h3>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="enable_auto_scan" name="enable_auto_scan" {% if enable_auto_scan in ['yes','true','1'] %}checked{% endif %}>
+                            Automatically scan music library on startup
+                        </label>
+                        <p class="help-text">When enabled, TuneForge will automatically scan your configured music folder when the application starts.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="enable_auto_analysis" name="enable_auto_analysis" {% if enable_auto_analysis in ['yes','true','1'] %}checked{% endif %}>
+                            Automatically start audio analysis on startup
+                        </label>
+                        <p class="help-text">When enabled, TuneForge will automatically start analyzing audio files when the application starts.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="startup_delay_seconds">Startup Delay (seconds):</label>
+                        <input type="number" id="startup_delay_seconds" name="startup_delay_seconds" value="{{ startup_delay_seconds }}" min="10" max="300" class="settings-input">
+                        <p class="help-text">Delay before starting automatic processes to ensure the application is fully loaded (10-300 seconds).</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="button" class="btn btn-secondary section-save-btn" data-section="startup">Save Auto-Startup Settings</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <button type="submit" class="primary-button">Save Settings</button>
+            </div>
+        </form>
+    </div>
+    
+    <!-- Local Music Management Section -->
+    <div class="settings-section">
+        <h2>Local Music Management</h2>
+        <p class="section-description">Index and manage your local music collection</p>
+        
+        <!-- Statistics Dashboard -->
+        <div class="stats-grid">
+            <div class="stat-box">
+                <div class="stat-icon">🎵</div>
+                <div class="stat-content">
+                    <h3>Total Tracks</h3>
+                    <p class="stat-number" id="total-tracks">{{ local_stats.total_tracks if local_stats else 0 }}</p>
+                </div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-icon">💾</div>
+                <div class="stat-content">
+                    <h3>Total Size</h3>
+                    <p class="stat-number" id="total-size">{{ local_stats.total_size | filesizeformat if local_stats else '0 B' }}</p>
+                </div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-icon">👥</div>
+                <div class="stat-content">
+                    <h3>Unique Artists</h3>
+                    <p class="stat-number" id="unique-artists">{{ local_stats.artists if local_stats else 0 }}</p>
+                </div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-icon">🎭</div>
+                <div class="stat-content">
+                    <h3>Genres</h3>
+                    <p class="stat-number" id="genres-count">{{ local_stats.genres | length if local_stats and local_stats.genres else 0 }}</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Folder Scanning Section -->
+        <div class="folder-scanning-section">
+            <h3>Index Music Folder</h3>
+            <p>Select a folder to scan and index your music collection</p>
+            
+            <form id="localMusicForm" class="local-music-form">
+                <div class="form-group">
+                    <label for="local_music_folder">Default Music Folder Path:</label>
+                    <div class="folder-input-group">
+                        <input type="text" id="local_music_folder" name="local_music_folder" 
+                               value="{{ local_music_folder }}" 
+                               placeholder="Enter the full path to your music folder (e.g., /home/user/Music)" 
+                               class="folder-input">
+                        <button type="button" id="browse-folder-btn" class="browse-btn">Browse</button>
+                    </div>
+                    <p class="help-text">This path will be saved and recalled automatically. You can change it anytime.</p>
+                </div>
+                
+                <div class="form-group">
+                    <button type="button" id="scan-folder-btn" class="primary-button">Scan Folder</button>
+                    <button type="button" id="save-folder-btn" class="secondary-button">Save Path</button>
+                </div>
+            </form>
+            
+            <div id="scan-progress" class="scan-progress" style="display: none;">
+                <div class="progress-indicator">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                </div>
+                <p id="scan-status" class="scan-status">Scanning...</p>
+            </div>
+        </div>
+        
+        <!-- Genre Breakdown -->
+        <div class="genre-breakdown-section">
+            <h3>Genre Breakdown</h3>
+            <p>Explore the musical diversity in your collection</p>
+            <div id="genre-breakdown" class="genre-breakdown">
+                {% if local_stats and local_stats.genres %}
+                    {% for genre in local_stats.genres %}
+                    <span class="genre-tag">{{ genre }}</span>
+                    {% endfor %}
+                {% else %}
+                    <p class="no-genres">No genres found. Scan a music folder to populate this section.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<style>
+/* Local Music Management Styles */
+.section-description {
+    color: var(--text-secondary);
+    margin-bottom: 1.5rem;
+    font-size: 1rem;
+}
+
+/* Local Music Form */
+.local-music-form {
+    margin-bottom: 1.5rem;
+}
+
+.local-music-form .form-group {
+    margin-bottom: 1rem;
+}
+
+.local-music-form .form-group label {
+    display: block;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.help-text {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin: 0.5rem 0 0 0;
+    font-style: italic;
+}
+
+/* Ollama Configuration Styles */
+.model-selector-group {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.model-selector-group select {
+    flex: 1;
+}
+
+.model-selector-group .secondary-button {
+    padding: 0.5rem 0.75rem;
+    white-space: nowrap;
+}
+
+.test-result {
+    margin-left: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.test-result.success {
+    color: #28a745;
+}
+
+.test-result.error {
+    color: #dc3545;
+}
+
+.test-result.warning {
+    color: #ffc107;
+}
+
+/* Message Display */
+.message {
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+
+.message.success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.message.error {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+/* Statistics Grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.stat-box {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.stat-box:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.stat-icon {
+    font-size: 1.8rem;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-color);
+    border-radius: 50%;
+    color: white;
+}
+
+.stat-content h3 {
+    color: var(--text-secondary);
+    margin: 0 0 0.25rem 0;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-number {
+    color: var(--text-primary);
+    font-size: 1.4rem;
+    font-weight: bold;
+    margin: 0;
+}
+
+/* Folder Scanning Section */
+.folder-scanning-section {
+    margin-bottom: 2rem;
+}
+
+.folder-scanning-section h3 {
+    color: var(--text-primary);
+    margin: 0 0 0.5rem 0;
+    font-size: 1.2rem;
+}
+
+.folder-scanning-section p {
+    color: var(--text-secondary);
+    margin: 0 0 1rem 0;
+    font-size: 0.9rem;
+}
+
+.folder-selector {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.folder-help {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin: 0.25rem 0;
+}
+
+.folder-help p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+
+.folder-input-group {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.folder-input {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.folder-input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(var(--accent-color-rgb), 0.1);
+}
+
+.browse-btn {
+    padding: 0.75rem 1rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.browse-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-color);
+}
+
+/* Progress Indicator */
+.scan-progress {
+    margin-top: 1rem;
+    text-align: center;
+}
+
+.progress-indicator {
+    margin-bottom: 1rem;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 6px;
+    background: var(--border-color);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    width: 100%;
+    height: 100%;
+    background: var(--accent-color);
+    animation: progress-animation 2s ease-in-out infinite;
+}
+
+@keyframes progress-animation {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.scan-status {
+    color: var(--text-secondary);
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+/* Genre Breakdown */
+.genre-breakdown-section {
+    margin-bottom: 2rem;
+}
+
+.genre-breakdown-section h3 {
+    color: var(--text-primary);
+    margin: 0 0 0.5rem 0;
+    font-size: 1.2rem;
+}
+
+.genre-breakdown-section p {
+    color: var(--text-secondary);
+    margin: 0 0 1rem 0;
+    font-size: 0.9rem;
+}
+
+.genre-breakdown {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.genre-tag {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    padding: 0.4rem 0.8rem;
+    border-radius: 16px;
+    font-size: 0.8rem;
+    border: 1px solid var(--border-color);
+    transition: all 0.2s;
+}
+
+.genre-tag:hover {
+    background: var(--accent-color);
+    color: white;
+    border-color: var(--accent-color);
+    transform: translateY(-1px);
+}
+
+.no-genres {
+    color: var(--text-muted);
+    font-style: italic;
+    margin: 0;
+}
+
+/* File Browser Modal */
+.file-browser-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.file-browser-modal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    width: 90%;
+    max-width: 700px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+}
+
+.file-browser-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.file-browser-header h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 1.1rem;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.close-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.file-browser-content {
+    flex: 1;
+    padding: 1rem;
+    overflow-y: auto;
+}
+
+.current-path {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    word-break: break-all;
+}
+
+.file-browser-navigation {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.nav-btn {
+    padding: 0.4rem 0.8rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.2s;
+}
+
+.nav-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: var(--accent-color);
+}
+
+.nav-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.file-browser-list {
+    min-height: 250px;
+}
+
+.loading, .error, .empty-dir {
+    text-align: center;
+    padding: 1.5rem;
+    color: var(--text-secondary);
+}
+
+.error {
+    color: #dc3545;
+}
+
+.directory-item, .file-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.directory-item:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-color);
+}
+
+.directory-item.parent-dir {
+    background: var(--bg-primary);
+    border-color: var(--border-color);
+}
+
+.dir-icon, .file-icon {
+    font-size: 1rem;
+    width: 20px;
+    text-align: center;
+}
+
+.dir-name, .file-name {
+    flex: 1;
+    color: var(--text-primary);
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+.file-size {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+}
+
+.permission-warning {
+    color: #ffc107;
+    font-size: 0.9rem;
+}
+
+.files-section {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.files-section h4 {
+    margin: 0 0 0.5rem 0;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.performance-info {
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+.performance-info p {
+    margin: 0;
+    color: var(--text-secondary);
+    line-height: 1.3;
+}
+
+.performance-info strong {
+    color: var(--text-primary);
+}
+
+.performance-info em {
+    color: var(--accent-color);
+    font-style: italic;
+}
+
+.file-browser-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Section Save Buttons */
+.section-save-btn {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    padding: 0.5rem 1rem;
+}
+
+.section-save-btn:hover {
+    background-color: var(--accent-color);
+    color: white;
+    border-color: var(--accent-color);
+}
+
+.section-save-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.section-save-btn:disabled:hover {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+}
+
+/* Section-specific save feedback */
+.section-feedback {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.section-feedback.success {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.section-feedback.error {
+    background-color: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .folder-input-group {
+        flex-direction: column;
+    }
+    
+    .file-browser-modal {
+        width: 95%;
+        margin: 1rem;
+    }
+}
+</style>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Function to toggle platform settings visibility
+        function togglePlatformSettings() {
+            const enableNavidrome = document.getElementById('enable_navidrome').value;
+            const enablePlex = document.getElementById('enable_plex').value;
+            
+            document.getElementById('navidromeSettings').style.display = enableNavidrome === 'yes' ? 'block' : 'none';
+            document.getElementById('plexSettings').style.display = enablePlex === 'yes' ? 'block' : 'none';
+        }
+        
+        // Add event listeners
+        document.getElementById('enable_navidrome').addEventListener('change', togglePlatformSettings);
+        document.getElementById('enable_plex').addEventListener('change', togglePlatformSettings);
+        
+        // Initialize visibility on page load
+        togglePlatformSettings();
+        
+        // Handle form submission with a success message
+        document.getElementById('settingsForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            
+            fetch('/settings', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (response.ok) {
+                    // Create a success message
+                    const message = document.createElement('div');
+                    message.className = 'message success';
+                    message.textContent = 'Settings saved successfully!';
+                    
+                    // Insert it at the top of the form
+                    const form = document.getElementById('settingsForm');
+                    form.parentNode.insertBefore(message, form);
+                    
+                    // Remove after a few seconds
+                    setTimeout(() => {
+                        message.remove();
+                    }, 3000);
+                }
+            })
+            .catch(error => {
+                console.error('Error saving settings:', error);
+                
+                // Create an error message
+                const message = document.createElement('div');
+                message.className = 'message error';
+                message.textContent = 'Error saving settings: ' + error;
+                
+                // Insert it at the top of the form
+                const form = document.getElementById('settingsForm');
+                form.parentNode.insertBefore(message, form);
+                
+                // Remove after a few seconds
+                setTimeout(() => {
+                    message.remove();
+                }, 5000);
+            });
+        });
+        
+        // Ollama Configuration Functions
+        async function loadOllamaModels() {
+            const ollamaUrl = document.getElementById('ollama_url').value;
+            const modelSelect = document.getElementById('ollama_model');
+            const currentValue = modelSelect.dataset.currentValue || '{{ ollama_model }}';
+            
+            if (!ollamaUrl) {
+                modelSelect.innerHTML = '<option value="">Enter Ollama URL first</option>';
+                return;
+            }
+            
+            modelSelect.innerHTML = '<option value="">Loading...</option>';
+            
+            try {
+                const response = await fetch(`/api/ollama-models?ollama_url=${encodeURIComponent(ollamaUrl)}`);
+                const data = await response.json();
+                
+                if (data.success && data.models.length > 0) {
+                    modelSelect.innerHTML = data.models.map(model => 
+                        `<option value="${model}" ${model === currentValue ? 'selected' : ''}>${model}</option>`
+                    ).join('');
+                } else {
+                    modelSelect.innerHTML = '<option value="">No models found</option>';
+                }
+            } catch (error) {
+                modelSelect.innerHTML = '<option value="">Error loading models</option>';
+            }
+        }
+        
+        async function testOllamaConnection() {
+            const ollamaUrl = document.getElementById('ollama_url').value;
+            const resultSpan = document.getElementById('ollama-test-result');
+            const testBtn = document.getElementById('test-ollama-btn');
+            
+            if (!ollamaUrl) {
+                resultSpan.textContent = '⚠️ Enter URL first';
+                resultSpan.className = 'test-result warning';
+                return;
+            }
+            
+            testBtn.disabled = true;
+            resultSpan.textContent = 'Testing...';
+            resultSpan.className = 'test-result';
+            
+            try {
+                const response = await fetch('/api/test-ollama-connection', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ollama_url: ollamaUrl})
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultSpan.textContent = '✓ ' + data.message;
+                    resultSpan.className = 'test-result success';
+                    loadOllamaModels(); // Auto-load models on successful connection
+                } else {
+                    resultSpan.textContent = '✗ ' + data.error;
+                    resultSpan.className = 'test-result error';
+                }
+            } catch (error) {
+                resultSpan.textContent = '✗ Connection failed';
+                resultSpan.className = 'test-result error';
+            } finally {
+                testBtn.disabled = false;
+            }
+        }
+        
+        // Ollama event listeners
+        document.getElementById('test-ollama-btn').addEventListener('click', testOllamaConnection);
+        document.getElementById('refresh-models-btn').addEventListener('click', loadOllamaModels);
+        document.getElementById('ollama_url').addEventListener('blur', loadOllamaModels);
+        
+        // Load models on page load
+        loadOllamaModels();
+        
+        // Inline Navidrome test functionality
+        async function testNavidromeConnectionInline() {
+            const navidromeUrl = document.getElementById('navidrome_url').value;
+            const navidromeUsername = document.getElementById('navidrome_username').value;
+            const navidromePassword = document.getElementById('navidrome_password').value;
+            const resultSpan = document.getElementById('navidrome-test-result');
+            const testBtn = document.getElementById('test-navidrome-inline-btn');
+            
+            if (!navidromeUrl || !navidromeUsername || !navidromePassword) {
+                resultSpan.textContent = '⚠️ Please fill in URL, username, and password first';
+                resultSpan.className = 'test-result warning';
+                return;
+            }
+            
+            testBtn.disabled = true;
+            resultSpan.textContent = 'Testing...';
+            resultSpan.className = 'test-result';
+            
+            try {
+                const response = await fetch('/api/test-navidrome-connection', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        navidrome_url: navidromeUrl,
+                        username: navidromeUsername,
+                        password: navidromePassword
+                    })
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultSpan.textContent = '✓ Connection successful';
+                    resultSpan.className = 'test-result success';
+                } else {
+                    // Provide more specific error messages
+                    let errorMessage = '✗ Connection failed';
+                    if (data.error) {
+                        if (data.error.toLowerCase().includes('password') || data.error.toLowerCase().includes('username') || data.error.toLowerCase().includes('auth')) {
+                            errorMessage = '✗ Wrong username or password';
+                        } else if (data.error.toLowerCase().includes('connect') || data.error.toLowerCase().includes('network') || data.error.toLowerCase().includes('timeout')) {
+                            errorMessage = '✗ Could not connect to server';
+                        } else {
+                            errorMessage = '✗ ' + data.error;
+                        }
+                    }
+                    resultSpan.textContent = errorMessage;
+                    resultSpan.className = 'test-result error';
+                }
+            } catch (error) {
+                resultSpan.textContent = '✗ Could not connect to server';
+                resultSpan.className = 'test-result error';
+            } finally {
+                testBtn.disabled = false;
+            }
+        }
+        
+        // Add event listener for inline Navidrome test
+        document.getElementById('test-navidrome-inline-btn').addEventListener('click', testNavidromeConnectionInline);
+        
+        // Section-specific save functionality
+        function saveSectionSettings(buttonElement) {
+            const section = buttonElement.dataset.section;
+            const form = document.getElementById('settingsForm');
+            const formData = new FormData(form);
+            
+            // Disable button and show loading state
+            buttonElement.disabled = true;
+            buttonElement.textContent = 'Saving...';
+            
+            // Remove any existing feedback for this section
+            const existingFeedback = document.querySelector(`[data-section="${section}"] .section-feedback`);
+            if (existingFeedback) {
+                existingFeedback.remove();
+            }
+            
+            fetch('/settings', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (response.ok) {
+                    // Show success message
+                    showSectionFeedback(buttonElement, 'Settings saved successfully!', 'success');
+                } else {
+                    showSectionFeedback(buttonElement, 'Error saving settings', 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error saving settings:', error);
+                showSectionFeedback(buttonElement, 'Error saving settings: ' + error.message, 'error');
+            })
+            .finally(() => {
+                // Re-enable button
+                buttonElement.disabled = false;
+                buttonElement.textContent = buttonElement.dataset.originalText || 'Save Settings';
+            });
+        }
+        
+        function showSectionFeedback(buttonElement, message, type) {
+            const feedback = document.createElement('div');
+            feedback.className = `section-feedback ${type}`;
+            feedback.textContent = message;
+            
+            // Insert feedback after the button
+            buttonElement.parentNode.insertBefore(feedback, buttonElement.nextSibling);
+            
+            // Remove feedback after 3 seconds
+            setTimeout(() => {
+                if (feedback.parentNode) {
+                    feedback.remove();
+                }
+            }, 3000);
+        }
+        
+        // Add event listeners to section save buttons
+        document.querySelectorAll('.section-save-btn').forEach(button => {
+            // Store original text
+            button.dataset.originalText = button.textContent;
+            
+            button.addEventListener('click', function() {
+                saveSectionSettings(this);
+            });
+        });
+    });
+</script>
+
+<!-- Local Music Management JavaScript -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const scanFolderBtn = document.getElementById('scan-folder-btn');
+    const browseFolderBtn = document.getElementById('browse-folder-btn');
+    const saveFolderBtn = document.getElementById('save-folder-btn');
+    const scanProgress = document.getElementById('scan-progress');
+    const scanStatus = document.getElementById('scan-status');
+    const musicFolderInput = document.getElementById('local_music_folder');
+
+    // File browser functionality
+    browseFolderBtn.addEventListener('click', function() {
+        console.log('Browse button clicked - opening file browser');
+        openFileBrowser();
+    });
+
+    // Save folder path functionality
+    saveFolderBtn.addEventListener('click', async function() {
+        const folderPath = musicFolderInput.value.trim();
+        if (!folderPath) {
+            alert('Please enter a folder path first');
+            return;
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('local_music_folder', folderPath);
+            
+            const response = await fetch('/settings', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.ok) {
+                // Show success message
+                showMessage('Folder path saved successfully!', 'success');
+            } else {
+                showMessage('Error saving folder path', 'error');
+            }
+        } catch (error) {
+            console.error('Error saving folder path:', error);
+            showMessage('Error saving folder path: ' + error.message, 'error');
+        }
+    });
+
+    // Show message helper function
+    function showMessage(message, type) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${type}`;
+        messageDiv.textContent = message;
+        
+        // Insert it at the top of the local music section
+        const localMusicSection = document.querySelector('.settings-section:last-child');
+        localMusicSection.insertBefore(messageDiv, localMusicSection.firstChild);
+        
+        // Remove after a few seconds
+        setTimeout(() => {
+            messageDiv.remove();
+        }, 3000);
+    }
+
+    // Open the file browser modal
+    function openFileBrowser() {
+        const modal = document.createElement('div');
+        modal.className = 'file-browser-overlay';
+        modal.innerHTML = `
+            <div class="file-browser-modal">
+                <div class="file-browser-header">
+                    <h3>Select Music Folder</h3>
+                    <button class="close-btn" onclick="this.closest('.file-browser-overlay').remove()">&times;</button>
+                </div>
+                <div class="file-browser-content">
+                    <div class="current-path">
+                        <span id="current-path-display">Loading...</span>
+                    </div>
+                    <div class="file-browser-navigation">
+                        <button id="parent-dir-btn" class="nav-btn" disabled>↑ Parent Directory</button>
+                        <button id="home-dir-btn" class="nav-btn">🏠 Home</button>
+                    </div>
+                    <div class="file-browser-list" id="file-browser-list">
+                        <div class="loading">Loading directory contents...</div>
+                    </div>
+                </div>
+                <div class="file-browser-footer">
+                    <button id="select-current-path" class="primary-button" disabled>Select This Folder</button>
+                    <button class="secondary-button" onclick="this.closest('.file-browser-overlay').remove()">Cancel</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Load initial directory (home directory)
+        loadDirectory('');
+        
+        // Set up event listeners
+        setupFileBrowserEvents(modal);
+    }
+
+    // Set up file browser event listeners
+    function setupFileBrowserEvents(modal) {
+        // Parent directory button
+        modal.querySelector('#parent-dir-btn').addEventListener('click', function() {
+            const currentPath = modal.querySelector('#current-path-display').textContent;
+            if (currentPath && currentPath !== '/') {
+                const parentPath = currentPath.split('/').slice(0, -1).join('/') || '/';
+                loadDirectory(parentPath);
+            }
+        });
+        
+        // Home directory button
+        modal.querySelector('#home-dir-btn').addEventListener('click', function() {
+            loadDirectory('');
+        });
+        
+        // Select current path button
+        modal.querySelector('#select-current-path').addEventListener('click', function() {
+            const currentPath = modal.querySelector('#current-path-display').textContent;
+            if (currentPath) {
+                musicFolderInput.value = currentPath;
+                modal.remove();
+            }
+        });
+    }
+
+    // Load directory contents
+    function loadDirectory(path) {
+        const modal = document.querySelector('.file-browser-overlay');
+        if (!modal) return;
+        
+        const listElement = modal.querySelector('#file-browser-list');
+        const currentPathDisplay = modal.querySelector('#current-path-display');
+        const parentDirBtn = modal.querySelector('#parent-dir-btn');
+        const selectBtn = modal.querySelector('#select-current-path');
+        
+        // Show loading state
+        listElement.innerHTML = '<div class="loading">Loading directory contents...</div>';
+        
+        // Make API call to browse path
+        fetch(`/api/browse-path?path=${encodeURIComponent(path)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    listElement.innerHTML = `<div class="error">Error: ${data.error}</div>`;
+                    return;
+                }
+                
+                // Update current path display
+                currentPathDisplay.textContent = data.current_path;
+                
+                // Enable/disable parent directory button
+                parentDirBtn.disabled = !data.parent_path;
+                
+                // Enable select button
+                selectBtn.disabled = false;
+                
+                // Build directory listing
+                let html = '';
+                
+                // Add parent directory if available
+                if (data.parent_path) {
+                    html += `<div class="directory-item parent-dir" data-path="${data.parent_path}">
+                        <span class="dir-icon">📁</span>
+                        <span class="dir-name">.. (Parent Directory)</span>
+                    </div>`;
+                }
+                
+                // Add directories
+                data.directories.forEach(dir => {
+                    html += `<div class="directory-item" data-path="${dir.path}">
+                        <span class="dir-icon">📁</span>
+                        <span class="dir-name">${dir.name}</span>
+                        ${!dir.readable ? '<span class="permission-warning">⚠️</span>' : ''}
+                    </div>`;
+                });
+                
+                // Add files (if any)
+                if (data.files.length > 0) {
+                    html += '<div class="files-section"><h4>Audio Files Found:</h4>';
+                    data.files.forEach(file => {
+                        const size = formatFileSize(file.size);
+                        html += `<div class="file-item">
+                            <span class="file-icon">🎵</span>
+                            <span class="file-name">${file.name}</span>
+                            <span class="file-size">${size}</span>
+                        </div>`;
+                    });
+                    html += '</div>';
+                }
+                
+                // Show performance info
+                if (data.performance_info) {
+                    const perf = data.performance_info;
+                    html += '<div class="performance-info">';
+                    html += `<p><strong>Directory Summary:</strong> ${perf.directories_count} folders, ${perf.files_scanned} audio files`;
+                    if (perf.note) {
+                        html += `<br><em>${perf.note}</em>`;
+                    }
+                    html += '</p>';
+                    html += '</div>';
+                }
+                
+                // Show message if no directories
+                if (data.directories.length === 0 && data.files.length === 0) {
+                    html += '<div class="empty-dir">This directory is empty</div>';
+                }
+                
+                listElement.innerHTML = html;
+                
+                // Add click handlers for directories
+                listElement.querySelectorAll('.directory-item').forEach(item => {
+                    item.addEventListener('click', function() {
+                        const dirPath = this.dataset.path;
+                        if (dirPath) {
+                            loadDirectory(dirPath);
+                        }
+                    });
+                });
+            })
+            .catch(error => {
+                console.error('Error loading directory:', error);
+                listElement.innerHTML = '<div class="error">Error loading directory contents</div>';
+            });
+    }
+
+    // Helper function to format file sizes
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+        const i = Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    // Enable scan button when there's text in the input
+    musicFolderInput.addEventListener('input', function() {
+        scanFolderBtn.disabled = !this.value.trim();
+        saveFolderBtn.disabled = !this.value.trim();
+    });
+
+    // Scan folder functionality
+    scanFolderBtn.addEventListener('click', async function() {
+        const folderPath = musicFolderInput.value.trim();
+        if (!folderPath) {
+            alert('Please select a folder first');
+            return;
+        }
+
+        scanFolderBtn.disabled = true;
+        browseFolderBtn.disabled = true;
+        saveFolderBtn.disabled = true;
+        scanProgress.style.display = 'block';
+        scanStatus.textContent = 'Starting scan...';
+
+        try {
+            const response = await fetch('/api/scan-music-folder', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ folder_path: folderPath })
+            });
+
+            const result = await response.json();
+            
+            if (result.success && result.scan_id) {
+                // Add scan to global status manager
+                window.globalStatusManager.addScan(result.scan_id, folderPath);
+                scanStatus.textContent = 'Scan started - check sidebar for progress';
+                scanFolderBtn.disabled = false;
+                browseFolderBtn.disabled = false;
+                saveFolderBtn.disabled = false;
+            } else {
+                scanStatus.textContent = `Error: ${result.error || 'Unknown error'}`;
+                scanFolderBtn.disabled = false;
+                browseFolderBtn.disabled = false;
+                saveFolderBtn.disabled = false;
+            }
+        } catch (error) {
+            scanStatus.textContent = `Error: ${error.message}`;
+            scanFolderBtn.disabled = false;
+            browseFolderBtn.disabled = false;
+            saveFolderBtn.disabled = false;
+        }
+    });
+
+    // Refresh stats after scan completion
+    function refreshStats() {
+        fetch('/api/local-music-stats')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateStatsDisplay(data.stats);
+                }
+            })
+            .catch(error => {
+                console.error('Error refreshing stats:', error);
+            });
+    }
+
+    function updateStatsDisplay(stats) {
+        document.getElementById('total-tracks').textContent = stats.total_tracks || 0;
+        document.getElementById('total-size').textContent = formatFileSize(stats.total_size || 0);
+        document.getElementById('unique-artists').textContent = stats.artists || 0;
+        document.getElementById('genres-count').textContent = stats.genres ? stats.genres.length : 0;
+        
+        // Update genre breakdown
+        const genreBreakdown = document.getElementById('genre-breakdown');
+        if (stats.genres && stats.genres.length > 0) {
+            genreBreakdown.innerHTML = stats.genres.map(genre => 
+                `<span class="genre-tag">${genre}</span>`
+            ).join('');
+        } else {
+            genreBreakdown.innerHTML = '<p class="no-genres">No genres found. Scan a music folder to populate this section.</p>';
+        }
+    }
+
+    // Initial stats load
+    refreshStats();
+    
+    // Enable/disable buttons based on initial state
+    const initialPath = musicFolderInput.value.trim();
+    scanFolderBtn.disabled = !initialPath;
+    saveFolderBtn.disabled = !initialPath;
+});
+</script>
+{% endblock %}

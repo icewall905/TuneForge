@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .form-group { margin-bottom: 15px; }
+        .form-control { width: 300px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .list-group { border: 1px solid #ddd; border-radius: 4px; margin-top: 8px; }
+        .list-group-item { padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; }
+        .list-group-item:hover { background-color: #f8f9fa; }
+        .list-group-item:last-child { border-bottom: none; }
+        .help-text { color: #666; font-size: 14px; }
+        .debug { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 4px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <h1>Search Test</h1>
+    
+    <div class="form-group">
+        <label for="seed_search">Search Local Library for Seed:</label>
+        <input type="text" id="seed_search" class="form-control" placeholder="Type title or artist...">
+        <div id="seed_results" class="list-group" style="max-height: 220px; overflow:auto; margin-top:8px;"></div>
+        <div id="seed_selected" class="help-text" style="margin-top:6px; display:none;"></div>
+    </div>
+
+    <div class="debug" id="debug_info">
+        <strong>Debug Info:</strong><br>
+        <span id="debug_status">Ready to search...</span>
+    </div>
+
+    <script>
+        const seedInput = document.getElementById('seed_search');
+        const seedResults = document.getElementById('seed_results');
+        const seedSelected = document.getElementById('seed_selected');
+        const debugStatus = document.getElementById('debug_status');
+        
+        let searchTimer = null;
+
+        function updateDebug(message) {
+            debugStatus.textContent = message;
+            console.log(message);
+        }
+
+        async function setSeed(track) {
+            updateDebug(`Selected: ${track.artist} - ${track.title}`);
+            seedSelected.style.display = 'block';
+            seedSelected.textContent = `Seed: ${track.artist} - ${track.title}`;
+            seedResults.innerHTML = '';
+        }
+
+        seedInput.addEventListener('input', () => {
+            const q = seedInput.value.trim();
+            updateDebug(`Input: "${q}" (length: ${q.length})`);
+            
+            if (searchTimer) clearTimeout(searchTimer);
+            if (q.length < 2) { 
+                seedResults.innerHTML = '';
+                updateDebug('Query too short, clearing results');
+                return; 
+            }
+            
+            updateDebug(`Starting search for: "${q}"`);
+            searchTimer = setTimeout(async () => {
+                try {
+                    updateDebug(`Fetching: /api/local-search?q=${encodeURIComponent(q)}`);
+                    const resp = await fetch(`/api/local-search?q=${encodeURIComponent(q)}`);
+                    
+                    if (!resp.ok) {
+                        throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+                    }
+                    
+                    const rows = await resp.json();
+                    updateDebug(`Received ${rows ? rows.length : 0} results`);
+                    
+                    seedResults.innerHTML = '';
+                    if (rows && rows.length > 0) {
+                        rows.forEach((r, index) => {
+                            const item = document.createElement('div');
+                            item.className = 'list-group-item';
+                            item.innerHTML = `<strong>${r.artist || 'Unknown Artist'}</strong> - ${r.title || 'Unknown Title'}<br><span class="help-text">${r.album || 'Unknown Album'}</span>`;
+                            item.style.cursor = 'pointer';
+                            item.onclick = () => setSeed(r);
+                            seedResults.appendChild(item);
+                            
+                            if (index < 3) { // Log first 3 results
+                                updateDebug(`Result ${index + 1}: ${r.artist} - ${r.title}`);
+                            }
+                        });
+                        updateDebug(`Displayed ${rows.length} results`);
+                    } else {
+                        updateDebug('No results to display');
+                    }
+                } catch(e) {
+                    updateDebug(`Search failed: ${e.message}`);
+                    console.error('Search failed', e);
+                }
+            }, 300);
+        });
+
+        // Test the API directly
+        async function testAPI() {
+            updateDebug('Testing API directly...');
+            try {
+                const resp = await fetch('/api/local-search?q=test');
+                const data = await resp.json();
+                updateDebug(`Direct API test: ${data ? data.length : 0} results`);
+            } catch(e) {
+                updateDebug(`Direct API test failed: ${e.message}`);
+            }
+        }
+
+        // Run test on page load
+        window.addEventListener('load', testAPI);
+    </script>
+</body>
+</html>

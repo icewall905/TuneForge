@@ -1,0 +1,28 @@
+[User]
+likes =
+dislikes =
+favorite_artists =
+
+[Ollama]
+url = http://localhost:11434/api/generate
+model = deepseek-r1:8b
+
+[Navidrome]
+url = http://localhost:4533/rest
+username =
+password =
+
+[Platforms]
+enable_navidrome = yes
+enable_plex = yes
+
+[Plex]
+server_url = http://localhost:32400
+plex_token = ABCDE12345
+machine_id = 0123456789ABCDEF
+playlist_type = audio
+music_section_id = 1
+
+[General]
+context_window = 2048
+max_attempts = 10

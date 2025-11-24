@@ -1,0 +1,1054 @@
+<!doctype html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}TuneForge{% endblock %}</title>
+    <link rel="icon" href="{{ url_for('static', filename='images/logo_small.jpeg') }}" type="image/jpeg">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css') }}">
+    <!-- If you plan to use Bootstrap JS components, uncomment the line below -->
+    <!-- <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script> -->
+    
+    <style>
+        /* Page Header Styles - Beautiful centered headers with icons */
+        .page-header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px 0;
+        }
+        
+        .page-header h1 {
+            color: #6a8a5e;
+            margin-bottom: 10px;
+            font-size: 2.5rem;
+            font-weight: 600;
+        }
+        
+        .page-header p {
+            color: #888;
+            font-size: 16px;
+            margin: 0;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .page-header h1 {
+                font-size: 2rem;
+            }
+            
+            .page-header p {
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <img src="{{ url_for('static', filename='images/logo_big.jpeg') }}" alt="Logo" class="sidebar-logo" style="width:240px; height:auto; margin-bottom:10px;">
+            <h2>TuneForge</h2>
+            <p class="tagline">TuneForge<br>AI Powered Playlists</p>
+            <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar">
+                <span class="toggle-icon">☰</span>
+            </button>
+        </div>
+        <nav class="sidebar-nav">
+            <div class="sidebar-section">
+                <h3>Menu</h3>
+                <ul>
+                    <li><a href="{{ url_for('main.index') }}" class="{% if request.endpoint == 'main.index' %}active{% endif %}">Ask a Friend</a></li>
+                    <li><a href="{{ url_for('main.new_generator') }}" class="{% if request.endpoint == 'main.new_generator' %}active{% endif %}">Sonic Traveller</a></li>
+                    <li><a href="{{ url_for('main.musical_agent') }}" class="{% if request.endpoint == 'main.musical_agent' %}active{% endif %}">Musical Agent</a></li>
+                    <li><a href="{{ url_for('main.local_music_page') }}" class="{% if request.endpoint == 'main.local_music_page' %}active{% endif %}">Local Music</a></li>
+                    <li><a href="{{ url_for('main.audio_analysis_page') }}" class="{% if request.endpoint == 'main.audio_analysis_page' %}active{% endif %}">Audio Analysis</a></li>
+                    <li><a href="{{ url_for('main.history') }}" class="{% if request.endpoint == 'main.history' %}active{% endif %}">History</a></li>
+                    <li><a href="{{ url_for('main.settings') }}" class="{% if request.endpoint == 'main.settings' %}active{% endif %}">Settings</a></li>
+                </ul>
+            </div>
+        </nav>
+        
+                    <!-- Simple Floating Progress Indicator -->
+            <div id="floating-progress" class="floating-progress" style="display: none;">
+                <div id="progress-content"></div>
+            </div>
+        
+        <div class="sidebar-footer">
+            <p class="version-info">v0.2.6</p>
+        </div>
+    </div>
+    
+    <!-- Mobile toggle and backdrop for off-canvas sidebar -->
+    <button id="mobile-sidebar-toggle" class="mobile-sidebar-toggle" aria-label="Open menu"><span class="toggle-icon">☰</span></button>
+    <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+    
+    <div class="main-content">
+        {% block content %}{% endblock %}
+    </div>
+
+    <script>
+        // Basic dark mode toggle based on your original script, adapted for new structure
+        document.addEventListener('DOMContentLoaded', function() {
+            const themeToggleBtn = document.getElementById('theme-toggle-btn'); // Assuming you'll add this button somewhere
+            const htmlElement = document.documentElement;
+            
+            function updateThemeIcon(theme) {
+                // Logic to update an icon if you have one, e.g., in the sidebar or main content header
+                // For now, this is a placeholder.
+                // Example: if (theme === 'dark') { darkIcon.style.display = 'none'; lightIcon.style.display = 'block'; }
+            }
+
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme) {
+                htmlElement.setAttribute('data-bs-theme', savedTheme);
+                updateThemeIcon(savedTheme);
+            } else {
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                const initialTheme = prefersDark ? 'dark' : 'light';
+                htmlElement.setAttribute('data-bs-theme', initialTheme);
+                updateThemeIcon(initialTheme);
+            }
+            
+            if (themeToggleBtn) {
+                themeToggleBtn.addEventListener('click', function() {
+                    const currentTheme = htmlElement.getAttribute('data-bs-theme');
+                    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                    htmlElement.setAttribute('data-bs-theme', newTheme);
+                    localStorage.setItem('theme', newTheme);
+                    updateThemeIcon(newTheme);
+                });
+            }
+        });
+    </script>
+    
+    <!-- Global Status Management Script -->
+    <script>
+                // Global status management with robust persistence
+            window.globalStatusManager = {
+                activeScans: new Map(),
+                activePlaylists: new Map(),
+                activeAudioAnalysis: null, // Single audio analysis process
+                progressPanel: null,
+                progressContent: null,
+                pollIntervals: new Map(),
+                playlistPollIntervals: new Map(),
+                updateTimeout: null, // Add debouncing timeout
+                lastUpdateState: null, // Track last update state
+                lastUpdateTime: null, // Track last update time
+        
+        init() {
+            this.progressPanel = document.getElementById('floating-progress');
+            this.progressContent = document.getElementById('progress-content');
+            
+            // Restore state from localStorage
+            this.restoreState();
+            // Validate any restored scans, playlists, and audio analysis with the server before polling
+            this.validateRestoredScans();
+            this.validateRestoredPlaylists();
+            this.validateRestoredAudioAnalysis();
+            
+            // Start background polling
+            this.startBackgroundPolling();
+            
+            // Immediately check for running audio analysis
+            setTimeout(() => this.checkForRunningAudioAnalysis(), 1000);
+            
+            // Ensure progress panel is visible if there are active tasks
+            this.ensureVisibility();
+            
+            // Set up page visibility and focus handlers
+            this.setupEventHandlers();
+        },
+        
+        async validateRestoredScans() {
+            try {
+                const toRemove = [];
+                for (const [scanId, scan] of this.activeScans) {
+                    try {
+                        // Add timeout to prevent hanging
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+                        
+                        const resp = await fetch(`/api/scan-progress/${scanId}`, {
+                            signal: controller.signal
+                        });
+                        clearTimeout(timeoutId);
+                        
+                        const progress = await resp.json();
+                        if (progress.error) {
+                            // Server has no progress for this ID; remove immediately
+                            console.log(`[Sidebar] Removing stale scan ${scanId}: ${progress.error}`);
+                            toRemove.push(scanId);
+                            continue;
+                        }
+                        if (['completed','cancelled','error'].includes(progress.status)) {
+                            // Terminal on server; remove soon for UX
+                            console.log(`[Sidebar] Scan ${scanId} is ${progress.status}, removing soon`);
+                            setTimeout(() => this.removeScan(scanId), 3000);
+                            continue;
+                        }
+                        // Active on server; ensure polling is running
+                        console.log(`[Sidebar] Scan ${scanId} is active, starting polling`);
+                        this.startPolling(scanId);
+                    } catch (e) {
+                        // Network or parse error: remove to avoid stale UI
+                        console.log(`[Sidebar] Removing scan ${scanId} due to error:`, e);
+                        toRemove.push(scanId);
+                    }
+                }
+                // Bulk remove any stale entries
+                toRemove.forEach(id => this.removeScan(id));
+                console.log(`[Sidebar] Validated scans: removed ${toRemove.length} stale entries`);
+            } catch (e) {
+                console.error('Failed to validate restored scans:', e);
+            }
+        },
+        
+        async validateRestoredAudioAnalysis() {
+            try {
+                if (this.activeAudioAnalysis) {
+                    try {
+                        const resp = await fetch('/api/audio-analysis/status');
+                        const status = await resp.json();
+                        
+                        if (status.error) {
+                            // Server has no knowledge of this analysis; remove immediately
+                            console.log(`[Sidebar] Removing stale audio analysis: ${status.error}`);
+                            this.removeAudioAnalysis();
+                            return;
+                        }
+                        
+                        if (['stopped', 'completed'].includes(status.status)) {
+                            // Terminal on server; remove soon for UX
+                            console.log(`[Sidebar] Audio analysis is ${status.status}, removing soon`);
+                            setTimeout(() => this.removeAudioAnalysis(), 3000);
+                        } else {
+                            // Active on server; ensure polling is running
+                            console.log(`[Sidebar] Audio analysis is active, starting polling`);
+                            this.startAudioAnalysisPolling();
+                        }
+                    } catch (e) {
+                        // Network or parse error: remove to avoid stale UI
+                        console.log(`[Sidebar] Removing audio analysis due to error:`, e);
+                        this.removeAudioAnalysis();
+                    }
+                } else {
+                    // Check if there's running audio analysis that we don't know about
+                    // But only if the audio analysis manager allows it
+                    if (!window.audioAnalysisManager || window.audioAnalysisManager.shouldAllowAudioAnalysis()) {
+                        await this.checkForRunningAudioAnalysis();
+                    } else {
+                        console.log('[Sidebar] Skipping audio analysis check (recently stopped)');
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to validate restored audio analysis:', e);
+            }
+        },
+        
+        async checkForRunningAudioAnalysis() {
+            try {
+                console.log('[Sidebar] Checking for running audio analysis...');
+                
+                // Check if the audio analysis manager allows us to add audio analysis
+                if (window.audioAnalysisManager && !window.audioAnalysisManager.shouldAllowAudioAnalysis()) {
+                    console.log('[Sidebar] Audio analysis manager prevents adding analysis (recently stopped)');
+                    return;
+                }
+                
+                const resp = await fetch('/api/audio-analysis/status');
+                const status = await resp.json();
+                
+                console.log('[Sidebar] Audio analysis status:', status.status);
+                
+                if (status.status === 'running' && !this.activeAudioAnalysis) {
+                    console.log('[Sidebar] Found running audio analysis, adding to UI');
+                    this.addAudioAnalysis();
+                } else if (status.status === 'running' && this.activeAudioAnalysis) {
+                    console.log('[Sidebar] Audio analysis already in UI');
+                } else {
+                    console.log('[Sidebar] No running audio analysis found');
+                }
+            } catch (e) {
+                console.error('Failed to check for running audio analysis:', e);
+            }
+        },
+        
+        async validateRestoredPlaylists() {
+            try {
+                const toRemove = [];
+                for (const [playlistId, playlist] of this.activePlaylists) {
+                    try {
+                        const resp = await fetch(`/api/playlist-progress/${playlistId}`);
+                        const progress = await resp.json();
+                        if (progress.error) {
+                            // Server has no progress for this ID; remove immediately
+                            toRemove.push(playlistId);
+                            continue;
+                        }
+                        if (['completed','cancelled','error'].includes(progress.status)) {
+                            // Terminal on server; remove soon for UX
+                            setTimeout(() => this.removePlaylist(playlistId), 3000);
+                            continue;
+                        }
+                        // Active on server; ensure polling is running
+                        this.startPlaylistPolling(playlistId);
+                    } catch (e) {
+                        // Network or parse error: remove to avoid stale UI
+                        toRemove.push(playlistId);
+                    }
+                }
+                // Bulk remove any stale entries
+                toRemove.forEach(id => this.removePlaylist(id));
+            } catch (e) {
+                console.error('Failed to validate restored playlists:', e);
+            }
+        },
+        
+                        // Persistent state management
+                saveState() {
+                    const state = {
+                        activeScans: Array.from(this.activeScans.entries()),
+                        activePlaylists: Array.from(this.activePlaylists.entries()),
+                        activeAudioAnalysis: this.activeAudioAnalysis,
+                        timestamp: Date.now()
+                    };
+                    localStorage.setItem('globalStatusManagerState', JSON.stringify(state));
+                },
+                
+                restoreState() {
+                    try {
+                        const savedState = localStorage.getItem('globalStatusManagerState');
+                        if (savedState) {
+                            const state = JSON.parse(savedState);
+                            const now = Date.now();
+                            
+                            // Only restore if state is less than 1 hour old
+                            if (now - state.timestamp < 3600000) {
+                                this.activeScans = new Map(state.activeScans || []);
+                                this.activePlaylists = new Map(state.activePlaylists || []);
+                                this.activeAudioAnalysis = state.activeAudioAnalysis || null;
+                                console.log(`[Sidebar] Restored ${this.activeScans.size} active scans, ${this.activePlaylists.size} active playlists, and audio analysis: ${this.activeAudioAnalysis ? 'active' : 'none'} from localStorage`);
+                                
+                                // If we have stale scans, they'll be cleaned up by validateRestoredScans
+                                if (this.activeScans.size > 0) {
+                                    console.log(`[Sidebar] Will validate ${this.activeScans.size} restored scans with server`);
+                                }
+                                
+                                // If we have audio analysis, start polling
+                                if (this.activeAudioAnalysis) {
+                                    console.log(`[Sidebar] Will validate audio analysis with server`);
+                                }
+                            } else {
+                                console.log('[Sidebar] Saved state too old, starting fresh');
+                                localStorage.removeItem('globalStatusManagerState');
+                            }
+                        } else {
+                            console.log('[Sidebar] No saved state found, starting fresh');
+                        }
+                    } catch (error) {
+                        console.error('[Sidebar] Error restoring state:', error);
+                        localStorage.removeItem('globalStatusManagerState');
+                    }
+                },
+        
+        showPanel() {
+            if (this.progressPanel) {
+                this.progressPanel.style.display = 'block';
+                this.saveState();
+            }
+        },
+        
+        hidePanel() {
+            if (this.progressPanel) {
+                this.progressPanel.style.display = 'none';
+                this.saveState();
+            }
+        },
+        
+        addScan(scanId, folderPath) {
+            this.activeScans.set(scanId, {
+                id: scanId,
+                folder: folderPath,
+                status: 'starting',
+                progress: 0,
+                currentFile: '',
+                totalFiles: 0,
+                processedFiles: 0,
+                startTime: Date.now()
+            });
+            
+            this.showPanel();
+            this.updateDisplay();
+            this.startPolling(scanId);
+            this.saveState();
+        },
+        
+        updateScan(scanId, data) {
+            const scan = this.activeScans.get(scanId);
+            if (scan) {
+                Object.assign(scan, data);
+                this.updateDisplay();
+                this.saveState();
+            }
+        },
+        
+                        removeScan(scanId) {
+                    this.activeScans.delete(scanId);
+                    this.pollIntervals.delete(scanId);
+                    this.updateDisplay();
+                    this.saveState();
+                    
+                    if (this.activeScans.size === 0 && this.activePlaylists.size === 0) {
+                        this.hidePanel();
+                    }
+                },
+                
+                addPlaylist(playlistId, playlistName, targetSongs) {
+                    console.log(`[Sidebar] Adding playlist: ${playlistId} (${playlistName}) target=${targetSongs}`);
+                    this.activePlaylists.set(playlistId, {
+                        id: playlistId,
+                        name: playlistName,
+                        targetSongs: targetSongs,
+                        status: 'starting',
+                        progress: 0,
+                        currentStatus: 'Initializing...',
+                        ollamaCalls: 0,
+                        tracksFound: 0,
+                        startTime: Date.now()
+                    });
+                    
+                    console.log(`[Sidebar] Active playlists count: ${this.activePlaylists.size}`);
+                    this.showPanel();
+                    this.updateDisplay();
+                    this.startPlaylistPolling(playlistId);
+                    this.saveState();
+                },
+                
+                updatePlaylist(playlistId, data) {
+                    const playlist = this.activePlaylists.get(playlistId);
+                    if (playlist) {
+                        Object.assign(playlist, data);
+                        this.updateDisplay();
+                        this.saveState();
+                    }
+                },
+                
+                removePlaylist(playlistId) {
+                    this.activePlaylists.delete(playlistId);
+                    if (this.playlistPollIntervals && this.playlistPollIntervals.has(playlistId)) {
+                        clearInterval(this.playlistPollIntervals.get(playlistId));
+                        this.playlistPollIntervals.delete(playlistId);
+                    }
+                    this.updateDisplay();
+                    this.saveState();
+                    
+                    if (this.activeScans.size === 0 && this.activePlaylists.size === 0) {
+                        this.hidePanel();
+                    }
+                },
+                
+                cancelPlaylist(playlistId) {
+                    const playlist = this.activePlaylists.get(playlistId);
+                    if (playlist && playlist.status !== 'completed') {
+                        // Call the cancel API endpoint
+                        fetch(`/api/cancel-playlist/${playlistId}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.status === 'cancelled') {
+                                playlist.status = 'cancelled';
+                                playlist.currentStatus = 'Cancelled by user';
+                                this.updateDisplay();
+                                this.saveState();
+                                
+                                // Remove after a delay
+                                setTimeout(() => {
+                                    this.removePlaylist(playlistId);
+                                }, 5000);
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error cancelling playlist:', error);
+                        });
+                    }
+                },
+        
+        updateDisplay() {
+            // Debug logging to see when this is called
+            console.log(`[Sidebar] updateDisplay called at ${Date.now()}`);
+            
+            // Debounce updates to prevent excessive calls
+            if (this.updateTimeout) {
+                clearTimeout(this.updateTimeout);
+            }
+            
+            // Add minimum time between updates (1 second)
+            const now = Date.now();
+            if (this.lastUpdateTime && (now - this.lastUpdateTime) < 1000) {
+                console.log(`[Sidebar] Skipping update - too soon since last update`);
+                return; // Skip if less than 1 second since last update
+            }
+            
+            this.updateTimeout = setTimeout(() => {
+                this.lastUpdateTime = Date.now();
+                console.log(`[Sidebar] Actually performing update after 500ms debounce`);
+                this._performUpdate();
+            }, 500); // 500ms debounce (much less frequent)
+        },
+        
+        _getStateHash() {
+            // Create a hash of the current state to detect changes
+            // Round progress to nearest 5% to prevent minor updates
+            const scanState = Array.from(this.activeScans.entries()).map(([id, scan]) => 
+                `${id}:${Math.round(scan.progress / 5) * 5}:${scan.status}:${Math.round(scan.processedFiles / 10) * 10}`
+            ).join('|');
+            
+            const playlistState = Array.from(this.activePlaylists.entries()).map(([id, playlist]) => 
+                `${id}:${Math.round(playlist.tracksFound / 5) * 5}:${playlist.status}`
+            ).join('|');
+            
+            const audioState = this.activeAudioAnalysis ? 
+                `${Math.round(this.activeAudioAnalysis.progress / 5) * 5}:${this.activeAudioAnalysis.status}:${Math.round(this.activeAudioAnalysis.processedTracks / 10) * 10}` : 
+                'none';
+            
+            return `${scanState}|${playlistState}|${audioState}`;
+        },
+        
+        _performUpdate() {
+            console.log(`[Sidebar] _performUpdate called - Scans: ${this.activeScans.size}, Playlists: ${this.activePlaylists.size}, Audio Analysis: ${this.activeAudioAnalysis ? 'active' : 'none'}`);
+            if (!this.progressContent) {
+                console.log('[Sidebar] No progress content element found');
+                return;
+            }
+            
+            if (this.activeScans.size === 0 && this.activePlaylists.size === 0 && !this.activeAudioAnalysis) {
+                console.log('[Sidebar] No active tasks, hiding panel');
+                this.hidePanel();
+                return;
+            }
+            
+            let html = '';
+            
+            // Display scans
+            for (const [scanId, scan] of this.activeScans) {
+                const elapsed = Math.round((Date.now() - scan.startTime) / 1000);
+                const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.round(elapsed/60)}m ${elapsed%60}s`;
+                
+                // Handle counting phase differently
+                let progressBar, progressInfo, progressText;
+                
+                if (scan.status === 'counting') {
+                    // Show counting progress with a different style
+                    progressBar = `<div class="progress-bar counting">
+                        <div class="progress-fill counting" style="width: ${scan.totalFiles > 0 ? Math.round((scan.processedFiles / scan.totalFiles) * 100) : 0}%"></div>
+                    </div>`;
+                    progressInfo = `<span class="progress-counts">${scan.processedFiles} found</span>`;
+                    progressText = scan.totalFiles > 0 ? `${Math.round((scan.processedFiles / scan.totalFiles) * 100)}%` : 'Counting...';
+                } else {
+                    // Normal scanning progress
+                    progressBar = `<div class="progress-bar">
+                        <div class="progress-fill" style="width: ${scan.progress}%"></div>
+                    </div>`;
+                    progressInfo = `<span class="progress-counts">${scan.processedFiles}/${scan.totalFiles}</span>`;
+                    progressText = `${scan.progress}%`;
+                }
+                
+                html += `
+                    <div class="progress-indicator">
+                        <div class="progress-header">
+                            <span class="progress-icon">${scan.status === 'counting' ? '🔍' : '🔄'}</span>
+                            <span class="progress-folder">${scan.folder.split('/').pop()}</span>
+                        </div>
+                        ${progressBar}
+                        <div class="progress-info">
+                            <span class="progress-text">${progressText}</span>
+                            ${progressInfo}
+                        </div>
+                        <div class="progress-current">${scan.currentFile || 'Starting...'}</div>
+                    </div>
+                `;
+            }
+            
+            // Display playlists
+            for (const [playlistId, playlist] of this.activePlaylists) {
+                const elapsed = Math.round((Date.now() - playlist.startTime) / 1000);
+                const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.round(elapsed/60)}m ${elapsed%60}s`;
+                
+                const progressPercent = Math.round((playlist.tracksFound / playlist.targetSongs) * 100);
+                
+                html += `
+                    <div class="progress-indicator playlist">
+                        <div class="progress-header">
+                            <span class="progress-icon">🎵</span>
+                            <span class="progress-folder">${playlist.name}</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${progressPercent}%"></div>
+                        </div>
+                        <div class="progress-info">
+                            <span class="progress-text">${progressPercent}%</span>
+                            <span class="progress-counts">${playlist.tracksFound}/${playlist.targetSongs}</span>
+                        </div>
+                        <div class="progress-current">${playlist.currentStatus}</div>
+                        <div class="progress-details">Ollama calls: ${playlist.ollamaCalls}</div>
+                        ${(['completed','cancelled','error'].includes(playlist.status)) ? '' : `<button class="cancel-btn" onclick="window.globalStatusManager.cancelPlaylist('${playlistId}')">Cancel</button>`}
+                    </div>
+                `;
+            }
+            
+            // Display audio analysis
+            if (this.activeAudioAnalysis) {
+                const elapsed = Math.round((Date.now() - this.activeAudioAnalysis.startTime) / 1000);
+                const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.round(elapsed/60)}m ${elapsed%60}s`;
+                
+                html += `
+                    <div class="progress-indicator audio-analysis">
+                        <div class="progress-header">
+                            <span class="progress-icon">🎵</span>
+                            <span class="progress-folder">Audio Analysis</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${this.activeAudioAnalysis.progress}%"></div>
+                        </div>
+                        <div class="progress-info">
+                            <span class="progress-text">${this.activeAudioAnalysis.progress}%</span>
+                            <span class="progress-counts">${this.activeAudioAnalysis.processedTracks}/${this.activeAudioAnalysis.totalTracks}</span>
+                        </div>
+                        <div class="progress-current">${this.activeAudioAnalysis.currentStatus}</div>
+                        <div class="progress-details">
+                            Workers: ${this.activeAudioAnalysis.workers} | 
+                            Queue: ${this.activeAudioAnalysis.queueSize} | 
+                            Failed: ${this.activeAudioAnalysis.failedTracks} | 
+                            Time: ${elapsedStr}
+                        </div>
+                        ${(['completed','error'].includes(this.activeAudioAnalysis.status)) ? '' : `<button class="cancel-btn" onclick="window.globalStatusManager.stopAudioAnalysis()">Stop</button>`}
+                    </div>
+                `;
+            }
+            
+            this.progressContent.innerHTML = html;
+            this.showPanel();
+        },
+        
+        startPolling(scanId) {
+            // Clear any existing interval
+            if (this.pollIntervals.has(scanId)) {
+                clearInterval(this.pollIntervals.get(scanId));
+            }
+            
+            const pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/scan-progress/${scanId}`);
+                    const progress = await response.json();
+                    
+                    if (progress.error) {
+                        this.updateScan(scanId, { status: 'error', currentFile: `Error: ${progress.error}` });
+                        clearInterval(pollInterval);
+                        this.pollIntervals.delete(scanId);
+                        setTimeout(() => this.removeScan(scanId), 5000);
+                        return;
+                    }
+                    
+                    if (progress.status === 'completed') {
+                        this.updateScan(scanId, { 
+                            status: 'completed', 
+                            progress: 100,
+                            currentFile: 'Completed!'
+                        });
+                        clearInterval(pollInterval);
+                        this.pollIntervals.delete(scanId);
+                        setTimeout(() => this.removeScan(scanId), 5000);
+                    } else if (progress.status === 'error') {
+                        this.updateScan(scanId, { 
+                            status: 'error', 
+                            currentFile: `Failed: ${progress.error}` 
+                        });
+                        clearInterval(pollInterval);
+                        this.pollIntervals.delete(scanId);
+                        setTimeout(() => this.removeScan(scanId), 5000);
+                    } else {
+                        // Update progress
+                        let progressPercent = 0;
+                        if (progress.total_files > 0) {
+                            progressPercent = Math.round((progress.files_processed / progress.total_files) * 100);
+                        }
+                        
+                        this.updateScan(scanId, {
+                            status: progress.status,
+                            progress: progressPercent,
+                            currentFile: progress.current_file || 'Processing...',
+                            totalFiles: progress.total_files || 0,
+                            processedFiles: progress.files_processed || 0
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error polling scan progress:', error);
+                }
+            }, 2000); // Poll every 2 seconds
+            
+            this.pollIntervals.set(scanId, pollInterval);
+        },
+        
+        ensureVisibility() {
+            if (this.activeScans.size > 0 || this.activePlaylists.size > 0 || this.activeAudioAnalysis) {
+                this.showPanel();
+                // Only update display if there are actual changes
+                if (this.lastUpdateState !== this._getStateHash()) {
+                    this.updateDisplay();
+                    this.lastUpdateState = this._getStateHash();
+                }
+            }
+        },
+        
+        setupEventHandlers() {
+            // Page visibility change
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) {
+                    this.ensureVisibility();
+                }
+            });
+            
+            // Page focus
+            window.addEventListener('focus', () => {
+                this.ensureVisibility();
+            });
+            
+            // Page load
+            window.addEventListener('load', () => {
+                this.ensureVisibility();
+            });
+            
+            // DOM ready
+            document.addEventListener('DOMContentLoaded', () => {
+                this.ensureVisibility();
+            });
+        },
+        
+        startBackgroundPolling() {
+            // Persistent background monitoring
+            setInterval(() => {
+                this.ensureVisibility();
+            }, 3000); // Check every 3 seconds (restored)
+            
+            // Restart polling for any scans that might have lost their intervals
+            setInterval(() => {
+                for (const [scanId, scan] of this.activeScans) {
+                    if (!this.pollIntervals.has(scanId) && scan.status !== 'completed' && scan.status !== 'error') {
+                        console.log(`Restarting polling for scan ${scanId}`);
+                        this.startPolling(scanId);
+                    }
+                }
+                // Ensure playlist polling is running as well
+                for (const [playlistId, playlist] of this.activePlaylists) {
+                    if (!this.playlistPollIntervals.has(playlistId) && playlist.status !== 'completed' && playlist.status !== 'cancelled' && playlist.status !== 'error') {
+                        console.log(`Restarting polling for playlist ${playlistId}`);
+                        this.startPlaylistPolling(playlistId);
+                    }
+                }
+                
+                // Ensure audio analysis polling is running
+                if (this.activeAudioAnalysis && !this.activeAudioAnalysis.pollInterval && 
+                    this.activeAudioAnalysis.status !== 'completed' && this.activeAudioAnalysis.status !== 'error') {
+                    console.log('Restarting polling for audio analysis');
+                    this.startAudioAnalysisPolling();
+                }
+                
+                // Check for running audio analysis that we don't know about
+                if (!this.activeAudioAnalysis) {
+                    this.checkForRunningAudioAnalysis();
+                }
+            }, 10000); // Check every 10 seconds
+        },
+        
+        startPlaylistPolling(playlistId) {
+            // Clear any existing interval
+            if (!this.playlistPollIntervals) this.playlistPollIntervals = new Map();
+            if (this.playlistPollIntervals.has(playlistId)) {
+                clearInterval(this.playlistPollIntervals.get(playlistId));
+            }
+            const pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/playlist-progress/${playlistId}`);
+                    const progress = await response.json();
+                    
+                    if (progress.error) {
+                        // Server has no knowledge of this playlist (likely after restart)
+                        this.updatePlaylist(playlistId, {
+                            status: 'error',
+                            currentStatus: 'No server progress (likely after restart). Removing…'
+                        });
+                        clearInterval(pollInterval);
+                        this.playlistPollIntervals.delete(playlistId);
+                        setTimeout(() => this.removePlaylist(playlistId), 3000);
+                        return;
+                    }
+                    
+                    this.updatePlaylist(playlistId, {
+                        status: progress.status,
+                        currentStatus: progress.current_status,
+                        ollamaCalls: progress.ollama_calls,
+                        tracksFound: progress.tracks_found,
+                        targetSongs: progress.target_songs || (this.activePlaylists.get(playlistId)?.targetSongs || 0)
+                    });
+                    
+                    if (progress.status === 'completed' || progress.status === 'cancelled' || progress.status === 'error') {
+                        clearInterval(pollInterval);
+                        this.playlistPollIntervals.delete(playlistId);
+                        setTimeout(() => { this.removePlaylist(playlistId); }, 5000);
+                    }
+                } catch (error) {
+                    console.error('Error polling playlist progress:', error);
+                    // On fetch error, stop polling and remove stale entry after a short delay
+                    this.updatePlaylist(playlistId, {
+                        status: 'error',
+                        currentStatus: 'Progress polling failed. Removing…'
+                    });
+                    clearInterval(pollInterval);
+                    this.playlistPollIntervals.delete(playlistId);
+                    setTimeout(() => this.removePlaylist(playlistId), 3000);
+                }
+            }, 2000);
+            this.playlistPollIntervals.set(playlistId, pollInterval);
+        },
+        
+        // Audio Analysis Management
+        addAudioAnalysis() {
+            // Check if the audio analysis manager allows us to add audio analysis
+            if (window.audioAnalysisManager && !window.audioAnalysisManager.shouldAllowAudioAnalysis()) {
+                console.log('[Sidebar] Audio analysis manager prevents adding analysis (recently stopped)');
+                return;
+            }
+            
+            console.log('[Sidebar] Adding audio analysis to UI...');
+            this.activeAudioAnalysis = {
+                status: 'starting',
+                progress: 0,
+                currentStatus: 'Initializing...',
+                totalTracks: 0,
+                processedTracks: 0,
+                failedTracks: 0,
+                startTime: Date.now(),
+                workers: 0,
+                queueSize: 0
+            };
+            
+            console.log('[Sidebar] Audio analysis object created:', this.activeAudioAnalysis);
+            this.showPanel();
+            this.updateDisplay();
+            this.startAudioAnalysisPolling();
+            this.saveState();
+            console.log('[Sidebar] Audio analysis added successfully');
+        },
+        
+        updateAudioAnalysis(data) {
+            if (this.activeAudioAnalysis) {
+                Object.assign(this.activeAudioAnalysis, data);
+                this.updateDisplay();
+                this.saveState();
+            }
+        },
+        
+        removeAudioAnalysis() {
+            this.activeAudioAnalysis = null;
+            this.updateDisplay();
+            this.saveState();
+            
+            if (this.activeScans.size === 0 && this.activePlaylists.size === 0) {
+                this.hidePanel();
+            }
+        },
+        
+        startAudioAnalysisPolling() {
+            const pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/api/audio-analysis/status');
+                    const status = await response.json();
+                    
+                    if (status.error) {
+                        this.updateAudioAnalysis({ 
+                            status: 'error', 
+                            currentStatus: `Error: ${status.error}` 
+                        });
+                        clearInterval(pollInterval);
+                        setTimeout(() => this.removeAudioAnalysis(), 5000);
+                        return;
+                    }
+                    
+                    if (status.status === 'stopped' || status.status === 'completed') {
+                        this.updateAudioAnalysis({ 
+                            status: 'completed', 
+                            currentStatus: 'Analysis completed!' 
+                        });
+                        clearInterval(pollInterval);
+                        setTimeout(() => this.removeAudioAnalysis(), 5000);
+                    } else {
+                        // Update status
+                        this.updateAudioAnalysis({
+                            status: status.status,
+                            workers: status.workers || 0,
+                            queueSize: status.queue_size || 0
+                        });
+                        
+                        // Get progress data (use nested fields from API)
+                        const progressResponse = await fetch('/api/audio-analysis/progress');
+                        const progressJson = await progressResponse.json();
+                        
+                        if (progressJson && progressJson.success && progressJson.progress) {
+                            const p = progressJson.progress;
+                            const total = p.total_tracks || 0;
+                            const analyzed = p.analyzed_tracks || 0;
+                            const errors = p.error_tracks || 0;
+                            let progressPercent = (typeof p.progress_percentage === 'number')
+                                ? Math.round(p.progress_percentage)
+                                : (total > 0 ? Math.round((analyzed / total) * 100) : 0);
+
+                            // Prevent regressions to 0% or any decrease due to transient responses
+                            const prev = (this.activeAudioAnalysis && typeof this.activeAudioAnalysis.progress === 'number')
+                                ? this.activeAudioAnalysis.progress
+                                : 0;
+                            if (progressPercent < prev) {
+                                progressPercent = prev;
+                            }
+                            if (progressPercent === 0 && prev > 0) {
+                                progressPercent = prev;
+                            }
+
+                            this.updateAudioAnalysis({
+                                progress: progressPercent,
+                                totalTracks: total,
+                                processedTracks: analyzed,
+                                failedTracks: errors,
+                                currentStatus: 'Processing...'
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error polling audio analysis progress:', error);
+                }
+            }, 2000); // Poll every 2 seconds
+            
+            // Store the interval for cleanup
+            this.activeAudioAnalysis.pollInterval = pollInterval;
+        },
+        
+        stopAudioAnalysis() {
+            if (this.activeAudioAnalysis && this.activeAudioAnalysis.pollInterval) {
+                clearInterval(this.activeAudioAnalysis.pollInterval);
+            }
+            
+            // Call the API to stop analysis
+            fetch('/api/audio-analysis/stop', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        this.updateAudioAnalysis({ 
+                            status: 'stopping', 
+                            currentStatus: 'Stopping analysis...' 
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error stopping audio analysis:', error);
+                });
+        }
+    };
+    
+    // Sidebar toggle functionality
+    function initSidebar() {
+        console.log('🔧 Initializing sidebar...');
+        const sidebar = document.querySelector('.sidebar');
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+        const mainContent = document.querySelector('.main-content');
+        const mobileToggle = document.getElementById('mobile-sidebar-toggle');
+        const backdrop = document.getElementById('sidebar-backdrop');
+        
+        console.log('🔧 Sidebar element:', sidebar);
+        console.log('🔧 Toggle button:', sidebarToggle);
+        console.log('🔧 Main content:', mainContent);
+        
+        if (!sidebar || !sidebarToggle) {
+            console.error('❌ Sidebar or toggle button not found!');
+            return;
+        }
+        
+        // Check localStorage for saved state (desktop)
+        const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+        console.log('🔧 Saved state - collapsed:', isCollapsed);
+        
+        if (isCollapsed) {
+            sidebar.classList.add('collapsed');
+            if (mainContent) mainContent.classList.add('sidebar-collapsed');
+        }
+        
+        // Desktop toggle
+        sidebarToggle.addEventListener('click', function() {
+            console.log('🔧 Toggle button clicked!');
+            sidebar.classList.toggle('collapsed');
+            if (mainContent) mainContent.classList.toggle('sidebar-collapsed');
+            const isNowCollapsed = sidebar.classList.contains('collapsed');
+            localStorage.setItem('sidebarCollapsed', isNowCollapsed);
+        });
+        
+        // Mobile toggle
+        if (mobileToggle && backdrop) {
+            const openMobileSidebar = () => {
+                sidebar.classList.add('open');
+                backdrop.style.display = 'block';
+            };
+            const closeMobileSidebar = () => {
+                sidebar.classList.remove('open');
+                backdrop.style.display = 'none';
+            };
+            mobileToggle.addEventListener('click', () => {
+                if (sidebar.classList.contains('open')) closeMobileSidebar();
+                else openMobileSidebar();
+            });
+            backdrop.addEventListener('click', closeMobileSidebar);
+        }
+        
+        // Auto-collapse on mobile and close off-canvas state on resize
+        function handleResponsive() {
+            if (window.innerWidth <= 768) {
+                // Ensure desktop collapsed state doesn't force width on mobile
+                if (!sidebar.classList.contains('open')) {
+                    sidebar.classList.remove('collapsed');
+                    if (mainContent) mainContent.classList.remove('sidebar-collapsed');
+                }
+            } else {
+                // Hide mobile backdrop and off-canvas state
+                if (backdrop) backdrop.style.display = 'none';
+                sidebar.classList.remove('open');
+                // Restore desktop collapsed state
+                const isCollapsedNow = localStorage.getItem('sidebarCollapsed') === 'true';
+                if (isCollapsedNow) {
+                    sidebar.classList.add('collapsed');
+                    if (mainContent) mainContent.classList.add('sidebar-collapsed');
+                }
+            }
+        }
+        handleResponsive();
+        window.addEventListener('resize', handleResponsive);
+        console.log('✅ Sidebar toggle functionality initialized');
+    }
+    
+    // Initialize when DOM is ready
+    document.addEventListener('DOMContentLoaded', () => {
+        // Initialize sidebar state
+        initSidebar();
+        
+        // Initialize global status manager
+        if (typeof window.globalStatusManager !== 'undefined') {
+            window.globalStatusManager.init();
+        }
+    });
+    </script>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

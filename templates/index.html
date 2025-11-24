@@ -1,0 +1,763 @@
+{% extends 'layout.html' %}
+
+{% block title %}Ask a Friend - TuneForge{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🤖 Ask a Friend</h1>
+    <p>Get AI-generated playlists based on your description.</p>
+
+</div>
+
+<div class="content-container">    
+    <div class="playlist-container">
+        <form id="playlistForm">
+            <div class="settings-section">
+                <div class="form-group">
+                    <label for="playlist_name">Playlist Name:</label>
+                    <input type="text" id="playlist_name" name="playlist_name" class="form-control" placeholder="Enter playlist name (optional)">
+                </div>
+                
+                <div class="form-group">
+                    <label for="playlist_description">Playlist Description:</label>
+                    <textarea id="playlist_description" name="playlist_description" class="form-control" rows="2" placeholder="Enter a description for your playlist (optional)"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="num_songs">Number of Tracks:</label>
+                    <select id="num_songs" name="num_songs" class="form-control">
+                        <option value="5">5 tracks</option>
+                        <option value="10" selected>10 tracks</option>
+                        <option value="15">15 tracks</option>
+                        <option value="20">20 tracks</option>
+                        <option value="25">25 tracks</option>
+                        <option value="30">30 tracks</option>
+                        <option value="40">40 tracks</option>
+                        <option value="50">50 tracks</option>
+                        <option value="75">75 tracks</option>
+                        <option value="100">100 tracks</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="likes">My Likes:</label>
+                    <textarea id="likes" name="likes" class="form-control" rows="3" placeholder="Genres, artists, moods that you like">{{ likes }}</textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="dislikes">My Dislikes:</label>
+                    <textarea id="dislikes" name="dislikes" class="form-control" rows="3" placeholder="Genres, artists, moods that you dislike">{{ dislikes }}</textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="artist_input">Add Favorite Artist:</label>
+                    <div class="input-group">
+                        <input type="text" id="artist_input" class="form-control" placeholder="Enter artist name">
+                        <button type="button" id="add_artist" class="secondary-button">Add</button>
+                    </div>
+                </div>
+                
+                <input type="hidden" id="favorite_artists" name="favorite_artists" value="{{ favorite_artists }}">
+                
+                <div class="form-group">
+                    <label>Favorite Artists:</label>
+                    <ul id="artist_list" class="list-group"></ul>
+                </div>
+                
+                <div class="form-group">
+                    <button type="submit" class="primary-button">Ask a Friend</button>
+                </div>
+            </div>
+        </form>
+        
+        <div id="loading" style="display:none;" class="loading-large">
+            <p>Generating playlist, please wait...</p>
+        </div>
+        
+        <div class="results-container">
+            <h2>Console Output</h2>
+            <div id="console_output" class="console-output"></div>
+            
+            <!-- Playlist Results Section -->
+            <div id="playlist_results" style="display:none;">
+                <h2>Generated Playlist</h2>
+                <div id="playlist_meta" class="playlist-meta"></div>
+                
+                <!-- Export Section -->
+                <div id="export_section" style="display:none; margin-top:16px;">
+                    <button id="export_json_btn" class="secondary-button">Export JSON</button>
+                    <button id="export_m3u_btn" class="secondary-button">Export M3U</button>
+                </div>
+                
+                <!-- Service Integration Section -->
+                <div id="service_integration_section" style="display:none; margin-top:20px;">
+                    <h3>🎵 Save to Music Services</h3>
+                    <div class="service-integration-container">
+                        <!-- Playlist Naming -->
+                        <div class="playlist-naming">
+                            <label for="playlist_name">Playlist Name:</label>
+                            <input type="text" id="playlist_name" class="form-control" placeholder="Enter custom playlist name (optional)">
+                            <small class="help-text">Leave empty to use current playlist name</small>
+                        </div>
+                        
+                        <!-- Service Buttons -->
+                        <div class="service-buttons">
+                            <button id="save_to_navidrome_btn" class="service-button navidrome" style="display:none;">
+                                <span class="service-icon">🎧</span>
+                                <span class="service-text">Save to Navidrome</span>
+                            </button>
+                            <button id="save_to_plex_btn" class="service-button plex" style="display:none;">
+                                <span class="service-icon">🎬</span>
+                                <span class="service-text">Save to Plex</span>
+                            </button>
+                        </div>
+                        
+                        <!-- Service Status -->
+                        <div id="service_status" class="service-status" style="display:none;">
+                            <div class="status-message"></div>
+                            <div class="mapping-results" style="display:none;">
+                                <h4>Track Mapping Results</h4>
+                                <div class="mapping-summary"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Tracks List -->
+                <div id="tracks_section" style="margin-top:20px;">
+                    <h3>Playlist Tracks</h3>
+                    <ul id="tracks_list" class="list-group"></ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Prevent double-handling of submissions
+    window.__playlistSubmitInProgress = false;
+
+    // Global error handler to log JavaScript errors
+    window.addEventListener('error', function(e) {
+        console.error('JavaScript error:', e.error);
+        console.error('Error location:', e.filename, e.lineno, e.colno);
+        console.error('Error message:', e.message);
+        
+        // Try to send error to backend for logging
+        fetch('/api/log-error', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: e.message,
+                filename: e.filename,
+                lineno: e.lineno,
+                colno: e.colno,
+                error: e.error ? e.error.toString() : 'Unknown error'
+            })
+        }).catch(err => console.error('Failed to log error to backend:', err));
+    });
+    
+    // Comprehensive JavaScript execution tracking
+    console.log('=== TUNEFORGE JAVASCRIPT LOADING STARTED ===');
+    console.log('Timestamp:', new Date().toISOString());
+    console.log('User Agent:', navigator.userAgent);
+    console.log('Document ready state:', document.readyState);
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('=== DOM CONTENT LOADED EVENT FIRED ===');
+        console.log('Document ready state:', document.readyState);
+        console.log('Form element exists:', !!document.getElementById('playlistForm'));
+        console.log('Submit button exists:', !!document.querySelector('button[type="submit"]'));
+        
+        function updateHiddenInput() {
+            const listItems = document.querySelectorAll('#artist_list li');
+            const artists = Array.from(listItems).map(item => item.querySelector('.artist-name').textContent);
+            document.getElementById('favorite_artists').value = artists.join(', ');
+        }
+        
+        function addArtist() {
+            const input = document.getElementById('artist_input');
+            const artistName = input.value.trim();
+            if (artistName === '') return;
+            
+            const li = document.createElement('li');
+            li.className = "list-group-item";
+            
+            const artistSpan = document.createElement('span');
+            artistSpan.className = 'artist-name';
+            artistSpan.textContent = artistName;
+            li.appendChild(artistSpan);
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.type = "button";
+            removeBtn.className = "text-button";
+            removeBtn.textContent = 'Remove';
+            removeBtn.onclick = function() { 
+                li.remove(); 
+                updateHiddenInput(); 
+            };
+            li.appendChild(removeBtn);
+            
+            document.getElementById('artist_list').appendChild(li);
+            input.value = '';
+            updateHiddenInput();
+        }
+        
+        document.getElementById('add_artist').addEventListener('click', addArtist);
+        
+        // Initialize favorite artists from hidden input
+        window.onload = function() {
+            const hiddenInput = document.getElementById('favorite_artists');
+            const existing = hiddenInput.value;
+            if (existing.trim() !== '') {
+                const artists = existing.split(',').map(a => a.trim());
+                artists.forEach(function(artist) {
+                    if (artist !== '') {
+                        document.getElementById('artist_input').value = artist;
+                        addArtist();
+                    }
+                });
+            }
+            
+            // Check if global status manager is ready
+            if (window.globalStatusManager) {
+                console.log('Global status manager is ready!');
+            } else {
+                console.log('Global status manager not ready yet, waiting...');
+                // Wait a bit more for it to initialize
+                setTimeout(() => {
+                    if (window.globalStatusManager) {
+                        console.log('Global status manager is now ready!');
+                    } else {
+                        console.error('Global status manager still not available after delay!');
+                    }
+                }, 1000);
+            }
+        };
+        
+        // Handle form submission for playlist generation
+        console.log('=== SETTING UP FORM SUBMISSION HANDLER ===');
+        const form = document.getElementById('playlistForm');
+        console.log('Form element found:', !!form);
+        console.log('Form element:', form);
+        
+        if (!form) {
+            console.error('CRITICAL ERROR: Form not found!');
+            return;
+        }
+        
+        // Single guard for both handlers
+        function handleSubmit(e) {
+            console.log('=== FORM SUBMIT EVENT ===');
+            if (window.__playlistSubmitInProgress) {
+                console.log('Submission already in progress; ignoring duplicate submit');
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+            window.__playlistSubmitInProgress = true;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            // Proceed
+            processFormSubmission(e);
+        }
+        
+        try {
+            form.addEventListener('submit', handleSubmit);
+            console.log('✅ addEventListener submit handler attached successfully');
+        } catch (error) {
+            console.error('❌ Failed to attach addEventListener submit handler:', error);
+        }
+        
+        try {
+            form.onsubmit = handleSubmit;
+            console.log('✅ onsubmit handler attached successfully');
+        } catch (error) {
+            console.error('❌ Failed to attach onsubmit handler:', error);
+        }
+        
+        // Function to process form submission
+        function processFormSubmission(e) {
+            document.getElementById('loading').style.display = 'block';
+            const outputElement = document.getElementById('console_output');
+            outputElement.innerHTML = '<div class="console-line">🚀 Starting playlist generation...</div>';
+            
+            // Collect form data
+            const formData = new FormData(e.target);
+            const formDataObj = {};
+            formData.forEach((value, key) => {
+                formDataObj[key] = value;
+            });
+            
+            console.log('Form data collected:', formDataObj);
+            
+            // Create the payload in the format expected by the API
+            const payload = {
+                prompt: `Create a playlist with these preferences: 
+                    Likes: ${formDataObj.likes}
+                    Dislikes: ${formDataObj.dislikes}
+                    Favorite Artists: ${formDataObj.favorite_artists}
+                    ${formDataObj.playlist_description ? 'Description: ' + formDataObj.playlist_description : ''}`,
+                num_songs: parseInt(formDataObj.num_songs) || 10,
+                playlist_name: formDataObj.playlist_name || "TuneForge Playlist"
+            };
+            
+            console.log('API payload created:', payload);
+
+            // Generate a client-side playlist ID and register in sidebar immediately
+            const clientPlaylistId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            payload.client_playlist_id = clientPlaylistId;
+            
+            if (window.globalStatusManager) {
+                window.globalStatusManager.addPlaylist(
+                    clientPlaylistId,
+                    payload.playlist_name,
+                    payload.num_songs
+                );
+            } else {
+                console.warn('Global status manager not available to add playlist immediately');
+            }
+            
+            // Start log streaming IMMEDIATELY to capture logs as they happen
+            startLogStreaming(outputElement);
+            
+            // Start the playlist generation
+            fetch('/api/generate-playlist', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(response => {
+                console.log('API response received:', response);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('API data received:', data);
+                console.log('Playlist ID found:', data.playlist_id);
+                console.log('Global status manager available:', !!window.globalStatusManager);
+                
+                // If server returned a different playlist_id (shouldn't), reconcile by updating map key
+                if (data.playlist_id && data.playlist_id !== clientPlaylistId && window.globalStatusManager) {
+                    const existing = window.globalStatusManager.activePlaylists.get(clientPlaylistId);
+                    if (existing) {
+                        window.globalStatusManager.activePlaylists.delete(clientPlaylistId);
+                        window.globalStatusManager.activePlaylists.set(data.playlist_id, Object.assign(existing, { id: data.playlist_id }));
+                        window.globalStatusManager.updateDisplay();
+                        window.globalStatusManager.saveState();
+                    }
+                }
+                
+                // Show playlist results
+                displayPlaylistResults(data);
+                
+                // Allow new submissions after this completes
+                window.__playlistSubmitInProgress = false;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('loading').style.display = 'none';
+                outputElement.innerHTML += `<div class="console-line error">❌ Error: ${error}</div>`;
+                window.__playlistSubmitInProgress = false;
+            });
+        }
+        
+        function startLogStreaming(outputElement) {
+            console.log('Starting log streaming...');
+            outputElement.innerHTML += `<div class="console-line info">🔌 Connecting to log stream...</div>`;
+            
+            // Start real-time log streaming
+            const eventSource = new EventSource('/api/logs/stream');
+            
+            // Store reference to close later
+            window.currentEventSource = eventSource;
+            
+            // Function to add log line with line limit management
+            function addLogLine(html) {
+                outputElement.innerHTML += html;
+                
+                // Limit console output to 100 lines to prevent browser hanging
+                const lines = outputElement.querySelectorAll('.console-line');
+                if (lines.length > 100) {
+                    // Remove oldest lines (keep the last 100)
+                    const linesToRemove = lines.length - 100;
+                    for (let i = 0; i < linesToRemove; i++) {
+                        lines[i].remove();
+                    }
+                }
+                
+                // Auto-scroll to bottom
+                outputElement.scrollTop = outputElement.scrollHeight;
+            }
+            
+            eventSource.onopen = function(event) {
+                console.log('EventSource opened');
+                addLogLine(`<div class="console-line success">🔗 Log stream connected!</div>`);
+            };
+            
+            eventSource.onmessage = function(event) {
+                console.log('Received message:', event.data);
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    switch(data.type) {
+                        case 'info':
+                            addLogLine(`<div class="console-line info">ℹ️ ${data.message}</div>`);
+                            break;
+                        case 'log':
+                            // Parse the log message and display it nicely
+                            const logMessage = parseLogMessage(data.message);
+                            addLogLine(`<div class="console-line log">${logMessage}</div>`);
+                            break;
+                        case 'error':
+                            addLogLine(`<div class="console-line error">❌ ${data.message}</div>`);
+                            break;
+                        case 'complete':
+                            addLogLine(`<div class="console-line success">✅ ${data.message}</div>`);
+                            // Don't close here - let it keep running to capture more logs
+                            break;
+                    }
+                } catch (e) {
+                    console.error('Error parsing log message:', e);
+                    addLogLine(`<div class="console-line error">❌ Parse error: ${e.message}</div>`);
+                }
+            };
+            
+            eventSource.onerror = function(event) {
+                console.error('EventSource error:', event);
+                addLogLine(`<div class="console-line error">❌ Connection error - check browser console</div>`);
+                // Don't close on error - let it retry
+            };
+        }
+        
+        function parseLogMessage(logLine) {
+            // Extract the relevant part of the log message
+            if (logLine.includes('Ollama:')) {
+                const message = logLine.split('Ollama:')[1]?.trim() || logLine;
+                return `🤖 ${message}`;
+            } else if (logLine.includes('Navidrome:')) {
+                const message = logLine.split('Navidrome:')[1]?.trim() || logLine;
+                return `🎵 ${message}`;
+            } else if (logLine.includes('Playlist Gen:')) {
+                const message = logLine.split('Playlist Gen:')[1]?.trim() || logLine;
+                return `📋 ${message}`;
+            } else {
+                return `📝 ${logLine}`;
+            }
+        }
+        
+        function displayLogMessage(outputElement, data) {
+            let className = 'console-line';
+            let icon = '📝';
+            
+            switch(data.status) {
+                case 'starting':
+                    className += ' info';
+                    icon = '🔄';
+                    break;
+                case 'progress':
+                    className += ' info';
+                    icon = '📝';
+                    break;
+                case 'complete':
+                    className += ' success';
+                    icon = '✅';
+                    break;
+                case 'error':
+                    className += ' error';
+                    icon = '❌';
+                    break;
+            }
+            
+            outputElement.innerHTML += `<div class="${className}">${icon} ${data.message}</div>`;
+            outputElement.scrollTop = outputElement.scrollHeight;
+        }
+
+        // Note: Removed local startPlaylistProgressPolling; sidebar now handles polling
+        
+        // Function to display playlist results
+        function displayPlaylistResults(data) {
+            console.log('🎵 Displaying playlist results:', data);
+            console.log('🔍 All available fields:', Object.keys(data));
+            
+            const playlistResults = document.getElementById('playlist_results');
+            const playlistMeta = document.getElementById('playlist_meta');
+            const tracksList = document.getElementById('tracks_list');
+            const exportSection = document.getElementById('export_section');
+            const serviceSection = document.getElementById('service_integration_section');
+            
+            // Show results section
+            playlistResults.style.display = 'block';
+            
+            // Display playlist metadata
+            playlistMeta.innerHTML = `
+                <div class="playlist-info">
+                    <h4>${data.playlist_name || 'Generated Playlist'}</h4>
+                    <p><strong>Status:</strong> ${data.message}</p>
+                    <p><strong>Tracks Found:</strong> ${data.tracks_added_count || 0}/${data.target_song_count || 0}</p>
+                    <p><strong>Ollama Calls:</strong> ${data.ollama_api_calls || 0}</p>
+                    <p><strong>Playlist ID:</strong> ${data.playlist_id || 'N/A'}</p>
+                </div>
+            `;
+            
+            // Check for tracks in different possible field names
+            let tracks = null;
+            if (data.tracks_details && data.tracks_details.length > 0) {
+                tracks = data.tracks_details;
+                console.log('✅ Found tracks in tracks_details');
+            } else if (data.tracks && data.tracks.length > 0) {
+                tracks = data.tracks;
+                console.log('✅ Found tracks in tracks field');
+            } else if (data.created_in_services && data.created_in_services.navidrome && data.created_in_services.navidrome.track_count > 0) {
+                // If we have service creation info but no track details, create a basic track list
+                console.log('✅ Found service creation info, creating basic track display');
+                tracks = Array(data.created_in_services.navidrome.track_count).fill().map((_, i) => ({
+                    artist: 'Track from Navidrome',
+                    title: `Track ${i + 1}`,
+                    source: 'navidrome'
+                }));
+            }
+            
+            console.log('🔍 Final tracks data:', tracks);
+            
+            if (tracks && tracks.length > 0) {
+                console.log('✅ Displaying tracks...');
+                tracksList.innerHTML = '';
+                tracks.forEach((track, index) => {
+                    console.log(`📝 Track ${index + 1}:`, track);
+                    const li = document.createElement('li');
+                    li.className = 'list-group-item';
+                    li.innerHTML = `
+                        <span class="track-info">
+                            <strong>${track.artist || 'Unknown Artist'}</strong> - ${track.title || 'Unknown Title'}
+                        </span>
+                        <span class="track-source">${track.source || 'Unknown'}</span>
+                    `;
+                    tracksList.appendChild(li);
+                });
+                
+                // Show export section
+                exportSection.style.display = 'block';
+                
+                // Show service integration section
+                serviceSection.style.display = 'block';
+                
+                // Initialize service buttons
+                initializeServiceButtons();
+                
+                // Store playlist data for service integration
+                window.currentPlaylistData = { ...data, tracks_details: tracks };
+            } else {
+                console.log('❌ No tracks found in any field, showing fallback message');
+                tracksList.innerHTML = '<li class="list-group-item">No track details available</li>';
+                
+                // Still show export section if we have basic data
+                if (data.playlist_name) {
+                    exportSection.style.display = 'block';
+                    serviceSection.style.display = 'block';
+                    initializeServiceButtons();
+                    window.currentPlaylistData = data;
+                }
+            }
+        }
+        
+        // Service Integration Functionality
+        let serviceButtonsInitialized = false;
+        
+        async function initializeServiceButtons() {
+            if (serviceButtonsInitialized) return;
+            
+            try {
+                // Check which services are enabled
+                const response = await fetch('/api/sonic/service-config');
+                if (response.ok) {
+                    const config = await response.json();
+                    
+                    if (config.success) {
+                        // Show Navidrome button if enabled
+                        if (config.navidrome_enabled) {
+                            document.getElementById('save_to_navidrome_btn').style.display = 'inline-flex';
+                        }
+                        
+                        // Show Plex button if enabled
+                        if (config.plex_enabled) {
+                            document.getElementById('save_to_plex_btn').style.display = 'inline-flex';
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to check service settings:', e);
+            }
+            
+            serviceButtonsInitialized = true;
+        }
+        
+        async function saveToService(serviceName) {
+            if (!window.currentPlaylistData) {
+                alert('No playlist generated yet. Please generate a playlist first.');
+                return;
+            }
+            
+            const playlistName = document.getElementById('playlist_name').value.trim() || window.currentPlaylistData.playlist_name;
+            const button = document.getElementById(`save_to_${serviceName}_btn`);
+            const originalText = button.innerHTML;
+            
+            try {
+                // Disable button and show loading state
+                button.disabled = true;
+                button.innerHTML = '<span class="service-icon">⏳</span><span class="service-text">Saving...</span>';
+                
+                // Show service status section
+                const serviceStatus = document.getElementById('service_status');
+                serviceStatus.style.display = 'block';
+                
+                const statusMessage = serviceStatus.querySelector('.status-message');
+                statusMessage.textContent = `Saving playlist to ${serviceName}...`;
+                statusMessage.className = 'status-message loading';
+                
+                // Make API call
+                const response = await fetch(`/api/history/save-to-${serviceName}`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        playlist_name: playlistName,
+                        tracks: window.currentPlaylistData.tracks_details || []
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Success
+                    statusMessage.textContent = result.message;
+                    statusMessage.className = 'status-message success';
+                    
+                    // Show mapping results
+                    if (result.mapping_results) {
+                        const mappingResults = serviceStatus.querySelector('.mapping-results');
+                        const mappingSummary = serviceStatus.querySelector('.mapping-summary');
+                        
+                        const found = result.mapping_results.found.length;
+                        const notFound = result.mapping_results.not_found.length;
+                        const total = result.mapping_results.total_processed;
+                        
+                        mappingSummary.innerHTML = `
+                            <strong>Successfully mapped:</strong> ${found}/${total} tracks<br>
+                            <strong>Not found in ${serviceName}:</strong> ${notFound} tracks<br>
+                            <strong>Playlist ID:</strong> ${result.playlist_id}<br>
+                            <strong>Playlist Name:</strong> ${result.playlist_name}
+                        `;
+                        
+                        mappingResults.style.display = 'block';
+                    }
+                    
+                    // Clear playlist name input
+                    document.getElementById('playlist_name').value = '';
+                    
+                } else {
+                    // Error
+                    statusMessage.textContent = `Error: ${result.error}`;
+                    statusMessage.className = 'status-message error';
+                    
+                    // Show mapping results if available
+                    if (result.mapping_results) {
+                        const mappingResults = serviceStatus.querySelector('.mapping-results');
+                        const mappingSummary = serviceStatus.querySelector('.mapping-summary');
+                        
+                        const found = result.mapping_results.found.length;
+                        const notFound = result.mapping_results.not_found.length;
+                        const total = result.mapping_results.total_processed;
+                        
+                        mappingSummary.innerHTML = `
+                            <strong>Successfully mapped:</strong> ${found}/${total} tracks<br>
+                            <strong>Not found in ${serviceName}:</strong> ${notFound} tracks<br>
+                            <strong>Error:</strong> ${result.error}
+                        `;
+                        
+                        mappingResults.style.display = 'block';
+                    }
+                }
+                
+            } catch (e) {
+                console.error(`Error saving to ${serviceName}:`, e);
+                const statusMessage = serviceStatus.querySelector('.status-message');
+                statusMessage.textContent = `Network error: ${e.message}`;
+                statusMessage.className = 'status-message error';
+            } finally {
+                // Re-enable button
+                button.disabled = false;
+                button.innerHTML = originalText;
+            }
+        }
+        
+        // Export functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            // Export JSON
+            document.getElementById('export_json_btn')?.addEventListener('click', () => {
+                if (!window.currentPlaylistData) return;
+                
+                const exportData = {
+                    playlist_name: window.currentPlaylistData.playlist_name,
+                    tracks: window.currentPlaylistData.tracks_details || [],
+                    metadata: {
+                        generated_at: new Date().toISOString(),
+                        ollama_calls: window.currentPlaylistData.ollama_api_calls,
+                        target_songs: window.currentPlaylistData.target_song_count
+                    }
+                };
+                
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${exportData.playlist_name.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
+            
+            // Export M3U
+            document.getElementById('export_m3u_btn')?.addEventListener('click', () => {
+                if (!window.currentPlaylistData) return;
+                
+                const tracks = window.currentPlaylistData.tracks_details || [];
+                const m3uLines = [
+                    '#EXTM3U',
+                    `# ${window.currentPlaylistData.playlist_name}`,
+                    `# Generated: ${new Date().toISOString()}`,
+                    `# Tracks: ${tracks.length}`,
+                    ''
+                ];
+                
+                tracks.forEach(track => {
+                    m3uLines.push(`#EXTINF:-1,${track.artist || 'Unknown'} - ${track.title || 'Unknown'}`);
+                    m3uLines.push(`# ${track.artist || 'Unknown'} - ${track.title || 'Unknown'} (${track.source || 'Unknown'})`);
+                });
+                
+                const blob = new Blob([m3uLines.join('\n')], { type: 'audio/x-mpegurl' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${window.currentPlaylistData.playlist_name.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.m3u`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            });
+            
+            // Service button event listeners
+            document.getElementById('save_to_navidrome_btn')?.addEventListener('click', () => saveToService('navidrome'));
+            document.getElementById('save_to_plex_btn')?.addEventListener('click', () => saveToService('plex'));
+        });
+    });
+</script>
+{% endblock %}

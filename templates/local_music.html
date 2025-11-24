@@ -1,0 +1,957 @@
+{% extends "layout.html" %}
+
+{% block title %}Local Music - TuneForge{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🎵 Local Music Library</h1>
+    <p>Browse and manage your local music collection</p>
+</div>
+    
+    <!-- Advanced Search and Filters -->
+    <div class="search-filters-section">
+        <div class="search-container">
+            <div class="search-input-group">
+                <input type="text" id="search-query" placeholder="Search for tracks, artists, albums, or genres..." class="search-input">
+                <button id="search-btn" class="primary-button">Search</button>
+                <button id="clear-search-btn" class="secondary-button">Clear</button>
+            </div>
+        </div>
+        
+        <div class="filters-container">
+            <div class="filter-group">
+                <label for="genre-filter">Genre:</label>
+                <select id="genre-filter" class="filter-select">
+                    <option value="">All Genres</option>
+                    {% for genre in stats.genres %}
+                    <option value="{{ genre }}">{{ genre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="year-filter">Year:</label>
+                <select id="year-filter" class="filter-select">
+                    <option value="">All Years</option>
+                    <option value="2020s">2020s</option>
+                    <option value="2010s">2010s</option>
+                    <option value="2000s">2000s</option>
+                    <option value="1990s">1990s</option>
+                    <option value="1980s">1980s</option>
+                    <option value="1970s">1970s</option>
+                    <option value="1960s">1960s</option>
+                    <option value="1950s">1950s</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="sort-by">Sort by:</label>
+                <select id="sort-by" class="filter-select">
+                    <option value="title">Title</option>
+                    <option value="artist">Artist</option>
+                    <option value="album">Album</option>
+                    <option value="year">Year</option>
+                    <option value="genre">Genre</option>
+                    <option value="duration">Duration</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="sort-order">Order:</label>
+                <select id="sort-order" class="filter-select">
+                    <option value="asc">A-Z</option>
+                    <option value="desc">Z-A</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results Summary and Actions -->
+    <div class="results-summary">
+        <div class="results-info">
+            <span id="results-count">0</span> tracks found
+        </div>
+        <div class="results-actions">
+            <button id="create-playlist-btn" class="secondary-button" disabled>Create Playlist from Results</button>
+            <button id="export-results-btn" class="secondary-button" disabled>Export Results</button>
+        </div>
+    </div>
+
+    <!-- Search Results -->
+    <div id="search-results" class="search-results">
+        <div class="no-results-message">
+            <p>Use the search bar above to find music in your library</p>
+            <p>Or browse by genre using the filters</p>
+        </div>
+    </div>
+
+    <!-- Browse by Genre Section -->
+    <div class="genre-browse-section">
+        <h2>Browse by Genre</h2>
+        <div class="genre-grid">
+            {% for genre in stats.genres %}
+            <div class="genre-card" data-genre="{{ genre }}">
+                <div class="genre-icon">🎵</div>
+                <h3>{{ genre }}</h3>
+                <p class="genre-count">{{ stats.genre_counts.get(genre, 0) }} tracks</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Recently Added Section -->
+    <div class="recent-section">
+        <h2>Recently Added</h2>
+        <div id="recent-tracks" class="tracks-grid">
+            <!-- Will be populated by JavaScript -->
+        </div>
+    </div>
+
+    <!-- Playlist Creation Modal -->
+    <div id="playlist-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create Playlist from Results</h3>
+                <button class="close-btn" onclick="closePlaylistModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="playlist-name">Playlist Name:</label>
+                    <input type="text" id="playlist-name" placeholder="Enter playlist name" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label for="playlist-description">Description:</label>
+                    <textarea id="playlist-description" placeholder="Optional description" class="form-textarea" rows="3"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Selected Tracks: <span id="selected-count">0</span></label>
+                    <div id="selected-tracks-list" class="selected-tracks-list">
+                        <!-- Selected tracks will be listed here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary-button" onclick="closePlaylistModal()">Cancel</button>
+                <button id="save-playlist-btn" class="primary-button">Create Playlist</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const searchBtn = document.getElementById('search-btn');
+    const clearSearchBtn = document.getElementById('clear-search-btn');
+    const searchInput = document.getElementById('search-query');
+    const searchResults = document.getElementById('search-results');
+    const resultsCount = document.getElementById('results-count');
+    const createPlaylistBtn = document.getElementById('create-playlist-btn');
+    const exportResultsBtn = document.getElementById('export-results-btn');
+    const genreFilter = document.getElementById('genre-filter');
+    const yearFilter = document.getElementById('year-filter');
+    const sortBy = document.getElementById('sort-by');
+    const sortOrder = document.getElementById('sort-order');
+    
+    let currentResults = [];
+    let selectedTracks = new Set();
+
+    // Search functionality
+    searchBtn.addEventListener('click', performSearch);
+    searchInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            performSearch();
+        }
+    });
+
+    // Clear search
+    clearSearchBtn.addEventListener('click', function() {
+        searchInput.value = '';
+        clearFilters();
+        showNoResultsMessage();
+        updateResultsCount(0);
+        disableActionButtons();
+    });
+
+    // Filter change handlers
+    [genreFilter, yearFilter, sortBy, sortOrder].forEach(filter => {
+        filter.addEventListener('change', performSearch);
+    });
+
+    // Genre card click handlers
+    document.querySelectorAll('.genre-card').forEach(card => {
+        card.addEventListener('click', function() {
+            const genre = this.dataset.genre;
+            genreFilter.value = genre;
+            searchInput.value = genre;
+            performSearch();
+        });
+    });
+
+    // Create playlist button
+    createPlaylistBtn.addEventListener('click', openPlaylistModal);
+
+    async function performSearch() {
+        const query = searchInput.value.trim();
+        const genre = genreFilter.value;
+        const year = yearFilter.value;
+        const sortByValue = sortBy.value;
+        const sortOrderValue = sortOrder.value;
+
+        if (!query && !genre && !year) {
+            showNoResultsMessage();
+            updateResultsCount(0);
+            disableActionButtons();
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/search-local-tracks', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    query: query, 
+                    limit: 500,
+                    genre: genre,
+                    year: year,
+                    sort_by: sortByValue,
+                    sort_order: sortOrderValue
+                })
+            });
+
+            const result = await response.json();
+            
+            if (result.success) {
+                currentResults = result.results;
+                displaySearchResults(currentResults);
+                updateResultsCount(currentResults.length);
+                enableActionButtons();
+            } else {
+                showErrorMessage(result.error);
+                updateResultsCount(0);
+                disableActionButtons();
+            }
+        } catch (error) {
+            showErrorMessage(error.message);
+            updateResultsCount(0);
+            disableActionButtons();
+        }
+    }
+
+    function displaySearchResults(tracks) {
+        if (tracks.length === 0) {
+            showNoResultsMessage();
+            return;
+        }
+
+        const resultsHtml = tracks.map(track => `
+            <div class="track-item" data-track-id="${track.id}">
+                <div class="track-checkbox">
+                    <input type="checkbox" id="track-${track.id}" class="track-select" 
+                           onchange="toggleTrackSelection(${track.id}, '${track.title}', '${track.artist}')">
+                </div>
+                <img class="art-thumb" src="/art?artist=${encodeURIComponent(track.artist || '')}&album=${encodeURIComponent(track.album || '')}&title=${encodeURIComponent(track.title || '')}" onerror="this.style.display='none'" alt="art" />
+                <div class="track-info">
+                    <h4>${track.title}</h4>
+                    <p class="track-artist">${track.artist}</p>
+                    <p class="track-album">${track.album}</p>
+                    ${track.genre ? `<span class="track-genre">${track.genre}</span>` : ''}
+                    ${track.year ? `<span class="track-year">${track.year}</span>` : ''}
+                </div>
+                <div class="track-details">
+                    ${track.duration ? `<span class="track-duration">${formatDuration(track.duration)}</span>` : ''}
+                    <span class="track-path">${track.file_path}</span>
+                </div>
+            </div>
+        `).join('');
+
+        searchResults.innerHTML = `
+            <div class="tracks-list">
+                ${resultsHtml}
+            </div>
+        `;
+    }
+
+    function showNoResultsMessage() {
+        searchResults.innerHTML = `
+            <div class="no-results-message">
+                <p>Use the search bar above to find music in your library</p>
+                <p>Or browse by genre using the filters</p>
+            </div>
+        `;
+    }
+
+    function showErrorMessage(message) {
+        searchResults.innerHTML = `
+            <div class="error-message">
+                <p>Error: ${message}</p>
+            </div>
+        `;
+    }
+
+    function updateResultsCount(count) {
+        resultsCount.textContent = count;
+    }
+
+    function enableActionButtons() {
+        createPlaylistBtn.disabled = false;
+        exportResultsBtn.disabled = false;
+    }
+
+    function disableActionButtons() {
+        createPlaylistBtn.disabled = true;
+        exportResultsBtn.disabled = true;
+    }
+
+    function clearFilters() {
+        genreFilter.value = '';
+        yearFilter.value = '';
+        sortBy.value = 'title';
+        sortOrder.value = 'asc';
+    }
+
+    function formatDuration(seconds) {
+        if (!seconds) return '';
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = Math.floor(seconds % 60);
+        return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+    }
+
+    // Load recent tracks
+    loadRecentTracks();
+});
+
+// Global functions for track selection
+function toggleTrackSelection(trackId, title, artist) {
+    const checkbox = document.getElementById(`track-${trackId}`);
+    if (checkbox.checked) {
+        selectedTracks.add(trackId);
+    } else {
+        selectedTracks.delete(trackId);
+    }
+    
+    // Update selected count in modal if open
+    const selectedCount = document.getElementById('selected-count');
+    if (selectedCount) {
+        selectedCount.textContent = selectedTracks.size;
+    }
+}
+
+function openPlaylistModal() {
+    const modal = document.getElementById('playlist-modal');
+    const selectedTracksList = document.getElementById('selected-tracks-list');
+    
+    // Populate selected tracks list
+    selectedTracksList.innerHTML = '';
+    selectedTracks.forEach(trackId => {
+        const trackItem = document.querySelector(`[data-track-id="${trackId}"]`);
+        if (trackItem) {
+            const title = trackItem.querySelector('h4').textContent;
+            const artist = trackItem.querySelector('.track-artist').textContent;
+            selectedTracksList.innerHTML += `
+                <div class="selected-track-item">
+                    <span class="track-title">${title}</span>
+                    <span class="track-artist">${artist}</span>
+                </div>
+            `;
+        }
+    });
+    
+    document.getElementById('selected-count').textContent = selectedTracks.size;
+    modal.style.display = 'flex';
+}
+
+function closePlaylistModal() {
+    const modal = document.getElementById('playlist-modal');
+    modal.style.display = 'none';
+}
+
+async function loadRecentTracks() {
+    try {
+        const response = await fetch('/api/search-local-tracks', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+                query: '', 
+                limit: 12,
+                sort_by: 'id',
+                sort_order: 'desc'
+            })
+        });
+
+        const result = await response.json();
+        
+        if (result.success && result.results.length > 0) {
+            const recentTracks = document.getElementById('recent-tracks');
+            const tracksHtml = result.results.map(track => `
+                <div class="track-card">
+                    <div class="track-card-header">
+                        <h4>${track.title}</h4>
+                        <p class="track-artist">${track.artist}</p>
+                    </div>
+                    <div class="track-card-body">
+                        <p class="track-album">${track.album}</p>
+                        ${track.genre ? `<span class="track-genre">${track.genre}</span>` : ''}
+                        ${track.year ? `<span class="track-year">${track.year}</span>` : ''}
+                    </div>
+                </div>
+            `).join('');
+            
+            recentTracks.innerHTML = tracksHtml;
+        }
+    } catch (error) {
+        console.error('Error loading recent tracks:', error);
+    }
+}
+</script>
+
+<style>
+/* Main Container */
+.main-container {
+    padding: 2rem;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.content-header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.content-header h1 {
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+    font-size: 2.5rem;
+}
+
+.subtitle {
+    color: var(--text-secondary);
+    font-size: 1.1rem;
+    margin: 0;
+}
+
+/* Search and Filters */
+.search-filters-section {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+}
+
+.search-container {
+    margin-bottom: 1.5rem;
+}
+
+.search-input-group {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.search-input {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px rgba(var(--accent-color-rgb), 0.1);
+}
+
+.filters-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.filter-group label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.filter-select {
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+/* Results Summary */
+.results-summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+}
+
+.results-info {
+    color: var(--text-secondary);
+    font-size: 1rem;
+}
+
+.results-info span {
+    color: var(--text-primary);
+    font-weight: bold;
+}
+
+.results-actions {
+    display: flex;
+    gap: 0.75rem;
+}
+
+/* Search Results */
+.search-results {
+    margin-bottom: 2rem;
+}
+
+.no-results-message, .error-message {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-secondary);
+}
+
+.error-message {
+    color: #dc3545;
+}
+
+.tracks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.track-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-primary);
+    transition: all 0.2s;
+}
+
+.track-item:hover {
+    border-color: var(--accent-color);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.track-checkbox {
+    margin-top: 0.25rem;
+}
+
+.track-select {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.track-info {
+    flex: 1;
+}
+
+.track-info h4 {
+    margin: 0 0 0.5rem 0;
+    color: var(--text-primary);
+    font-size: 1.1rem;
+}
+
+.track-artist {
+    color: var(--text-secondary);
+    margin: 0 0 0.25rem 0;
+    font-weight: 500;
+}
+
+.track-album {
+    color: var(--text-muted);
+    margin: 0 0 0.75rem 0;
+    font-size: 0.9rem;
+}
+
+.track-genre, .track-year {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    margin-right: 0.5rem;
+    font-weight: 500;
+}
+
+.track-genre {
+    background: var(--accent-color);
+    color: white;
+}
+
+.track-year {
+    background: var(--success-color);
+    color: white;
+}
+
+.track-details {
+    text-align: right;
+    font-size: 0.9rem;
+    min-width: 200px;
+}
+
+.track-duration {
+    display: block;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.track-path {
+    color: var(--text-muted);
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.8rem;
+    word-break: break-all;
+    max-width: 200px;
+    line-height: 1.4;
+}
+
+/* Genre Browse Section */
+.genre-browse-section {
+    margin-bottom: 2rem;
+}
+
+.genre-browse-section h2 {
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+    font-size: 1.5rem;
+}
+
+.genre-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.genre-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.genre-card:hover {
+    border-color: var(--accent-color);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.genre-icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+.genre-card h3 {
+    color: var(--text-primary);
+    margin: 0 0 0.5rem 0;
+    font-size: 1.1rem;
+}
+
+.genre-count {
+    color: var(--text-secondary);
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+/* Recent Section */
+.recent-section {
+    margin-bottom: 2rem;
+}
+
+.recent-section h2 {
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+    font-size: 1.5rem;
+}
+
+.tracks-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1rem;
+}
+
+.track-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1rem;
+    transition: all 0.2s;
+}
+
+.track-card:hover {
+    border-color: var(--accent-color);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.track-card-header h4 {
+    color: var(--text-primary);
+    margin: 0 0 0.25rem 0;
+    font-size: 1rem;
+}
+
+.track-card-header .track-artist {
+    color: var(--text-secondary);
+    margin: 0 0 0.75rem 0;
+    font-size: 0.9rem;
+}
+
+.track-card-body {
+    font-size: 0.85rem;
+}
+
+.track-card-body .track-album {
+    color: var(--text-muted);
+    margin: 0 0 0.5rem 0;
+}
+
+/* Modal Styles */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 1.3rem;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.close-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.modal-body {
+    flex: 1;
+    padding: 1.5rem;
+    overflow-y: auto;
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.form-input, .form-textarea {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.form-input:focus, .form-textarea:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(var(--accent-color-rgb), 0.1);
+}
+
+.selected-tracks-list {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 0.5rem;
+    background: var(--bg-primary);
+}
+
+.selected-track-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.selected-track-item:last-child {
+    border-bottom: none;
+}
+
+.track-title {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.track-artist {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    padding: 1.5rem;
+    border-top: 1px solid var(--border-color);
+}
+
+/* Buttons */
+.primary-button, .secondary-button {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.primary-button {
+    background: var(--accent-color);
+    color: white;
+}
+
+.primary-button:hover:not(:disabled) {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+}
+
+.primary-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.secondary-button {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+.secondary-button:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-color);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .main-container {
+        padding: 1rem;
+    }
+    
+    .search-filters-section {
+        padding: 1rem;
+    }
+    
+    .filters-container {
+        grid-template-columns: 1fr;
+    }
+    
+    .search-input-group {
+        flex-direction: column;
+    }
+    
+    .results-summary {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: stretch;
+    }
+    
+    .results-actions {
+        justify-content: center;
+    }
+    
+    .track-item {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .track-details {
+        text-align: left;
+        min-width: auto;
+    }
+    
+    .genre-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    }
+    
+    .tracks-grid {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+{% endblock %}

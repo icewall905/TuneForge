@@ -1,0 +1,18 @@
+{% extends 'layout.html' %}
+
+{% block title %}Playlist Not Found - TuneForge{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>❌ Playlist Not Found</h1>
+    <p>The requested playlist could not be located</p>
+</div>
+
+<div class="content-container">
+    
+    <div class="message">
+        <p>The shared playlist you're looking for could not be found. It may have been deleted or the link is incorrect.</p>
+        <p><a href="{{ url_for('main.home') }}" class="btn btn-primary">Ask a Friend</a></p>
+    </div>
+</div>
+{% endblock %}
