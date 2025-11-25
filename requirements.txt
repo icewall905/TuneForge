@@ -7,3 +7,5 @@ mutagen==1.47.0
 librosa>=0.10.0
 numpy>=1.21.0
 scipy>=1.7.0
+mcp
+uvicorn

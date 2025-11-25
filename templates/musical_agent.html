@@ -32,7 +32,7 @@
         margin: 0 auto;
         background: #fff;
         border-radius: 12px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
         display: flex;
         flex-direction: column;
         height: 600px;
@@ -55,10 +55,17 @@
         margin-bottom: 10px;
         animation: fadeIn 0.3s ease;
     }
-    
+
     @keyframes fadeIn {
-        from { opacity: 0; transform: translateY(10px); }
-        to { opacity: 1; transform: translateY(0); }
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
     }
 
     .user-message {
@@ -76,7 +83,7 @@
         font-size: 15px;
         line-height: 1.5;
         word-wrap: break-word;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
     }
 
     .user-message .message-content {
@@ -114,7 +121,7 @@
 
     #user-input:focus {
         border-color: #007bff;
-        box-shadow: 0 0 0 3px rgba(0,123,255,0.15);
+        box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.15);
     }
 
     #send-btn {
@@ -132,7 +139,7 @@
         transition: background-color 0.2s;
         white-space: nowrap;
     }
-    
+
     #send-btn:hover {
         background-color: #0069d9;
     }
@@ -148,7 +155,7 @@
         border-bottom-left-radius: 4px;
         width: fit-content;
         border: 1px solid #e9ecef;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
     }
 
     .dot {
@@ -159,91 +166,311 @@
         animation: bounce 1.4s infinite ease-in-out both;
     }
 
-    .dot:nth-child(1) { animation-delay: -0.32s; }
-    .dot:nth-child(2) { animation-delay: -0.16s; }
+    .dot:nth-child(1) {
+        animation-delay: -0.32s;
+    }
+
+    .dot:nth-child(2) {
+        animation-delay: -0.16s;
+    }
 
     @keyframes bounce {
-        0%, 80%, 100% { transform: scale(0); }
-        40% { transform: scale(1); }
+
+        0%,
+        80%,
+        100% {
+            transform: scale(0);
+        }
+
+        40% {
+            transform: scale(1);
+        }
     }
-    
+
     /* Dark mode support */
     [data-bs-theme="dark"] .chat-container {
         background: #2b3035;
         border-color: #495057;
     }
-    
+
     [data-bs-theme="dark"] .chat-window {
         background-color: #212529;
     }
-    
+
     [data-bs-theme="dark"] .chat-input-area {
         background-color: #2b3035;
         border-top-color: #495057;
     }
-    
+
     [data-bs-theme="dark"] #user-input {
         background-color: #212529;
         border-color: #495057;
         color: #fff;
     }
-    
+
     [data-bs-theme="dark"] #user-input:focus {
         border-color: #0d6efd;
-        box-shadow: 0 0 0 3px rgba(13,110,253,0.25);
+        box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.25);
     }
-    
+
     [data-bs-theme="dark"] .agent-message .message-content {
         background-color: #343a40;
         color: #e9ecef;
         border-color: #495057;
     }
-    
+
     [data-bs-theme="dark"] .typing-indicator {
         background-color: #343a40;
         border-color: #495057;
     }
-    
+
     [data-bs-theme="dark"] .dot {
         background-color: #6c757d;
+    }
+
+    /* Loading message text */
+    .loading-message {
+        margin-top: 10px;
+        font-size: 14px;
+        color: #6c757d;
+        font-style: italic;
+        text-align: center;
+        animation: fadeIn 0.3s ease;
+    }
+
+    [data-bs-theme="dark"] .loading-message {
+        color: #adb5bd;
+    }
+
+    /* Markdown rendering styles */
+    .message-content h1,
+    .message-content h2,
+    .message-content h3,
+    .message-content h4,
+    .message-content h5,
+    .message-content h6 {
+        margin-top: 0.5em;
+        margin-bottom: 0.5em;
+        font-weight: 600;
+    }
+
+    .message-content h1 {
+        font-size: 1.5em;
+    }
+
+    .message-content h2 {
+        font-size: 1.3em;
+    }
+
+    .message-content h3 {
+        font-size: 1.2em;
+    }
+
+    .message-content h4 {
+        font-size: 1.1em;
+    }
+
+    .message-content ul,
+    .message-content ol {
+        margin: 0.5em 0;
+        padding-left: 1.5em;
+    }
+
+    .message-content li {
+        margin: 0.25em 0;
+    }
+
+    .message-content p {
+        margin: 0.5em 0;
+    }
+
+    .message-content code {
+        background-color: rgba(0, 0, 0, 0.05);
+        padding: 0.2em 0.4em;
+        border-radius: 3px;
+        font-family: 'Courier New', monospace;
+        font-size: 0.9em;
+    }
+
+    .message-content pre {
+        background-color: rgba(0, 0, 0, 0.05);
+        padding: 1em;
+        border-radius: 6px;
+        overflow-x: auto;
+        margin: 0.5em 0;
+    }
+
+    .message-content pre code {
+        background: none;
+        padding: 0;
+    }
+
+    .message-content table {
+        border-collapse: collapse;
+        margin: 0.5em 0;
+        width: 100%;
+    }
+
+    .message-content table th,
+    .message-content table td {
+        border: 1px solid #dee2e6;
+        padding: 0.5em;
+        text-align: left;
+    }
+
+    .message-content table th {
+        background-color: rgba(0, 0, 0, 0.05);
+        font-weight: 600;
+    }
+
+    .message-content blockquote {
+        border-left: 3px solid #007bff;
+        padding-left: 1em;
+        margin: 0.5em 0;
+        color: #666;
+    }
+
+    [data-bs-theme="dark"] .message-content code {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+
+    [data-bs-theme="dark"] .message-content pre {
+        background-color: rgba(255, 255, 255, 0.1);
+    }
+
+    [data-bs-theme="dark"] .message-content table th,
+    [data-bs-theme="dark"] .message-content table td {
+        border-color: #495057;
+    }
+
+    [data-bs-theme="dark"] .message-content table th {
+        background-color: rgba(255, 255, 255, 0.1);
     }
 </style>
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', function () {
         const chatWindow = document.getElementById('chat-window');
         const userInput = document.getElementById('user-input');
         const sendBtn = document.getElementById('send-btn');
         const webhookUrl = 'https://n8n.lan/webhook/4284d2aa-27d6-4d8a-806b-2001c5361e15';
-        
+
+        // Humorous loading messages
+        const loadingMessages = [
+            "Still thinking...",
+            "This is really hard...",
+            "Working on it...",
+            "Being an AI Agent is not easy...",
+            "Be a music curator they said...",
+            "Easiest job in the world they say...",
+            "...I'd rather be sailing.",
+            "I really am working as fast as I can, I promise...",
+            "...Be mad at the admin for not optimising me better!",
+            "Consulting the music gods...",
+            "Rummaging through the library...",
+            "This playlist better be worth it...",
+            "Maybe I should've been a chatbot instead...",
+            "Loading musical genius... 99%...",
+            "Hang tight, crafting perfection...",
+            "Would you like some elevator music while you wait?",
+            "Trust me, the wait will be worth it!",
+            "Still here! Just very, very busy...",
+            "It will be worth the wait, I promise!",
+            "...Yeah, sure. I can promise you anything you want.",
+            "Zug zug... Work work...",
+            "Cut. It. Out. (Can't, still processing)",
+            "Hasta la pasta, baby!",
+            "Gag me with a spoon! Still loading...",
+            "Like, totally loading to the max!",
+            "I'm so sure... this will finish eventually",
+            "As if! (But really, I'm working hard)",
+            "Talk to the hand... the face is busy loading",
+            "Don't have a cow, man!",
+            "Eat my shorts! (After I finish loading)",
+            "Ay, caramba! Still processing...",
+            "D'oh! Longer than expected...",
+            "Excellent! *air guitar* But still loading...",
+            "Party on, dudes!",
+            "Bogus journey... through the database",
+            "Station! (But make it a loading station)",
+            "Be excellent to each other... while waiting",
+            "Strange things are afoot at the Circle K...",
+            "Whoa... this is heavy, doc",
+            "Nobody puts this AI in a corner!",
+            "I carried a watermelon... and this heavy load",
+            "You can't handle the truth! (It's still loading)",
+            "Show me the money! (Show me the playlist!)",
+            "Jerry! Hello! (Still working here)",
+            "Newman... (said with disdain at loading times)",
+            "No soup for you! (Until loading finishes)",
+            "Serenity now! Insanity later!",
+            "The sea was angry that day, my friends...",
+            "These pretzels are making me thirsty!",
+            "Not that there's anything wrong with that...",
+            "Yadda yadda yadda... still loading",
+            "I'm out there, Jerry, and I'm loving every minute!",
+            "Giddy up! (But slowly)",
+            "It's real, and it's spectacular... this wait time",
+            "I don't wanna be a pirate! I wanna be loaded!",
+            "Who is this? (It's your patient AI, still working)",
+            "Simulation running... please insert quarter",
+            "All your base are belong to us... eventually"
+        ];
+
+        let loadingMessageInterval = null;
+        let loadingMessageElement = null;
+
         // Generate a session UID that persists for this page session
-        const sessionUID = (typeof crypto !== 'undefined' && crypto.randomUUID) 
-            ? crypto.randomUUID() 
+        const sessionUID = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
             : 'uid-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-        
+
         console.log('Session UID:', sessionUID);
 
         function appendMessage(text, sender) {
             const msgDiv = document.createElement('div');
             msgDiv.className = `message ${sender}-message`;
-            
+
             const contentDiv = document.createElement('div');
             contentDiv.className = 'message-content';
-            
-            // Simple formatting: handle newlines
-            // If you expect markdown or HTML, you might need a parser, 
-            // but for safety I'll use textContent and convert newlines to <br>
-            
-            // For now, just text content to avoid XSS
-            contentDiv.innerText = text; 
-            
+
+            // Render Markdown for agent, plain text for user
+            if (sender === 'agent') {
+                // Check if libraries are loaded
+                if (typeof marked === 'undefined') {
+                    console.error('marked.js library not loaded!');
+                    contentDiv.innerText = '[ERROR: Markdown library not loaded] ' + text;
+                } else if (typeof DOMPurify === 'undefined') {
+                    console.error('DOMPurify library not loaded!');
+                    contentDiv.innerText = '[ERROR: DOMPurify library not loaded] ' + text;
+                } else {
+                    try {
+                        // Parse markdown and sanitize HTML
+                        console.log('Parsing markdown:', text.substring(0, 100));
+                        const rawHtml = marked.parse(text);
+                        console.log('Raw HTML:', rawHtml.substring(0, 100));
+                        const cleanHtml = DOMPurify.sanitize(rawHtml);
+                        console.log('Clean HTML:', cleanHtml.substring(0, 100));
+                        contentDiv.innerHTML = cleanHtml;
+                    } catch (e) {
+                        console.error('Error rendering markdown:', e);
+                        contentDiv.innerText = text;
+                    }
+                }
+            } else {
+                // User message: plain text for safety
+                contentDiv.innerText = text;
+            }
+
             msgDiv.appendChild(contentDiv);
             chatWindow.appendChild(msgDiv);
             scrollToBottom();
         }
-        
+
         function scrollToBottom() {
             chatWindow.scrollTop = chatWindow.scrollHeight;
         }
@@ -252,25 +479,55 @@
             const msgDiv = document.createElement('div');
             msgDiv.className = 'message agent-message typing-msg';
             msgDiv.id = 'typing-indicator';
-            
+
             const contentDiv = document.createElement('div');
             contentDiv.className = 'typing-indicator';
-            
+
             for (let i = 0; i < 3; i++) {
                 const dot = document.createElement('div');
                 dot.className = 'dot';
                 contentDiv.appendChild(dot);
             }
-            
+
             msgDiv.appendChild(contentDiv);
             chatWindow.appendChild(msgDiv);
             scrollToBottom();
+
+            // Start loading message cycle after 10 seconds
+            setTimeout(() => {
+                if (document.getElementById('typing-indicator')) {
+                    loadingMessageElement = document.createElement('div');
+                    loadingMessageElement.className = 'loading-message';
+                    loadingMessageElement.id = 'loading-message';
+                    loadingMessageElement.innerText = loadingMessages[0];
+                    chatWindow.appendChild(loadingMessageElement);
+                    scrollToBottom();
+
+                    let messageIndex = 0;
+                    loadingMessageInterval = setInterval(() => {
+                        messageIndex = (messageIndex + 1) % loadingMessages.length;
+                        if (loadingMessageElement) {
+                            loadingMessageElement.innerText = loadingMessages[messageIndex];
+                        }
+                    }, 5000); // Change message every 5 seconds
+                }
+            }, 10000); // Start after 10 seconds
         }
 
         function removeTypingIndicator() {
             const indicator = document.getElementById('typing-indicator');
             if (indicator) {
                 indicator.remove();
+            }
+
+            // Clear loading message interval and element
+            if (loadingMessageInterval) {
+                clearInterval(loadingMessageInterval);
+                loadingMessageInterval = null;
+            }
+            if (loadingMessageElement) {
+                loadingMessageElement.remove();
+                loadingMessageElement = null;
             }
         }
 
@@ -287,33 +544,33 @@
             showTypingIndicator();
 
             try {
-                // Create AbortController for timeout handling (120 seconds)
+                // Create AbortController for timeout handling (500 seconds)
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 seconds
-                
+                const timeoutId = setTimeout(() => controller.abort(), 500000); // 500 seconds
+
                 const response = await fetch(webhookUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ 
+                    body: JSON.stringify({
                         input: text,
                         uid: sessionUID
                     }),
                     signal: controller.signal
                 });
-                
+
                 clearTimeout(timeoutId);
-                
+
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                
+
                 const data = await response.json();
-                
+
                 // Remove typing indicator
                 removeTypingIndicator();
-                
+
                 // Display response
                 // The expected format is { "answer": ... }
                 if (data && data.answer) {
@@ -323,11 +580,11 @@
                     appendMessage("Received a response, but couldn't find the 'answer' field.", 'agent');
                     console.log("Full response:", data);
                 }
-                
+
             } catch (error) {
                 removeTypingIndicator();
                 if (error.name === 'AbortError') {
-                    appendMessage('Request timed out after 120 seconds. The request may still be processing. Please try again or check if the request completed.', 'agent');
+                    appendMessage('Request timed out after 500 seconds. The request may still be processing. Please try again or check if the request completed.', 'agent');
                 } else {
                     appendMessage(`Error: ${error.message}. Please try again later.`, 'agent');
                 }
@@ -336,16 +593,15 @@
         }
 
         sendBtn.addEventListener('click', handleSend);
-        
+
         userInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 handleSend();
             }
         });
-        
+
         // Focus input on load
         userInput.focus();
     });
 </script>
 {% endblock %}
-

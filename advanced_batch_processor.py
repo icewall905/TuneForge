@@ -448,8 +448,11 @@ class AdvancedBatchProcessor:
         
         if total_processed > 0:
             # Calculate average processing time
-            total_time = sum(job.processing_time for job in self.completed_jobs)
-            self.stats.average_processing_time = total_time / len(self.completed_jobs)
+            if self.stats.completed_jobs > 0:
+                total_time = sum(job.processing_time for job in self.completed_jobs)
+                self.stats.average_processing_time = total_time / len(self.completed_jobs)
+            else:
+                self.stats.average_processing_time = 0.0
             
             # Calculate success rate
             self.stats.success_rate = (self.stats.completed_jobs / total_processed) * 100

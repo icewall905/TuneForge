@@ -1928,12 +1928,26 @@ def init_local_music_db():
         CREATE TABLE IF NOT EXISTS audio_features (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             track_id INTEGER NOT NULL,
-            mfcc_features TEXT,
-            spectral_features TEXT,
-            rhythm_features TEXT,
-            harmony_features TEXT,
+            tempo REAL,
+            key TEXT,
+            mode TEXT,
+            energy REAL,
+            danceability REAL,
+            valence REAL,
+            acousticness REAL,
+            instrumentalness REAL,
+            loudness REAL,
+            speechiness REAL,
+            spectral_centroid REAL,
+            spectral_rolloff REAL,
+            spectral_bandwidth REAL,
+            duration REAL,
+            sample_rate INTEGER,
+            num_samples INTEGER,
+            analysis_version TEXT DEFAULT '1.0',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (track_id) REFERENCES tracks (id)
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (track_id) REFERENCES tracks (id) ON DELETE CASCADE
         )
     ''')
     
