@@ -23,6 +23,8 @@ The server listens on all network interfaces (`0.0.0.0`), so you can connect usi
 - **Arguments**:
   - `query` (string): The search query (title, artist, etc.).
   - `platform` (string): "plex" or "navidrome" (default: "plex").
+  - `limit` (integer, optional): Maximum number of results (default: 20, max: 50).
+- **Note**: For Plex, searching by artist name (e.g., "Oasis") will prioritize tracks by that artist. The search first looks for an exact artist match, then retrieves all tracks from that artist.
 
 ### `create_playlist`
 - **Description**: Create a new empty playlist (Navidrome only).
@@ -65,3 +67,26 @@ Any client that supports the MCP SSE transport can connect using the URL:
 
 - **Logs:** Check the terminal where `./start_mcp.sh` is running for server logs.
 - **Database:** The server uses `db/local_music.db`. Ensure this database is populated and tracks have been analyzed (features extracted) for the similarity search to work.
+- **Playlist Creation:** If playlists don't appear, check:
+  - Navidrome: Verify credentials in `config.ini` use `Username` and `Password` (not `User`, `Token`, `Salt`)
+  - Plex: Verify `X-Plex-Token` is valid and has playlist creation permissions
+  - Both: Check MCP debug logs at `/opt/tuneforge/logs/mcp_debug.log`
+- **Search Issues:** 
+  - If Plex search doesn't find expected tracks, verify `MusicSectionID` is correct in `config.ini`
+  - For artist searches, the tool prioritizes exact artist name matches
+  - Track IDs must match the platform: Plex uses numeric IDs, Navidrome uses hex IDs
+
+## Testing
+
+A comprehensive test script is available to verify playlist creation:
+```bash
+cd /opt/tuneforge
+source venv/bin/activate
+python debug_scripts/test_mcp_playlist_creation.py
+```
+
+This will test:
+- Track search on both platforms
+- Empty playlist creation (Navidrome)
+- Playlist creation with tracks (both platforms)
+- Verification that playlists appear in the services

@@ -1,0 +1,166 @@
+[
+  {
+    "name": "find_similar_songs",
+    "title": null,
+    "description": "\n    Find similar songs based on audio features.\n    \n    Args:\n        song_title: The title of the song to find similarities for.\n        artist_name: Optional artist name to narrow down the search.\n        limit: The maximum number of similar songs to return (default: 5).\n        \n    Returns:\n        A formatted string containing the list of similar songs and their similarity scores.\n    ",
+    "inputSchema": {
+      "properties": {
+        "song_title": {
+          "title": "Song Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "song_title"
+      ],
+      "title": "find_similar_songsArguments",
+      "type": "object"
+    },
+    "outputSchema": {
+      "properties": {
+        "result": {
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "find_similar_songsOutput",
+      "type": "object"
+    },
+    "icons": null,
+    "annotations": null,
+    "meta": null
+  },
+  {
+    "name": "search_tracks",
+    "title": null,
+    "description": "\n    Search for tracks on Plex or Navidrome.\n    \n    Args:\n        query: The search query (title, artist, etc.)\n        platform: \"plex\" or \"navidrome\"\n        \n    Returns:\n        JSON string containing list of found tracks with IDs.\n    ",
+    "inputSchema": {
+      "properties": {
+        "query": {
+          "title": "Query",
+          "type": "string"
+        },
+        "platform": {
+          "default": "plex",
+          "title": "Platform",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "search_tracksArguments",
+      "type": "object"
+    },
+    "outputSchema": {
+      "properties": {
+        "result": {
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "search_tracksOutput",
+      "type": "object"
+    },
+    "icons": null,
+    "annotations": null,
+    "meta": null
+  },
+  {
+    "name": "create_playlist",
+    "title": null,
+    "description": "\n    Create a new empty playlist.\n    \n    Args:\n        name: Name of the playlist\n        platform: \"plex\" or \"navidrome\"\n        \n    Returns:\n        Status message with Playlist ID if successful.\n    ",
+    "inputSchema": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "platform": {
+          "default": "plex",
+          "title": "Platform",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "create_playlistArguments",
+      "type": "object"
+    },
+    "outputSchema": {
+      "properties": {
+        "result": {
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "create_playlistOutput",
+      "type": "object"
+    },
+    "icons": null,
+    "annotations": null,
+    "meta": null
+  },
+  {
+    "name": "add_to_playlist",
+    "title": null,
+    "description": "\n    Add tracks to a playlist.\n    \n    Args:\n        playlist_id: ID of the playlist (if existing). If creating new on Plex, pass \"NEW\" and provide playlist_name.\n        track_ids: List of track IDs to add.\n        platform: \"plex\" or \"navidrome\"\n        playlist_name: Required if creating a new playlist on Plex (playlist_id=\"NEW\"). Optional otherwise.\n        \n    Returns:\n        Status message.\n    ",
+    "inputSchema": {
+      "properties": {
+        "playlist_id": {
+          "title": "Playlist Id",
+          "type": "string"
+        },
+        "track_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Track Ids",
+          "type": "array"
+        },
+        "platform": {
+          "default": "plex",
+          "title": "Platform",
+          "type": "string"
+        },
+        "playlist_name": {
+          "default": null,
+          "title": "Playlist Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "playlist_id",
+        "track_ids"
+      ],
+      "title": "add_to_playlistArguments",
+      "type": "object"
+    },
+    "outputSchema": {
+      "properties": {
+        "result": {
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "add_to_playlistOutput",
+      "type": "object"
+    },
+    "icons": null,
+    "annotations": null,
+    "meta": null
+  }
+]

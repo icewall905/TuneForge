@@ -1,0 +1,36 @@
+[
+  {
+    "name": "find_similar_songs",
+    "title": null,
+    "description": "\n    Find similar songs based on audio features.\n    \n    Args:\n        song_title: The title of the song to find similarities for.\n        artist_name: Optional artist name to narrow down the search.\n        limit: The maximum number of similar songs to return (default: 5).\n        \n    Returns:\n        A formatted string containing the list of similar songs and their similarity scores.\n    ",
+    "inputSchema": {
+      "properties": {
+        "song_title": {
+          "title": "Song Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "song_title"
+      ],
+      "title": "find_similar_songsArguments",
+      "type": "object"
+    },
+    "outputSchema": {
+      "properties": {
+        "result": {
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "find_similar_songsOutput",
+      "type": "object"
+    },
+    "icons": null,
+    "annotations": null,
+    "meta": null
+  }
+]
