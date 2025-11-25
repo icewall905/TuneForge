@@ -2,6 +2,7 @@ import sqlite3
 import math
 import os
 import logging
+from logging.handlers import RotatingFileHandler
 import requests
 import configparser
 import json
@@ -11,11 +12,56 @@ import sonic_similarity
 import feature_store
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+# Set up logging with separate handlers for file and console
+# File handler: INFO level for detailed logs to disk
+# Console handler: WARNING level to reduce output to LLM agent
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Remove any existing handlers to avoid duplicates
+logger.handlers.clear()
+
+# File handler for detailed logging
+log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, 'mcp_server.log')
+
+# Check if log file exists and fix permissions if needed
+if os.path.exists(log_file):
+    try:
+        # Try to open in append mode to check permissions
+        with open(log_file, 'a'):
+            pass
+    except PermissionError:
+        # If we can't write, remove the file so it can be recreated with correct permissions
+        try:
+            os.remove(log_file)
+        except Exception:
+            pass  # If we can't remove it, RotatingFileHandler will handle it
+
+file_handler = RotatingFileHandler(
+    log_file,
+    maxBytes=5*1024*1024,  # 5 MB
+    backupCount=5,
+    encoding='utf-8'
+)
+file_handler.setLevel(logging.INFO)
+file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+logger.addHandler(file_handler)
+
+# Console handler for minimal output (only WARNING and above)
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.WARNING)
+console_formatter = logging.Formatter('%(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
+logger.addHandler(console_handler)
+
+# Prevent propagation to root logger to avoid duplicate output
+logger.propagate = False
 
 # Initialize FastMCP server
-mcp = FastMCP("TuneForge", debug=True)
+mcp = FastMCP("TuneForge", debug=False)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'db', 'local_music.db')
 
@@ -40,8 +86,6 @@ def find_similar_songs(song_title: str, artist_name: str = None, limit: int = 5)
     Returns:
         A formatted string containing the list of similar songs and their similarity scores.
     """
-    logger.info(f"Finding similar songs for: title='{song_title}', artist='{artist_name}', limit={limit}")
-    
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -63,7 +107,6 @@ def find_similar_songs(song_title: str, artist_name: str = None, limit: int = 5)
         # If multiple matches, pick the first one (or could ask for clarification, but for tool simplicity we pick first)
         seed_track = tracks[0]
         seed_id = seed_track['id']
-        logger.info(f"Found seed track: {seed_track['title']} by {seed_track['artist']} (ID: {seed_id})")
         
         # 2. Get features for seed track
         seed_features = feature_store.fetch_track_features(DB_PATH, seed_id)
@@ -121,6 +164,194 @@ def find_similar_songs(song_title: str, artist_name: str = None, limit: int = 5)
 
 # --- Playlist Management Tools ---
 
+def _search_navidrome_tracks(query: str, limit: int) -> List[Dict[str, Any]]:
+    """
+    Helper function to search for tracks in Navidrome.
+    
+    Args:
+        query: The search query
+        limit: Maximum number of results to return
+        
+    Returns:
+        List of track dictionaries with 'id', 'title', 'artist', 'album' keys.
+        Returns empty list on error.
+    """
+    url = get_config_value('NAVIDROME', 'URL')
+    user = get_config_value('NAVIDROME', 'Username')
+    password = get_config_value('NAVIDROME', 'Password')
+    
+    if not all([url, user, password]):
+        return []
+        
+    try:
+        base_url = url.rstrip('/')
+        if '/rest' not in base_url: base_url = f"{base_url}/rest"
+        
+        params = {
+            'u': user, 'p': password, 'v': '1.16.1', 'c': 'TuneForge', 'f': 'json',
+            'query': query, 'songCount': limit
+        }
+        
+        response = requests.get(f"{base_url}/search3.view", params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('subsonic-response', {}).get('status') == 'ok':
+            songs = data.get('subsonic-response', {}).get('searchResult3', {}).get('song', [])
+            results = []
+            for song in songs:
+                results.append({
+                    'id': song.get('id'),
+                    'title': song.get('title'),
+                    'artist': song.get('artist'),
+                    'album': song.get('album')
+                })
+            return results
+        else:
+            logger.warning(f"Navidrome search error for '{query}': {data.get('subsonic-response', {}).get('error', {}).get('message')}")
+            return []
+            
+    except Exception as e:
+        logger.error(f"Error searching Navidrome for '{query}': {str(e)}")
+        return []
+
+def _search_plex_tracks(query: str, limit: int) -> List[Dict[str, Any]]:
+    """
+    Helper function to search for tracks in Plex.
+    
+    Args:
+        query: The search query
+        limit: Maximum number of results to return
+        
+    Returns:
+        List of track dictionaries with 'id', 'title', 'artist', 'album' keys.
+        Returns empty list on error.
+    """
+    url = get_config_value('PLEX', 'ServerURL')
+    token = get_config_value('PLEX', 'Token')
+    section_id = get_config_value('PLEX', 'MusicSectionID')
+    
+    if not all([url, token, section_id]):
+        return []
+        
+    try:
+        headers = {'X-Plex-Token': token, 'Accept': 'application/json'}
+        metadata = []
+        all_url = f"{url.rstrip('/')}/library/sections/{section_id}/all"
+        search_url = f"{url.rstrip('/')}/library/sections/{section_id}/search"
+        query_lower = query.lower().strip()
+        
+        # Strategy 1: Try genre filtering if the query looks like a genre
+        genre_keywords = ['rock', 'pop', 'jazz', 'classical', 'electronic', 'hip hop', 'rap', 'country', 
+                        'blues', 'folk', 'metal', 'punk', 'reggae', 'r&b', 'soul', 'funk', 'disco',
+                        'techno', 'house', 'trance', 'dubstep', 'indie', 'alternative', 'grunge']
+        
+        might_be_genre = any(keyword in query_lower for keyword in genre_keywords) or len(query.split()) <= 2
+        
+        if might_be_genre:
+            try:
+                genre_params = {'type': '10', 'genre.tag': query, 'X-Plex-Token': token}
+                response = requests.get(all_url, headers=headers, params=genre_params, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                genre_tracks = data.get('MediaContainer', {}).get('Metadata', [])
+                if genre_tracks:
+                    metadata.extend(genre_tracks)
+            except Exception as e:
+                logger.debug(f"Plex: Genre filter failed for '{query}': {e}")
+                pass
+        
+        # Strategy 2: Try to find the artist first, then get all their tracks
+        if not metadata or len(metadata) < limit:
+            artist_params = {'type': '8', 'query': query, 'X-Plex-Token': token}
+            
+            try:
+                response = requests.get(search_url, headers=headers, params=artist_params, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                artist_results = data.get('MediaContainer', {}).get('Metadata', [])
+                
+                matching_artist = None
+                for artist in artist_results:
+                    artist_title = artist.get('title', '').lower()
+                    if artist_title == query_lower or query_lower in artist_title or artist_title in query_lower:
+                        matching_artist = artist
+                        break
+                
+                if matching_artist:
+                    artist_id = matching_artist.get('ratingKey')
+                    track_params = {'type': '10', 'artist.id': artist_id, 'X-Plex-Token': token}
+                    
+                    try:
+                        response = requests.get(all_url, headers=headers, params=track_params, timeout=10)
+                        response.raise_for_status()
+                        data = response.json()
+                        artist_tracks = data.get('MediaContainer', {}).get('Metadata', [])
+                        if artist_tracks:
+                            existing_ids = {track.get('ratingKey') for track in metadata}
+                            for track in artist_tracks:
+                                if track.get('ratingKey') not in existing_ids:
+                                    metadata.append(track)
+                    except Exception as e:
+                        logger.debug(f"Plex: Failed to get tracks for artist: {e}")
+                        pass
+            except Exception as e:
+                logger.debug(f"Plex: Artist search failed: {e}")
+                pass
+        
+        # Strategy 3: General text search
+        if not metadata or len(metadata) < limit:
+            track_params = {'type': '10', 'query': query, 'X-Plex-Token': token}
+            
+            try:
+                response = requests.get(search_url, headers=headers, params=track_params, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                general_metadata = data.get('MediaContainer', {}).get('Metadata', [])
+                
+                existing_ids = {track.get('ratingKey') for track in metadata}
+                exact_matches = []
+                artist_matches = []
+                title_matches = []
+                other_matches = []
+                
+                for track in general_metadata:
+                    track_id = track.get('ratingKey')
+                    if track_id in existing_ids:
+                        continue
+                    
+                    title = track.get('title', '').lower()
+                    artist = track.get('grandparentTitle', '').lower()
+                    
+                    if query_lower == title or query_lower == artist:
+                        exact_matches.append(track)
+                    elif artist and query_lower in artist:
+                        artist_matches.append(track)
+                    elif title and query_lower in title:
+                        title_matches.append(track)
+                    else:
+                        other_matches.append(track)
+                
+                metadata = metadata + exact_matches + artist_matches + title_matches + other_matches
+            except Exception as e:
+                logger.debug(f"Plex: General search failed: {e}")
+                pass
+        
+        results = []
+        if metadata:
+            for track in metadata[:limit]:
+                results.append({
+                    'id': track.get('ratingKey'),
+                    'title': track.get('title'),
+                    'artist': track.get('grandparentTitle'),
+                    'album': track.get('parentTitle')
+                })
+        return results
+        
+    except Exception as e:
+        logger.error(f"Plex search error for '{query}': {e}")
+        return []
+
 def get_config_value(section, key, default=None):
     """Helper to read config.ini"""
     config = configparser.ConfigParser()
@@ -150,7 +381,11 @@ def get_config_value(section, key, default=None):
 @mcp.tool()
 def search_tracks(query: str, platform: str = "plex", limit: int = 20) -> str:
     """
-    Search for tracks on Plex or Navidrome by title, artist, genre, tags, or any text query.
+    Search for tracks in the user's Plex or Navidrome library by title, artist, genre, tags, or any text query.
+    
+    CRITICAL: All results returned by this function are tracks that EXIST in the user's library. 
+    These are REAL tracks that can be immediately added to playlists. Never question whether 
+    these results are valid - they are confirmed library tracks.
     
     This function supports flexible searching:
     - Artist names (e.g., "The Beatles", "Oasis")
@@ -165,7 +400,9 @@ def search_tracks(query: str, platform: str = "plex", limit: int = 20) -> str:
         limit: Maximum number of results to return (default: 20, max: 50)
         
     Returns:
-        JSON string containing list of found tracks with IDs, titles, artists, and albums.
+        JSON string containing list of found tracks WITH VALID TRACK IDs from the user's library.
+        These track IDs can be immediately used with add_to_playlist. All results are confirmed 
+        to exist in the user's Plex or Navidrome library.
     """
     # Enforce reasonable limits
     limit = min(max(1, limit), 50)
@@ -178,37 +415,12 @@ def search_tracks(query: str, platform: str = "plex", limit: int = 20) -> str:
         
         if not all([url, user, password]):
             return "Error: Navidrome not configured."
-            
-        try:
-            base_url = url.rstrip('/')
-            if '/rest' not in base_url: base_url = f"{base_url}/rest"
-            
-            # Navidrome's search3.view supports text search across all metadata including genres
-            params = {
-                'u': user, 'p': password, 'v': '1.16.1', 'c': 'TuneForge', 'f': 'json',
-                'query': query, 'songCount': limit
-            }
-            
-            response = requests.get(f"{base_url}/search3.view", params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            
-            if data.get('subsonic-response', {}).get('status') == 'ok':
-                songs = data.get('subsonic-response', {}).get('searchResult3', {}).get('song', [])
-                results = []
-                for song in songs:
-                    results.append({
-                        'id': song.get('id'),
-                        'title': song.get('title'),
-                        'artist': song.get('artist'),
-                        'album': song.get('album')
-                    })
-                return json.dumps(results, indent=2)
-            else:
-                return f"Navidrome Error: {data.get('subsonic-response', {}).get('error', {}).get('message')}"
-                
-        except Exception as e:
-            return f"Error searching Navidrome: {str(e)}"
+        
+        results = _search_navidrome_tracks(query, limit)
+        if results:
+            return json.dumps(results, indent=2)
+        else:
+            return "Error: No results found or search failed."
 
     elif platform == "plex":
         url = get_config_value('PLEX', 'ServerURL')
@@ -217,143 +429,138 @@ def search_tracks(query: str, platform: str = "plex", limit: int = 20) -> str:
         
         if not all([url, token, section_id]):
             return "Error: Plex not configured (URL, Token, or MusicSectionID missing)."
-            
-        try:
-            headers = {'X-Plex-Token': token, 'Accept': 'application/json'}
-            metadata = []
-            all_url = f"{url.rstrip('/')}/library/sections/{section_id}/all"
-            search_url = f"{url.rstrip('/')}/library/sections/{section_id}/search"
-            query_lower = query.lower().strip()
-            
-            # Strategy 1: Try genre filtering if the query looks like a genre
-            # Common genre keywords that might appear in queries
-            genre_keywords = ['rock', 'pop', 'jazz', 'classical', 'electronic', 'hip hop', 'rap', 'country', 
-                            'blues', 'folk', 'metal', 'punk', 'reggae', 'r&b', 'soul', 'funk', 'disco',
-                            'techno', 'house', 'trance', 'dubstep', 'indie', 'alternative', 'grunge']
-            
-            # Check if query might be a genre (contains genre keywords or is a common genre name)
-            might_be_genre = any(keyword in query_lower for keyword in genre_keywords) or len(query.split()) <= 2
-            
-            if might_be_genre:
-                try:
-                    # Try filtering by genre tag
-                    genre_params = {'type': '10', 'genre.tag': query, 'X-Plex-Token': token}
-                    response = requests.get(all_url, headers=headers, params=genre_params, timeout=10)
-                    response.raise_for_status()
-                    data = response.json()
-                    genre_tracks = data.get('MediaContainer', {}).get('Metadata', [])
-                    if genre_tracks:
-                        metadata.extend(genre_tracks)
-                        logger.info(f"Plex: Found {len(genre_tracks)} tracks via genre filter for '{query}'")
-                except Exception as e:
-                    logger.debug(f"Plex: Genre filter failed for '{query}': {e}")
-                    pass  # Continue to other strategies
-            
-            # Strategy 2: Try to find the artist first, then get all their tracks
-            # This is the most reliable way to find tracks by a specific artist
-            if not metadata or len(metadata) < limit:
-                artist_params = {'type': '8', 'query': query, 'X-Plex-Token': token}  # type 8 is artist
-                
-                try:
-                    response = requests.get(search_url, headers=headers, params=artist_params, timeout=10)
-                    response.raise_for_status()
-                    data = response.json()
-                    artist_results = data.get('MediaContainer', {}).get('Metadata', [])
-                    
-                    # Look for exact or close artist name match (case-insensitive)
-                    matching_artist = None
-                    for artist in artist_results:
-                        artist_title = artist.get('title', '').lower()
-                        if artist_title == query_lower or query_lower in artist_title or artist_title in query_lower:
-                            matching_artist = artist
-                            break
-                    
-                    # If we found a matching artist, get all their tracks
-                    if matching_artist:
-                        artist_id = matching_artist.get('ratingKey')
-                        track_params = {'type': '10', 'artist.id': artist_id, 'X-Plex-Token': token}
-                        
-                        try:
-                            response = requests.get(all_url, headers=headers, params=track_params, timeout=10)
-                            response.raise_for_status()
-                            data = response.json()
-                            artist_tracks = data.get('MediaContainer', {}).get('Metadata', [])
-                            if artist_tracks:
-                                # Add tracks that aren't already in metadata
-                                existing_ids = {track.get('ratingKey') for track in metadata}
-                                for track in artist_tracks:
-                                    if track.get('ratingKey') not in existing_ids:
-                                        metadata.append(track)
-                                logger.info(f"Plex: Found {len(artist_tracks)} tracks for artist '{matching_artist.get('title')}'")
-                        except Exception as e:
-                            logger.debug(f"Plex: Failed to get tracks for artist: {e}")
-                            pass  # Fall through to general search
-                except Exception as e:
-                    logger.debug(f"Plex: Artist search failed: {e}")
-                    pass  # Fall through to general search
-            
-            # Strategy 3: General text search for track titles, partial matches, etc.
-            # This will catch track titles, album names, and other metadata
-            if not metadata or len(metadata) < limit:
-                track_params = {'type': '10', 'query': query, 'X-Plex-Token': token}
-                
-                try:
-                    response = requests.get(search_url, headers=headers, params=track_params, timeout=10)
-                    response.raise_for_status()
-                    data = response.json()
-                    general_metadata = data.get('MediaContainer', {}).get('Metadata', [])
-                    
-                    # Prioritize results where artist name or title matches query
-                    existing_ids = {track.get('ratingKey') for track in metadata}
-                    exact_matches = []
-                    artist_matches = []
-                    title_matches = []
-                    other_matches = []
-                    
-                    for track in general_metadata:
-                        track_id = track.get('ratingKey')
-                        if track_id in existing_ids:
-                            continue
-                        
-                        title = track.get('title', '').lower()
-                        artist = track.get('grandparentTitle', '').lower()
-                        
-                        # Exact match in title or artist
-                        if query_lower == title or query_lower == artist:
-                            exact_matches.append(track)
-                        # Query appears in artist name
-                        elif artist and query_lower in artist:
-                            artist_matches.append(track)
-                        # Query appears in title
-                        elif title and query_lower in title:
-                            title_matches.append(track)
-                        else:
-                            other_matches.append(track)
-                    
-                    # Combine: existing metadata, then exact matches, artist matches, title matches, others
-                    metadata = metadata + exact_matches + artist_matches + title_matches + other_matches
-                    logger.info(f"Plex: General search found {len(general_metadata)} total tracks for '{query}'")
-                except Exception as e:
-                    logger.debug(f"Plex: General search failed: {e}")
-                    pass  # Use whatever we got from previous strategies
-            
-            results = []
-            if metadata:
-                for track in metadata[:limit]:  # Limit results
-                    results.append({
-                        'id': track.get('ratingKey'),
-                        'title': track.get('title'),
-                        'artist': track.get('grandparentTitle'),
-                        'album': track.get('parentTitle')
-                    })
+        
+        results = _search_plex_tracks(query, limit)
+        if results:
             return json.dumps(results, indent=2)
-            
-        except Exception as e:
-            logger.error(f"Plex search error: {e}")
-            return f"Error searching Plex: {str(e)}"
+        else:
+            return "Error: No results found or search failed."
             
     else:
         return "Error: Unsupported platform. Use 'plex' or 'navidrome'."
+
+@mcp.tool()
+def bulk_search_tracks(queries: List[str], platform: str = "plex", limit: int = 50) -> str:
+    """
+    Search for multiple tracks in a single call across Plex or Navidrome libraries.
+    
+    CRITICAL: All results returned by this function are tracks that EXIST in the user's library. 
+    These are REAL tracks that can be immediately added to playlists. Never question whether 
+    these results are valid - they are confirmed library tracks.
+    
+    This function allows searching for multiple tracks (e.g., 10 queries) in a single MCP call,
+    returning results grouped by query with track IDs for each match.
+    
+    Args:
+        queries: List of search queries (e.g., ["Oasis", "Wonderwall", "The Beatles"])
+        platform: "plex" or "navidrome" (default: "plex")
+        limit: Total maximum number of results across all queries (default: 50, max: 200)
+        
+    Returns:
+        JSON string containing results grouped by query:
+        {
+            "query1": [{"id": "...", "title": "...", "artist": "...", "album": "..."}, ...],
+            "query2": [{"id": "...", "title": "...", "artist": "...", "album": "..."}, ...],
+            ...
+        }
+        Each query's results contain track IDs that can be immediately used with add_to_playlist.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    # Validate inputs
+    if not queries or not isinstance(queries, list) or len(queries) == 0:
+        return json.dumps({"error": "No queries provided. Please provide a list of search queries."}, indent=2)
+    
+    # Enforce reasonable limits
+    limit = min(max(1, limit), 200)
+    platform = platform.lower()
+    
+    if platform not in ["plex", "navidrome"]:
+        return json.dumps({"error": "Unsupported platform. Use 'plex' or 'navidrome'."}, indent=2)
+    
+    # Check platform configuration
+    if platform == "navidrome":
+        url = get_config_value('NAVIDROME', 'URL')
+        user = get_config_value('NAVIDROME', 'Username')
+        password = get_config_value('NAVIDROME', 'Password')
+        if not all([url, user, password]):
+            return json.dumps({"error": "Navidrome not configured."}, indent=2)
+    else:  # plex
+        url = get_config_value('PLEX', 'ServerURL')
+        token = get_config_value('PLEX', 'Token')
+        section_id = get_config_value('PLEX', 'MusicSectionID')
+        if not all([url, token, section_id]):
+            return json.dumps({"error": "Plex not configured (URL, Token, or MusicSectionID missing)."}, indent=2)
+    
+    # Calculate per-query limit (distribute total limit across queries)
+    # Use equal distribution, but ensure each query can get at least 1 result
+    num_queries = len(queries)
+    per_query_limit = max(1, limit // num_queries)
+    # Allow some queries to get more if we have remainder
+    remainder = limit % num_queries
+    
+    # Execute searches concurrently
+    results = {}
+    errors = {}
+    
+    def search_single_query(query: str, query_limit: int) -> tuple:
+        """Search a single query and return (query, results, error)"""
+        try:
+            if platform == "navidrome":
+                tracks = _search_navidrome_tracks(query, query_limit)
+            else:  # plex
+                tracks = _search_plex_tracks(query, query_limit)
+            return (query, tracks, None)
+        except Exception as e:
+            logger.error(f"Error searching '{query}' on {platform}: {e}")
+            return (query, [], str(e))
+    
+    # Execute searches with ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(10, num_queries)) as executor:
+        # Submit all queries
+        future_to_query = {}
+        for i, query in enumerate(queries):
+            # Distribute remainder to first queries
+            query_limit = per_query_limit + (1 if i < remainder else 0)
+            future = executor.submit(search_single_query, query, query_limit)
+            future_to_query[future] = query
+        
+        # Collect results as they complete
+        for future in as_completed(future_to_query):
+            query, tracks, error = future.result()
+            if error:
+                errors[query] = error
+                results[query] = []
+            else:
+                results[query] = tracks
+    
+    # Enforce total limit across all results
+    total_results = sum(len(tracks) for tracks in results.values())
+    if total_results > limit:
+        # Trim results to respect total limit
+        # Priority: keep results from queries that have fewer results first
+        sorted_queries = sorted(results.items(), key=lambda x: len(x[1]))
+        remaining_limit = limit
+        
+        trimmed_results = {}
+        for query, tracks in sorted_queries:
+            if remaining_limit <= 0:
+                trimmed_results[query] = []
+            elif len(tracks) <= remaining_limit:
+                trimmed_results[query] = tracks
+                remaining_limit -= len(tracks)
+            else:
+                trimmed_results[query] = tracks[:remaining_limit]
+                remaining_limit = 0
+        
+        results = trimmed_results
+    
+    # Build response with results and any errors
+    response = {"results": results}
+    if errors:
+        response["errors"] = errors
+    
+    return json.dumps(response, indent=2)
 
 @mcp.tool()
 def create_playlist(name: str, platform: str = "plex") -> str:
