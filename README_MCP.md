@@ -51,7 +51,17 @@ The server listens on all network interfaces (`0.0.0.0`), so you can connect usi
 
 1. Ensure the server is running:
    ```bash
-   ./start_mcp.sh
+   # The MCP server runs as a systemd service
+   sudo systemctl status tuneforge-mcp
+   
+   # If not running, start it:
+   sudo systemctl start tuneforge-mcp
+   
+   # Enable auto-start on boot:
+   sudo systemctl enable tuneforge-mcp
+   
+   # View logs:
+   sudo journalctl -u tuneforge-mcp -f
    ```
 
 2. In n8n, use an **SSE Trigger** node (if available) or an **HTTP Request** node configured for streaming to consume the endpoint at `http://localhost:8000/sse`.
@@ -65,7 +75,14 @@ Any client that supports the MCP SSE transport can connect using the URL:
 
 ## Troubleshooting
 
-- **Logs:** Check the terminal where `./start_mcp.sh` is running for server logs.
+- **Logs:** The MCP server runs as a systemd service. View logs with:
+  ```bash
+  sudo journalctl -u tuneforge-mcp -f
+  ```
+  Or check service status:
+  ```bash
+  sudo systemctl status tuneforge-mcp
+  ```
 - **Database:** The server uses `db/local_music.db`. Ensure this database is populated and tracks have been analyzed (features extracted) for the similarity search to work.
 - **Playlist Creation:** If playlists don't appear, check:
   - Navidrome: Verify credentials in `config.ini` use `Username` and `Password` (not `User`, `Token`, `Salt`)

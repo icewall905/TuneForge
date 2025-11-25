@@ -64,3 +64,6 @@ Thumbs.db
 # Debug scripts output
 debug_scripts/*.db
 debug_scripts/*.log
+db/local_music.db-shm
+db/local_music.db-wal
+.coverage
