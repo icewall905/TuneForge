@@ -207,9 +207,33 @@ def search_tracks(query: str, platform: str = "plex", limit: int = 20) -> str:
             response.raise_for_status()
             data = response.json()
             
+            metadata = data.get('MediaContainer', {}).get('Metadata', [])
+            
+            # Fallback: If no results and query has spaces, try splitting (e.g. "Title Artist" -> "Title")
+            if not metadata and ' ' in query:
+                words = query.split()
+                # Try removing words from the end, one by one
+                for i in range(len(words)-1, 0, -1):
+                    sub_query = ' '.join(words[:i])
+                    # Don't search for very short queries to avoid noise
+                    if len(sub_query) < 3: 
+                        break
+                        
+                    params['query'] = sub_query
+                    try:
+                        resp = requests.get(search_url, headers=headers, params=params, timeout=5)
+                        if resp.status_code == 200:
+                            sub_data = resp.json()
+                            sub_metadata = sub_data.get('MediaContainer', {}).get('Metadata', [])
+                            if sub_metadata:
+                                metadata = sub_metadata
+                                break
+                    except Exception:
+                        continue
+            
             results = []
-            if data.get('MediaContainer', {}).get('Metadata'):
-                for track in data['MediaContainer']['Metadata'][:limit]:  # Limit results
+            if metadata:
+                for track in metadata[:limit]:  # Limit results
                     results.append({
                         'id': track.get('ratingKey'),
                         'title': track.get('title'),
@@ -373,22 +397,31 @@ def add_to_playlist(playlist_id: str, track_ids: list[str], platform: str = "ple
                 
                 if remaining_tracks:
                     items_uris = [f"server://{machine_id}/com.plexapp.plugins.library/library/metadata/{tid}" for tid in remaining_tracks]
+                    # Use PUT with proper format to ADD tracks (not replace)
                     put_params = {'uri': ','.join(items_uris), 'X-Plex-Token': token}
                     requests.put(f"{url.rstrip('/')}/playlists/{new_playlist_id}/items", headers=headers, params=put_params).raise_for_status()
                     
                 return f"Successfully created Plex playlist '{playlist_name}' (ID: {new_playlist_id}) with {len(track_ids)} tracks."
                 
             else:
+                # Add tracks to existing playlist - matches working implementation from routes.py
                 items_uris = [f"server://{machine_id}/com.plexapp.plugins.library/library/metadata/{tid}" for tid in track_ids]
-                put_params = {'uri': ','.join(items_uris), 'X-Plex-Token': token}
-                requests.put(f"{url.rstrip('/')}/playlists/{playlist_id}/items", headers=headers, params=put_params).raise_for_status()
+                items_uri_param = ','.join(items_uris)
+                # Important: X-Plex-Token must come BEFORE uri in params dict
+                put_params = {
+                    'X-Plex-Token': token,
+                    'uri': items_uri_param
+                }
+                resp = requests.put(f"{url.rstrip('/')}/playlists/{playlist_id}/items", headers=headers, params=put_params, timeout=60)
+                resp.raise_for_status()
                 return f"Successfully added {len(track_ids)} tracks to Plex playlist ID {playlist_id}."
                 
         except Exception as e:
             return f"Error updating Plex playlist: {str(e)}"
-            
+    
     else:
-        return "Error: Unsupported platform."
+        return f"Error: Unknown platform '{platform}'"
+
 
 if __name__ == "__main__":
     # Run the service using uvicorn when executed directly

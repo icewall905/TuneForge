@@ -1297,7 +1297,256 @@ def _map_candidates_to_local_with_features(candidates):
 
 @main_bp.route('/musical-agent')
 def musical_agent():
-    return render_template('musical_agent.html')
+    context = {
+        'n8n_webhook_url': get_config_value('N8N', 'WebhookURL', ''),
+        'n8n_auth_token': get_config_value('N8N', 'AuthToken', '')
+    }
+    return render_template('musical_agent.html', **context)
+
+# --- Chat History API ---
+
+@main_bp.route('/api/chat/sessions', methods=['POST'])
+def create_chat_session():
+    """Create a new chat session"""
+    try:
+        session_id = str(uuid.uuid4())
+        title = "New Chat"
+        
+        db_path = init_local_music_db()
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO chat_sessions (id, title) VALUES (?, ?)",
+                (session_id, title)
+            )
+            conn.commit()
+            
+        return jsonify({'id': session_id, 'title': title})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/chat/sessions', methods=['GET'])
+def get_chat_sessions():
+    """Get all chat sessions ordered by last update"""
+    try:
+        db_path = init_local_music_db()
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM chat_sessions ORDER BY updated_at DESC")
+            sessions = [dict(row) for row in cursor.fetchall()]
+            
+        return jsonify(sessions)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/chat/sessions/<session_id>', methods=['GET'])
+def get_chat_session(session_id):
+    """Get messages for a specific session"""
+    try:
+        db_path = init_local_music_db()
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Get session details
+            cursor.execute("SELECT * FROM chat_sessions WHERE id = ?", (session_id,))
+            session = cursor.fetchone()
+            if not session:
+                return jsonify({'error': 'Session not found'}), 404
+                
+            # Get messages
+            cursor.execute("SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC", (session_id,))
+            messages = [dict(row) for row in cursor.fetchall()]
+            
+        return jsonify({'session': dict(session), 'messages': messages})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/chat/sessions/<session_id>', methods=['DELETE'])
+def delete_chat_session(session_id):
+    """Delete a chat session"""
+    try:
+        db_path = init_local_music_db()
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+            conn.commit()
+            
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/chat/sessions/<session_id>/messages', methods=['POST'])
+def add_chat_message(session_id):
+    """Add a message to a session"""
+    try:
+        data = request.get_json()
+        role = data.get('role')
+        content = data.get('content')
+        
+        if not role or not content:
+            return jsonify({'error': 'Role and content are required'}), 400
+            
+        db_path = init_local_music_db()
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Verify session exists
+            cursor.execute("SELECT 1 FROM chat_sessions WHERE id = ?", (session_id,))
+            if not cursor.fetchone():
+                return jsonify({'error': 'Session not found'}), 404
+            
+            # Insert message
+            cursor.execute(
+                "INSERT INTO chat_messages (session_id, role, content) VALUES (?, ?, ?)",
+                (session_id, role, content)
+            )
+            
+            # Update session timestamp
+            cursor.execute(
+                "UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (session_id,)
+            )
+            
+            # Auto-update title if it's the first user message and title is "New Chat"
+            if role == 'user':
+                cursor.execute("SELECT count(*) FROM chat_messages WHERE session_id = ?", (session_id,))
+                count = cursor.fetchone()[0]
+                if count <= 1: # First message (or first pair)
+                    # Use first ~30 chars of message as title
+                    new_title = content[:30] + "..." if len(content) > 30 else content
+                    cursor.execute("UPDATE chat_sessions SET title = ? WHERE id = ? AND title = 'New Chat'", (new_title, session_id))
+            
+            conn.commit()
+            
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/chat/sessions/<session_id>', methods=['PATCH'])
+def update_chat_session(session_id):
+    """Update session details (e.g. title)"""
+    try:
+        data = request.get_json()
+        title = data.get('title')
+        
+        if not title:
+            return jsonify({'error': 'Title is required'}), 400
+            
+        db_path = init_local_music_db()
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE chat_sessions SET title = ? WHERE id = ?", (title, session_id))
+            conn.commit()
+            
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def generate_ollama_summary(messages):
+    """Generate a short title for the conversation using Ollama"""
+    ollama_url = get_config_value('OLLAMA', 'URL', 'http://localhost:11434')
+    ollama_model = get_config_value('OLLAMA', 'Model', 'llama3')
+    
+    # Get other config values
+    try:
+        context_window = int(get_config_value('OLLAMA', 'ContextWindow', '2048'))
+        temperature = float(get_config_value('OLLAMA', 'Temperature', '0.7'))
+        top_p = float(get_config_value('OLLAMA', 'TopP', '0.9'))
+    except ValueError:
+        context_window = 2048
+        temperature = 0.7
+        top_p = 0.9
+
+    debug_log(f"DEBUG: generate_ollama_summary using URL: {ollama_url}, Model: {ollama_model}", "INFO")
+    
+    if not ollama_url or not ollama_model:
+        debug_log("DEBUG: Missing Ollama URL or Model", "ERROR")
+        return None
+
+    debug_log(f"DEBUG: Constructing prompt with {len(messages)} messages", "INFO")
+    # Construct prompt
+    conversation_text = ""
+    for msg in messages[-10:]: # Use last 10 messages for context
+        role = "User" if msg['role'] == 'user' else "Assistant"
+        conversation_text += f"{role}: {msg['content']}\n"
+        
+    debug_log(f"DEBUG: Starting Ollama request to {ollama_url} (using /api/chat)", "INFO")
+    
+    # Prepare messages for chat API
+    chat_messages = [
+        {"role": "system", "content": "You are a helpful assistant. Summarize the following conversation into a single, short, descriptive title (max 6 words). Do not use quotes."},
+        {"role": "user", "content": f"Conversation:\n{conversation_text}\n\nTitle:"}
+    ]
+
+    try:
+        response = requests.post(
+            f"{ollama_url.rstrip('/')}/api/chat",
+            json={
+                "model": ollama_model,
+                "messages": chat_messages,
+                "stream": False,
+                "options": {
+                    "num_ctx": context_window,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "num_predict": 100 
+                }
+            },
+            timeout=60
+        )
+        
+        debug_log(f"DEBUG: Ollama response status: {response.status_code}", "INFO")
+        
+        if response.status_code != 200:
+             debug_log(f"DEBUG: Ollama error response: {response.text}", "ERROR")
+
+        if response.status_code == 200:
+            result = response.json()
+            
+            # Handle chat response format
+            if 'message' in result and 'content' in result['message']:
+                title = result['message']['content'].strip().strip('"')
+            else:
+                # Fallback to 'response' if it exists (unlikely for chat API)
+                title = result.get('response', '').strip().strip('"')
+            
+            debug_log(f"DEBUG: Generated title: '{title}'", "INFO")
+            return title
+    except Exception as e:
+        debug_log(f"Error generating summary: {e}", "ERROR")
+        return None
+    return None
+
+@main_bp.route('/api/chat/sessions/<session_id>/summarize', methods=['POST'])
+def summarize_chat_session(session_id):
+    """Trigger auto-summary for a session"""
+    try:
+        db_path = init_local_music_db()
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Get messages
+            cursor.execute("SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC", (session_id,))
+            messages = [dict(row) for row in cursor.fetchall()]
+            
+            if not messages:
+                return jsonify({'error': 'No messages to summarize'}), 400
+                
+            # Generate summary
+            new_title = generate_ollama_summary(messages)
+            
+            if new_title:
+                cursor.execute("UPDATE chat_sessions SET title = ? WHERE id = ?", (new_title, session_id))
+                conn.commit()
+                return jsonify({'success': True, 'title': new_title})
+            else:
+                return jsonify({'success': False, 'message': 'Failed to generate summary'}), 500
+                
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @main_bp.route('/settings', methods=['GET', 'POST'])
 def settings():
@@ -1350,6 +1599,10 @@ def settings():
         current_config.set('PLEX', 'MusicSectionID', request.form.get('plex_music_section_id', get_config_value('PLEX', 'MusicSectionID', '')))
         current_config.set('PLEX', 'PlaylistType', request.form.get('plex_playlist_type', get_config_value('PLEX', 'PlaylistType', 'audio')))
 
+        # N8N section
+        if not current_config.has_section('N8N'): current_config.add_section('N8N')
+        current_config.set('N8N', 'WebhookURL', request.form.get('n8n_webhook_url', get_config_value('N8N', 'WebhookURL', '')))
+        current_config.set('N8N', 'AuthToken', request.form.get('n8n_auth_token', get_config_value('N8N', 'AuthToken', '')))
 
         with open(CONFIG_FILE, 'w') as configfile:
             current_config.write(configfile)
@@ -1385,6 +1638,9 @@ def settings():
         'plex_machine_id': get_config_value('PLEX', 'MachineID', ''),
         'plex_playlist_type': get_config_value('PLEX', 'PlaylistType', 'audio'), 
         'plex_music_section_id': get_config_value('PLEX', 'MusicSectionID', ''),
+
+        'n8n_webhook_url': get_config_value('N8N', 'WebhookURL', ''),
+        'n8n_auth_token': get_config_value('N8N', 'AuthToken', ''),
 
         'enable_auto_scan': get_config_value('AUTO_STARTUP', 'EnableAutoScan', 'no'),
         'enable_auto_analysis': get_config_value('AUTO_STARTUP', 'EnableAutoAnalysis', 'no'),
@@ -1961,6 +2217,30 @@ def init_local_music_db():
             FOREIGN KEY (track_id) REFERENCES tracks (id)
         )
     ''')
+    
+    # Create chat history tables
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (session_id) REFERENCES chat_sessions (id) ON DELETE CASCADE
+        )
+    ''')
+    
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_chat_sessions_updated_at ON chat_sessions(updated_at)')
     
     conn.commit()
     conn.close()

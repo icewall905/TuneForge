@@ -137,6 +137,25 @@
                     </div>
                 </div>
                 
+                <div class="settings-group">
+                    <h3>n8n Configuration</h3>
+                    <div class="form-group">
+                        <label for="n8n_webhook_url">n8n Webhook URL:</label>
+                        <input type="text" id="n8n_webhook_url" name="n8n_webhook_url" value="{{ n8n_webhook_url }}" placeholder="https://n8n.lan/webhook/...">
+                        <p class="help-text">The webhook URL for your n8n Musical Agent workflow.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="n8n_auth_token">n8n Auth Token (Optional):</label>
+                        <input type="password" id="n8n_auth_token" name="n8n_auth_token" value="{{ n8n_auth_token }}">
+                        <p class="help-text">Authorization token if your webhook requires authentication.</p>
+                    </div>
+                    
+                    <div class="form-group">
+                        <button type="button" class="btn btn-secondary section-save-btn" data-section="n8n">Save n8n Settings</button>
+                    </div>
+                </div>
+                
                 <div class="settings-group" id="navidromeSettings">
                     <h3>Navidrome Configuration</h3>
                     <div class="form-group">

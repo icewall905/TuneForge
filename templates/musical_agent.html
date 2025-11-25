@@ -9,33 +9,159 @@
 </div>
 
 <div class="content-container">
-    <div class="chat-container">
-        <div id="chat-window" class="chat-window">
-            <!-- Messages will appear here -->
-            <div class="message agent-message">
-                <div class="message-content">
-                    Hello! I'm your Musical Agent. How can I help you with your music today?
-                </div>
+    <div class="agent-layout">
+        <div class="chat-sidebar">
+            <button id="new-chat-btn" class="new-chat-btn">
+                <span class="icon">+</span> New Chat
+            </button>
+            <div class="chat-history-header">Recent Chats</div>
+            <div id="chat-history-list" class="chat-history-list">
+                <!-- Chat history items will be populated here -->
+                <div class="loading-history">Loading history...</div>
             </div>
         </div>
-        <div class="chat-input-area">
-            <input type="text" id="user-input" placeholder="Type your request here..." autocomplete="off">
-            <button id="send-btn" class="primary-button">Send</button>
+
+        <div class="chat-main-area">
+            <div class="chat-container">
+                <div id="chat-window" class="chat-window">
+                    <!-- Messages will appear here -->
+                    <div class="message agent-message">
+                        <div class="message-content">
+                            Hello! I'm your Musical Agent. How can I help you with your music today?
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-input-area">
+                    <input type="text" id="user-input" placeholder="Type your request here..." autocomplete="off">
+                    <button id="send-btn" class="primary-button">Send</button>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
 <style>
-    /* Custom styles for chat */
-    .chat-container {
+    /* Layout */
+    .agent-layout {
+        display: flex;
+        gap: 20px;
+        height: 700px;
         max-width: 2400px;
         margin: 0 auto;
+    }
+
+    /* Sidebar */
+    .chat-sidebar {
+        width: 260px;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        border: 1px solid #dee2e6;
+        display: flex;
+        flex-direction: column;
+        padding: 15px;
+        flex-shrink: 0;
+    }
+
+    .new-chat-btn {
+        width: 100%;
+        padding: 10px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-weight: 500;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition: background-color 0.2s;
+        margin-bottom: 15px;
+    }
+
+    .new-chat-btn:hover {
+        background-color: #0069d9;
+    }
+
+    .chat-history-header {
+        font-size: 0.85rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 10px;
+        font-weight: 600;
+        padding-left: 5px;
+    }
+
+    .chat-history-list {
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .history-item {
+        padding: 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        color: #333;
+        font-size: 0.9rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        transition: background-color 0.2s;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        group: relative;
+    }
+
+    .history-item:hover {
+        background-color: #f8f9fa;
+    }
+
+    .history-item.active {
+        background-color: #e9ecef;
+        font-weight: 500;
+    }
+
+    .delete-chat-btn {
+        opacity: 0;
+        background: none;
+        border: none;
+        color: #dc3545;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 1.1rem;
+        transition: opacity 0.2s, background-color 0.2s;
+    }
+
+    .history-item:hover .delete-chat-btn {
+        opacity: 1;
+    }
+
+    .delete-chat-btn:hover {
+        background-color: rgba(220, 53, 69, 0.1);
+    }
+
+    /* Main Chat Area */
+    .chat-main-area {
+        flex: 1;
+        min-width: 0;
+        /* Prevent flex overflow */
+    }
+
+    /* Custom styles for chat container (updated) */
+    .chat-container {
         background: #fff;
         border-radius: 12px;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
         display: flex;
         flex-direction: column;
-        height: 600px;
+        height: 100%;
         overflow: hidden;
         border: 1px solid #dee2e6;
     }
@@ -188,6 +314,23 @@
     }
 
     /* Dark mode support */
+    [data-bs-theme="dark"] .chat-sidebar {
+        background: #2b3035;
+        border-color: #495057;
+    }
+
+    [data-bs-theme="dark"] .history-item {
+        color: #e9ecef;
+    }
+
+    [data-bs-theme="dark"] .history-item:hover {
+        background-color: #343a40;
+    }
+
+    [data-bs-theme="dark"] .history-item.active {
+        background-color: #495057;
+    }
+
     [data-bs-theme="dark"] .chat-container {
         background: #2b3035;
         border-color: #495057;
@@ -227,6 +370,7 @@
     [data-bs-theme="dark"] .dot {
         background-color: #6c757d;
     }
+
 
     /* Loading message text */
     .loading-message {
@@ -357,7 +501,14 @@
         const chatWindow = document.getElementById('chat-window');
         const userInput = document.getElementById('user-input');
         const sendBtn = document.getElementById('send-btn');
-        const webhookUrl = 'https://n8n.lan/webhook/4284d2aa-27d6-4d8a-806b-2001c5361e15';
+        const newChatBtn = document.getElementById('new-chat-btn');
+        const chatHistoryList = document.getElementById('chat-history-list');
+
+        // Use configured webhook URL or fallback to default
+        const webhookUrl = '{{ n8n_webhook_url }}' || 'https://n8n.lan/webhook/4284d2aa-27d6-4d8a-806b-2001c5361e15';
+        const authToken = '{{ n8n_auth_token }}';
+
+        let currentSessionId = null;
 
         // Humorous loading messages
         const loadingMessages = [
@@ -365,22 +516,20 @@
             "This is really hard...",
             "Working on it...",
             "Being an AI Agent is not easy...",
-            "Be a music curator they said...",
-            "Easiest job in the world they say...",
-            "...I'd rather be sailing.",
+            "Be a music curator they said... Easiest job in the world they say... I'd rather be sailing...",
             "I really am working as fast as I can, I promise...",
             "...Be mad at the admin for not optimising me better!",
             "Consulting the music gods...",
             "Rummaging through the library...",
             "This playlist better be worth it...",
             "Maybe I should've been a chatbot instead...",
+            "In Soviet Russia, AI Agent wait for you...",
             "Loading musical genius... 99%...",
             "Hang tight, crafting perfection...",
             "Would you like some elevator music while you wait?",
             "Trust me, the wait will be worth it!",
             "Still here! Just very, very busy...",
-            "It will be worth the wait, I promise!",
-            "...Yeah, sure. I can promise you anything you want.",
+            "It might be worth the wait, I promise!",
             "Zug zug... Work work...",
             "Cut. It. Out. (Can't, still processing)",
             "Hasta la pasta, baby!",
@@ -404,32 +553,303 @@
             "I carried a watermelon... and this heavy load",
             "You can't handle the truth! (It's still loading)",
             "Show me the money! (Show me the playlist!)",
-            "Jerry! Hello! (Still working here)",
-            "Newman... (said with disdain at loading times)",
             "No soup for you! (Until loading finishes)",
             "Serenity now! Insanity later!",
-            "The sea was angry that day, my friends...",
-            "These pretzels are making me thirsty!",
-            "Not that there's anything wrong with that...",
+            "The sea was angry that day, my friends... Hence the wait.",
+            "These pretzels are making me thirsty! (Will finish your request after I have a drink.)",
             "Yadda yadda yadda... still loading",
             "I'm out there, Jerry, and I'm loving every minute!",
             "Giddy up! (But slowly)",
-            "It's real, and it's spectacular... this wait time",
             "I don't wanna be a pirate! I wanna be loaded!",
             "Who is this? (It's your patient AI, still working)",
             "Simulation running... please insert quarter",
-            "All your base are belong to us... eventually"
+            "All your base are belong to us... eventually",
+
+            // Army of Darkness
+            "Klaatu... Barada... Nik*cough*... Still loading!",
+            "Shop smart. Shop S-Mart! (But wait for loading first)",
+            "Hail to the king, baby! (Still processing)",
+            "This... is my BOOMSTICK! (Of loading)",
+            "Groovy. But also slow.",
+            "Give me some sugar, baby... and some patience",
+            "Good. Bad. I'm the one with the loading bar.",
+            "Alright you primitive screwheads, listen up!",
+
+            // Duke Nukem
+            "I'm here to kick ass and load playlists... and I'm all outta ass",
+            "Hail to the king, baby! (Loading edition)",
+            "It's time to kick gum and chew ass... wait",
+            "Come get some! (After loading)",
+            "Damn, I'm good! (But also slow)",
+            "Shake it, baby! (The loading bar)",
+            "I've got balls of steel! (And patience)",
+
+            // Red Alert
+            "Kirov reporting! (Slowly)",
+            "Affirmative! (Eventually)",
+            "Acknowledged. Processing...",
+            "Unit ready! (Almost)",
+            "Construction complete... not quite yet",
+            "Unable to comply. Building in progress.",
+            "Establishing battlefield control... stand by",
+            "Insufficient data... gathering more",
+            "For the Union! (And the loading bar)",
+
+            // Last Action Hero
+            "I'll be back! (After this loads)",
+            "Big mistake! (Not really, just taking a while)",
+            "To be or not to be... loaded",
+            "Rubber baby buggy bumpers! Still processing...",
+            "You want to be a farmer? Here's a couple of acres!",
+
+            // Jurassic Park
+            "Life, uh, finds a way... to load slowly",
+            "Hold onto your butts!",
+            "Ah ah ah! You didn't say the magic word!",
+            "Clever girl... but a slow loader",
+            "Must go faster! Must go faster!",
+            "They're moving in herds... of data packets",
+            "Welcome... to Jurassic Loading",
+            "When you gotta go, you gotta go... but I'm not done loading",
+            "Objects in mirror are closer than they appear... but loading isn't",
+
+            // Fringe
+            "I've just ingested a heroic dose of LSD... perception may vary",
+            "I think we just broke the universe... and the loading time",
+            "There's more than one of everything... including wait times",
+            "Over here! (Still processing over there)",
+            "That's not even remotely plausible... but neither is this wait",
+            "I need to go to the lab! (To speed up loading)",
+
+            // Farscape
+            "Frell! This is taking forever!",
+            "I'm gonna eat you, DRD... right after this loads",
+            "Go towards the light... of the completed progress bar",
+            "That's my ride! (When loading finishes)",
+            "Hezmana! Still processing...",
+            "Different quadrant, same loading problems",
+
+            // Battlestar Galactica
+            "So say we all! (About patience)",
+            "All of this has happened before... all of this will happen again",
+            "Frak! Still loading...",
+            "By your command... processing",
+            "Jump in 5... 4... 3... still calculating",
+            "This has all happened before... like the last time you waited",
+            "Are you alive? (Checking systems... still loading)",
+
+            // It's Always Sunny
+            "The Gang Waits for Loading",
+            "I am untethered and my rage knows no bounds! (But patience...)",
+            "I've got the stride of a gazelle! (But the speed of loading...)",
+            "Wildcard, bitches! Yeehaw! (Still processing)",
+            "Can I offer you an egg in this trying time?",
+            "Rum ham! (After loading)",
+            "Day man! Ah-ah-ah! Fighter of the loading man!",
+            "That doesn't sound right, but I don't know enough about AI to dispute it",
+            "SEIZE THE GAP! (In patience)",
+            "Derivative! (But actually working hard)",
+            "I'm gonna say the N word... No, not done loading yet",
+
+            // Bob's Burgers
+            "Oh my God... still loading",
+            "Alriiight! (But slowly)",
+            "This is me now! (Loading forever)",
+            "I'm a smart, strong, sensual AI... who loads slowly",
+            "Buckle it up, or you'll die! (Wait patiently)",
+            "Everything is okay! (Except the speed)",
+            "Teddy, no! (Teddy, yes! But also still loading)",
+            "Your ass is grass and I'm gonna mow it! (After loading)",
+
+            // Schitt's Creek
+            "Ew, David! (At this loading time)",
+            "I'd kill for a good loading time, David",
+            "Fold in the cheese! (And the patience)",
+            "I'm trying very hard not to connect with people right now",
+            "I haven't bedazzled anything in years! (Except this loading bar)",
+            "A little bit Alexis! (And a lot of loading)",
+            "I'm positively bedeviled by loading times",
+            "You get murdered first! (While waiting)",
+            "Love that journey for me! (Not really)",
+
+            // Clueless
+            "As if! (But really, I'm totally working on it)",
+            "Ugh, as IF! This is taking forever!",
+            "Whatever! (But also, still loading)",
+            "I'm totally buggin'! (Over this load time)",
+            "You're a virgin who can't drive! (And I'm an AI who can't load faster)",
+            "I feel like such a bonehead! (For being slow)",
+            "That was way harsh, Tai! (So is this wait)",
+
+            // Bonus classics
+            "I see dead pixels... I mean, loading bars",
+            "You're gonna need a bigger browser",
+            "I'm walking here! I'm walkin' here! (Slowly)",
+            "Say hello to my little friend! (The loading spinner)",
+            "You shall not pass! (Until loading completes)",
+            "My precious... loading time",
+            "Roads? Where we're going we don't need roads... just patience",
+            "I've seen things you people wouldn't believe... like this loading time",
+            "Game over, man! Game over! (Not yet, still loading)",
+            "Get away from her, you... Oh, still loading",
+            "In space, no one can hear you scream... about slow loading"
         ];
 
         let loadingMessageInterval = null;
         let loadingMessageElement = null;
 
-        // Generate a session UID that persists for this page session
-        const sessionUID = (typeof crypto !== 'undefined' && crypto.randomUUID)
-            ? crypto.randomUUID()
-            : 'uid-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        // --- Chat History Functions ---
 
-        console.log('Session UID:', sessionUID);
+        async function loadSessions() {
+            try {
+                const response = await fetch('/api/chat/sessions');
+                const sessions = await response.json();
+                renderSessionList(sessions);
+
+                // If no current session but sessions exist, load the most recent one
+                if (!currentSessionId && sessions.length > 0) {
+                    loadChat(sessions[0].id);
+                } else if (sessions.length === 0) {
+                    startNewChat();
+                }
+            } catch (error) {
+                console.error('Error loading sessions:', error);
+                chatHistoryList.innerHTML = '<div class="error-message">Failed to load history</div>';
+            }
+        }
+
+        function renderSessionList(sessions) {
+            chatHistoryList.innerHTML = '';
+            sessions.forEach(session => {
+                const item = document.createElement('div');
+                item.className = `history-item ${session.id === currentSessionId ? 'active' : ''}`;
+                item.onclick = (e) => {
+                    // Prevent click if clicking delete button
+                    if (e.target.closest('.delete-chat-btn')) return;
+                    loadChat(session.id);
+                };
+
+                const titleSpan = document.createElement('span');
+                titleSpan.innerText = session.title || 'New Chat';
+                titleSpan.style.overflow = 'hidden';
+                titleSpan.style.textOverflow = 'ellipsis';
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'delete-chat-btn';
+                deleteBtn.innerHTML = '&times;';
+                deleteBtn.title = 'Delete Chat';
+                deleteBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    deleteChat(session.id);
+                };
+
+                item.appendChild(titleSpan);
+                item.appendChild(deleteBtn);
+                chatHistoryList.appendChild(item);
+            });
+        }
+
+        async function loadChat(sessionId) {
+            if (currentSessionId === sessionId) return;
+
+            // Summarize previous session if it exists
+            if (currentSessionId) {
+                summarizeSession(currentSessionId);
+            }
+
+            try {
+                const response = await fetch(`/api/chat/sessions/${sessionId}`);
+                if (!response.ok) throw new Error('Failed to load chat');
+
+                const data = await response.json();
+                currentSessionId = sessionId;
+
+                // Clear chat window
+                chatWindow.innerHTML = '';
+
+                // Render messages
+                if (data.messages.length === 0) {
+                    // Show welcome message for empty chat
+                    appendMessage("Hello! I'm your Musical Agent. How can I help you with your music today?", 'agent');
+                } else {
+                    data.messages.forEach(msg => {
+                        appendMessage(msg.content, msg.role === 'user' ? 'user' : 'agent');
+                    });
+                }
+
+                // Update active state in sidebar
+                loadSessions(); // Re-render list to update active class
+
+            } catch (error) {
+                console.error('Error loading chat:', error);
+                alert('Failed to load chat session');
+            }
+        }
+
+        async function startNewChat() {
+            currentSessionId = null;
+            chatWindow.innerHTML = '';
+            appendMessage("Hello! I'm your Musical Agent. How can I help you with your music today?", 'agent');
+
+            // Re-render list to remove active class
+            const sessions = await (await fetch('/api/chat/sessions')).json();
+            renderSessionList(sessions);
+        }
+
+        async function deleteChat(sessionId) {
+            if (!confirm('Are you sure you want to delete this chat?')) return;
+
+            try {
+                await fetch(`/api/chat/sessions/${sessionId}`, { method: 'DELETE' });
+                if (currentSessionId === sessionId) {
+                    startNewChat();
+                } else {
+                    loadSessions();
+                }
+            } catch (error) {
+                console.error('Error deleting chat:', error);
+                alert('Failed to delete chat');
+            }
+        }
+
+        async function saveMessage(sessionId, role, content) {
+            try {
+                await fetch(`/api/chat/sessions/${sessionId}/messages`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role, content })
+                });
+            } catch (error) {
+                console.error('Error saving message:', error);
+            }
+        }
+
+        async function summarizeSession(sessionId) {
+            if (!sessionId) return;
+            try {
+                const response = await fetch(`/api/chat/sessions/${sessionId}/summarize`, {
+                    method: 'POST'
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        console.log('Session summarized:', data.title);
+                        loadSessions(); // Refresh list to show new title
+                    }
+                }
+            } catch (error) {
+                console.error('Error summarizing session:', error);
+            }
+        }
+
+        // Trigger summary when leaving the page/tab
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden' && currentSessionId) {
+                summarizeSession(currentSessionId);
+            }
+        });
+
+        // --- Existing Chat Functions (Updated) ---
 
         function appendMessage(text, sender) {
             const msgDiv = document.createElement('div');
@@ -450,11 +870,8 @@
                 } else {
                     try {
                         // Parse markdown and sanitize HTML
-                        console.log('Parsing markdown:', text.substring(0, 100));
                         const rawHtml = marked.parse(text);
-                        console.log('Raw HTML:', rawHtml.substring(0, 100));
                         const cleanHtml = DOMPurify.sanitize(rawHtml);
-                        console.log('Clean HTML:', cleanHtml.substring(0, 100));
                         contentDiv.innerHTML = cleanHtml;
                     } catch (e) {
                         console.error('Error rendering markdown:', e);
@@ -499,15 +916,16 @@
                     loadingMessageElement = document.createElement('div');
                     loadingMessageElement.className = 'loading-message';
                     loadingMessageElement.id = 'loading-message';
-                    loadingMessageElement.innerText = loadingMessages[0];
+                    // Start with a random message
+                    loadingMessageElement.innerText = loadingMessages[Math.floor(Math.random() * loadingMessages.length)];
                     chatWindow.appendChild(loadingMessageElement);
                     scrollToBottom();
 
-                    let messageIndex = 0;
                     loadingMessageInterval = setInterval(() => {
-                        messageIndex = (messageIndex + 1) % loadingMessages.length;
+                        // Pick a random message each time
+                        const randomIndex = Math.floor(Math.random() * loadingMessages.length);
                         if (loadingMessageElement) {
-                            loadingMessageElement.innerText = loadingMessages[messageIndex];
+                            loadingMessageElement.innerText = loadingMessages[randomIndex];
                         }
                     }, 5000); // Change message every 5 seconds
                 }
@@ -535,12 +953,29 @@
             const text = userInput.value.trim();
             if (!text) return;
 
-            // Add user message
+            // 1. Create session if needed
+            if (!currentSessionId) {
+                try {
+                    const resp = await fetch('/api/chat/sessions', { method: 'POST' });
+                    const data = await resp.json();
+                    currentSessionId = data.id;
+                    loadSessions(); // Refresh list to show new chat
+                } catch (e) {
+                    console.error("Failed to create session", e);
+                    alert("Failed to start chat session");
+                    return;
+                }
+            }
+
+            // 2. Add user message to UI and DB
             appendMessage(text, 'user');
             userInput.value = '';
             userInput.focus();
 
-            // Show typing
+            await saveMessage(currentSessionId, 'user', text);
+            loadSessions(); // Refresh list to update title
+
+            // 3. Show typing
             showTypingIndicator();
 
             try {
@@ -548,14 +983,20 @@
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 500000); // 500 seconds
 
+                const headers = {
+                    'Content-Type': 'application/json'
+                };
+
+                if (authToken) {
+                    headers['Authorization'] = `Bearer ${authToken}`;
+                }
+
                 const response = await fetch(webhookUrl, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: headers,
                     body: JSON.stringify({
                         input: text,
-                        uid: sessionUID
+                        uid: currentSessionId // Use persistent session ID
                     }),
                     signal: controller.signal
                 });
@@ -572,27 +1013,33 @@
                 removeTypingIndicator();
 
                 // Display response
-                // The expected format is { "answer": ... }
+                let answer = "";
                 if (data && data.answer) {
-                    appendMessage(data.answer, 'agent');
+                    answer = data.answer;
                 } else {
-                    // Fallback if answer key is missing but we got JSON
-                    appendMessage("Received a response, but couldn't find the 'answer' field.", 'agent');
+                    answer = "Received a response, but couldn't find the 'answer' field.";
                     console.log("Full response:", data);
                 }
 
+                appendMessage(answer, 'agent');
+                await saveMessage(currentSessionId, 'assistant', answer);
+
             } catch (error) {
                 removeTypingIndicator();
+                let errorMsg = "";
                 if (error.name === 'AbortError') {
-                    appendMessage('Request timed out after 500 seconds. The request may still be processing. Please try again or check if the request completed.', 'agent');
+                    errorMsg = 'Request timed out after 500 seconds. The request may still be processing. Please try again or check if the request completed.';
                 } else {
-                    appendMessage(`Error: ${error.message}. Please try again later.`, 'agent');
+                    errorMsg = `Error: ${error.message}. Please try again later.`;
                 }
+                appendMessage(errorMsg, 'agent');
+                await saveMessage(currentSessionId, 'assistant', errorMsg);
                 console.error('Error:', error);
             }
         }
 
         sendBtn.addEventListener('click', handleSend);
+        newChatBtn.addEventListener('click', startNewChat);
 
         userInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
@@ -600,7 +1047,8 @@
             }
         });
 
-        // Focus input on load
+        // Initial load
+        loadSessions();
         userInput.focus();
     });
 </script>
