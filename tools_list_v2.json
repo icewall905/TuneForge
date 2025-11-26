@@ -73,6 +73,53 @@
     "meta": null
   },
   {
+    "name": "bulk_search_tracks",
+    "title": null,
+    "description": "\n    Search for multiple tracks in a single call across Plex or Navidrome libraries. This allows the agent to query multiple tracks (e.g., 10 queries) efficiently in one MCP call and get track IDs back for all matches, grouped by query.\n    \n    Args:\n        queries: List of search queries (e.g., [\"Oasis\", \"Wonderwall\", \"The Beatles\"])\n        platform: \"plex\" or \"navidrome\" (default: \"plex\")\n        limit: Total maximum number of results across all queries (default: 50, max: 200)\n        \n    Returns:\n        JSON string containing results grouped by query with track IDs that can be immediately used with add_to_playlist.\n    ",
+    "inputSchema": {
+      "properties": {
+        "queries": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Queries",
+          "type": "array"
+        },
+        "platform": {
+          "default": "plex",
+          "title": "Platform",
+          "type": "string"
+        },
+        "limit": {
+          "default": 50,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "queries"
+      ],
+      "title": "bulk_search_tracksArguments",
+      "type": "object"
+    },
+    "outputSchema": {
+      "properties": {
+        "result": {
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "result"
+      ],
+      "title": "bulk_search_tracksOutput",
+      "type": "object"
+    },
+    "icons": null,
+    "annotations": null,
+    "meta": null
+  },
+  {
     "name": "create_playlist",
     "title": null,
     "description": "\n    Create a new empty playlist.\n    \n    Args:\n        name: Name of the playlist\n        platform: \"plex\" or \"navidrome\"\n        \n    Returns:\n        Status message with Playlist ID if successful.\n    ",

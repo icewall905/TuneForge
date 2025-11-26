@@ -784,34 +784,26 @@ def add_to_playlist(playlist_id: str, track_ids: list[str], platform: str = "nav
                 tracks_added_so_far = int(first_track_added) if first_track_added else 0
                 
                 if remaining_tracks:
-                    items_uris = [f"server://{machine_id}/com.plexapp.plugins.library/library/metadata/{tid}" for tid in remaining_tracks]
-                    # Use PUT with proper format to ADD tracks (not replace)
-                    put_params = {'uri': ','.join(items_uris), 'X-Plex-Token': token}
-                    log_mcp(f"Plex Add Remaining Request: {url}/playlists/{new_playlist_id}/items with params {put_params}")
-                    put_resp = requests.put(f"{url.rstrip('/')}/playlists/{new_playlist_id}/items", headers=headers, params=put_params, timeout=60)
-                    log_mcp(f"Plex Add Remaining Response: {put_resp.status_code} - {put_resp.text}")
-                    put_resp.raise_for_status()
+                    # Plex API requires adding tracks one at a time
+                    added_count = 0
+                    for tid in remaining_tracks:
+                        uri = f"server://{machine_id}/com.plexapp.plugins.library/library/metadata/{tid}"
+                        put_params = {'X-Plex-Token': token, 'uri': uri}
+                        try:
+                            put_resp = requests.put(f"{url.rstrip('/')}/playlists/{new_playlist_id}/items", headers=headers, params=put_params, timeout=30)
+                            put_resp.raise_for_status()
+                            result = put_resp.json()
+                            if result.get('MediaContainer', {}).get('leafCountAdded', 0) > 0:
+                                added_count += 1
+                        except Exception as e:
+                            log_mcp(f"Plex: Error adding track {tid}: {e}")
                     
-                    # Verify remaining tracks were added
-                    try:
-                        put_data = put_resp.json()
-                        put_playlist_meta = put_data.get('MediaContainer', {}).get('Metadata', [])
-                        if put_playlist_meta:
-                            put_playlist_info = put_playlist_meta[0]
-                            leaf_count_added = put_playlist_info.get('leafCountAdded')
-                            if leaf_count_added is not None:
-                                additional_added = int(leaf_count_added)
-                                total_added = tracks_added_so_far + additional_added
-                                if total_added < len(track_ids):
-                                    return f"Warning: Created Plex playlist '{playlist_name}' (ID: {new_playlist_id}) but only {total_added} out of {len(track_ids)} tracks were added. Some track IDs may be invalid. Please use the 'search_tracks' tool with platform='plex' to get valid Plex track IDs."
-                                else:
-                                    return f"Successfully created Plex playlist '{playlist_name}' (ID: {new_playlist_id}) with {total_added} tracks."
-                            else:
-                                final_count = put_playlist_info.get('leafCount', put_playlist_info.get('size'))
-                                if final_count:
-                                    return f"Successfully created Plex playlist '{playlist_name}' (ID: {new_playlist_id}) with {final_count} tracks."
-                    except (ValueError, KeyError, AttributeError) as e:
-                        log_mcp(f"Plex: Error parsing response for remaining tracks: {e}")
+                    total_added = tracks_added_so_far + added_count
+                    log_mcp(f"Plex: Added {added_count} of {len(remaining_tracks)} remaining tracks to playlist {new_playlist_id}")
+                    
+                    if total_added < len(track_ids):
+                        return f"Warning: Created Plex playlist '{playlist_name}' (ID: {new_playlist_id}) but only {total_added} out of {len(track_ids)} tracks were added."
+                    return f"Successfully created Plex playlist '{playlist_name}' (ID: {new_playlist_id}) with {total_added} tracks."
                 
                 # If only one track or verification failed, return basic success message
                 if tracks_added_so_far == 0:
@@ -820,50 +812,28 @@ def add_to_playlist(playlist_id: str, track_ids: list[str], platform: str = "nav
                     return f"Successfully created Plex playlist '{playlist_name}' (ID: {new_playlist_id}) with {tracks_added_so_far} track(s)."
                 
             else:
-                # Add tracks to existing playlist - matches working implementation from routes.py
-                items_uris = [f"server://{machine_id}/com.plexapp.plugins.library/library/metadata/{tid}" for tid in track_ids]
-                items_uri_param = ','.join(items_uris)
-                # Important: X-Plex-Token must come BEFORE uri in params dict
-                put_params = {
-                    'X-Plex-Token': token,
-                    'uri': items_uri_param
-                }
-                log_mcp(f"Plex Add Request: {url}/playlists/{playlist_id}/items with params {put_params}")
-                resp = requests.put(f"{url.rstrip('/')}/playlists/{playlist_id}/items", headers=headers, params=put_params, timeout=60)
-                log_mcp(f"Plex Add Response: {resp.status_code} - {resp.text}")
-                resp.raise_for_status()
+                # Add tracks to existing playlist - Plex API requires adding one track at a time
+                added_count = 0
+                for tid in track_ids:
+                    uri = f"server://{machine_id}/com.plexapp.plugins.library/library/metadata/{tid}"
+                    put_params = {'X-Plex-Token': token, 'uri': uri}
+                    try:
+                        resp = requests.put(f"{url.rstrip('/')}/playlists/{playlist_id}/items", headers=headers, params=put_params, timeout=30)
+                        resp.raise_for_status()
+                        result = resp.json()
+                        if result.get('MediaContainer', {}).get('leafCountAdded', 0) > 0:
+                            added_count += 1
+                    except Exception as e:
+                        log_mcp(f"Plex: Error adding track {tid}: {e}")
                 
-                # Verify tracks were actually added by checking the response
-                try:
-                    response_data = resp.json()
-                    playlist_meta = response_data.get('MediaContainer', {}).get('Metadata', [])
-                    if playlist_meta:
-                        playlist_info = playlist_meta[0]
-                        leaf_count_added = playlist_info.get('leafCountAdded')
-                        if leaf_count_added is not None:
-                            added_count = int(leaf_count_added)
-                            if added_count == 0:
-                                return f"Warning: No tracks were added to Plex playlist ID {playlist_id}. The provided track IDs may be invalid (e.g., from Deezer or another service). Please use the 'search_tracks' tool with platform='plex' to get valid Plex track IDs before adding them to playlists."
-                            elif added_count < len(track_ids):
-                                return f"Warning: Only {added_count} out of {len(track_ids)} tracks were added to Plex playlist ID {playlist_id}. Some track IDs may be invalid. Please use the 'search_tracks' tool with platform='plex' to get valid Plex track IDs."
-                            else:
-                                return f"Successfully added {added_count} tracks to Plex playlist ID {playlist_id}."
-                        else:
-                            # If leafCountAdded is not available, check final count
-                            final_count = playlist_info.get('leafCount', playlist_info.get('size'))
-                            if final_count is not None:
-                                log_mcp(f"Plex: leafCountAdded not available, but final count is {final_count}")
-                                return f"Successfully added tracks to Plex playlist ID {playlist_id}. (Final track count: {final_count})"
-                            else:
-                                # Fallback: assume success but warn
-                                log_mcp(f"Plex: Could not verify track count from response")
-                                return f"Successfully added {len(track_ids)} tracks to Plex playlist ID {playlist_id}. (Note: Unable to verify exact count from Plex API response)"
-                    else:
-                        log_mcp(f"Plex: No metadata in response to verify track addition")
-                        return f"Successfully added {len(track_ids)} tracks to Plex playlist ID {playlist_id}. (Note: Unable to verify from Plex API response)"
-                except (ValueError, KeyError, AttributeError) as e:
-                    log_mcp(f"Plex: Error parsing response to verify tracks: {e}")
-                    return f"Successfully added {len(track_ids)} tracks to Plex playlist ID {playlist_id}. (Note: Unable to verify from Plex API response)"
+                log_mcp(f"Plex: Added {added_count} of {len(track_ids)} tracks to playlist {playlist_id}")
+                
+                if added_count == 0:
+                    return f"Warning: No tracks were added to Plex playlist ID {playlist_id}. The provided track IDs may be invalid."
+                elif added_count < len(track_ids):
+                    return f"Warning: Only {added_count} out of {len(track_ids)} tracks were added to Plex playlist ID {playlist_id}."
+                else:
+                    return f"Successfully added {added_count} tracks to Plex playlist ID {playlist_id}."
                 
         except Exception as e:
             log_mcp(f"Plex Exception: {e}")

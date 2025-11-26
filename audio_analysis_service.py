@@ -338,44 +338,46 @@ class AudioAnalysisService:
             Dictionary with analysis statistics
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("""
-                    SELECT 
-                        analysis_status,
-                        COUNT(*) as count
-                    FROM tracks 
-                    GROUP BY analysis_status
-                """)
-                
-                status_counts = dict(cursor.fetchall())
-                
-                # Calculate totals
-                total_tracks = sum(status_counts.values())
-                analyzed_tracks = status_counts.get('analyzed', 0)
-                pending_tracks = status_counts.get('pending', 0)
-                error_tracks = status_counts.get('error', 0)
-                
-                progress = {
-                    'total_tracks': total_tracks,
-                    'analyzed_tracks': analyzed_tracks,
-                    'pending_tracks': pending_tracks,
-                    'error_tracks': error_tracks,
-                    'progress_percentage': round((analyzed_tracks / total_tracks * 100) if total_tracks > 0 else 0, 1),
-                    'status_counts': status_counts
-                }
-                
-                return progress
+            # Simple retry mechanism for DB locks
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    with sqlite3.connect(self.db_path, timeout=5.0) as conn:
+                        cursor = conn.execute("""
+                            SELECT 
+                                analysis_status,
+                                COUNT(*) as count
+                            FROM tracks 
+                            GROUP BY analysis_status
+                        """)
+                        
+                        status_counts = dict(cursor.fetchall())
+                        
+                        # Calculate totals
+                        total_tracks = sum(status_counts.values())
+                        analyzed_tracks = status_counts.get('analyzed', 0)
+                        pending_tracks = status_counts.get('pending', 0)
+                        error_tracks = status_counts.get('error', 0)
+                        
+                        progress = {
+                            'total_tracks': total_tracks,
+                            'analyzed_tracks': analyzed_tracks,
+                            'pending_tracks': pending_tracks,
+                            'error_tracks': error_tracks,
+                            'progress_percentage': round((analyzed_tracks / total_tracks * 100) if total_tracks > 0 else 0, 1),
+                            'status_counts': status_counts
+                        }
+                        
+                        return progress
+                except sqlite3.OperationalError as e:
+                    if "locked" in str(e) and attempt < max_retries - 1:
+                        time.sleep(0.5)  # Wait a bit before retrying
+                        continue
+                    raise  # Re-raise if not locked or max retries reached
                 
         except Exception as e:
             logger.error(f"Error getting analysis progress: {e}")
-            return {
-                'total_tracks': 0,
-                'analyzed_tracks': 0,
-                'pending_tracks': 0,
-                'error_tracks': 0,
-                'progress_percentage': 0,
-                'status_counts': {}
-            }
+            raise  # Re-raise to let caller handle it (e.g. return 500 or error JSON)
     
     def get_track_features(self, track_id: int) -> Optional[Dict[str, Any]]:
         """

@@ -1336,6 +1336,29 @@ def get_chat_sessions():
             cursor.execute("SELECT * FROM chat_sessions ORDER BY updated_at DESC")
             sessions = [dict(row) for row in cursor.fetchall()]
             
+            # Check each session and trigger background summarization if needed
+            for session in sessions:
+                session_id = session['id']
+                title = session.get('title', '')
+                
+                # Get messages for this session to check if title needs summarization
+                cursor.execute("SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC", (session_id,))
+                messages = [dict(row) for row in cursor.fetchall()]
+                
+                if title_needs_summarization(session_id, title, messages):
+                    # Trigger background summarization (don't block response)
+                    def summarize_in_background(sid):
+                        try:
+                            _summarize_chat_session_internal(sid)
+                        except Exception as e:
+                            debug_log(f"Background summarization failed for session {sid}: {e}", "ERROR")
+                    
+                    # Start background thread for summarization
+                    thread = threading.Thread(target=summarize_in_background, args=(session_id,))
+                    thread.daemon = True
+                    thread.start()
+                    debug_log(f"Triggered background summarization for session {session_id}", "INFO")
+            
         return jsonify(sessions)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1444,6 +1467,53 @@ def update_chat_session(session_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def title_needs_summarization(session_id, title, messages):
+    """
+    Check if a chat session title needs AI-generated summarization.
+    Returns True if title is just the first message or "New Chat", False if it's already a proper summary.
+    """
+    if not title or not messages:
+        return True
+    
+    title = title.strip()
+    
+    # "New Chat" always needs summarization
+    if title == "New Chat":
+        return True
+    
+    # Find first user message
+    first_user_msg = None
+    for msg in messages:
+        if msg.get('role') == 'user' and msg.get('content'):
+            first_user_msg = msg['content'].strip()
+            break
+    
+    if not first_user_msg:
+        return False  # No user messages, can't determine
+    
+    # Check if title matches first user message (allowing for truncation with "...")
+    # Titles are typically truncated to 30 chars + "..." if longer
+    first_30_chars = first_user_msg[:30]
+    
+    # Exact match
+    if title == first_user_msg:
+        return True
+    
+    # Match with truncation (title ends with "...")
+    if title.endswith("...") and first_user_msg.startswith(title[:-3]):
+        return True
+    
+    # Match first 30 chars (common truncation pattern)
+    if title == first_30_chars or title == first_30_chars + "...":
+        return True
+    
+    # If title is very long (>50 chars), it's likely just the first message
+    if len(title) > 50:
+        return True
+    
+    # If title appears to be a proper summary (short, doesn't match first message), return False
+    return False
+
 def generate_ollama_summary(messages):
     """Generate a short title for the conversation using Ollama"""
     ollama_url = get_config_value('OLLAMA', 'URL', 'http://localhost:11434')
@@ -1466,17 +1536,35 @@ def generate_ollama_summary(messages):
         return None
 
     debug_log(f"DEBUG: Constructing prompt with {len(messages)} messages", "INFO")
+    
+    # Validate messages structure
+    if not messages or len(messages) == 0:
+        debug_log("DEBUG: No messages provided for summary generation", "WARN")
+        return None
+    
     # Construct prompt
     conversation_text = ""
     for msg in messages[-10:]: # Use last 10 messages for context
+        # Safety check for message structure
+        if not isinstance(msg, dict):
+            debug_log(f"DEBUG: Skipping invalid message (not a dict): {type(msg)}", "WARN")
+            continue
+        if 'role' not in msg or 'content' not in msg:
+            debug_log(f"DEBUG: Skipping message missing 'role' or 'content': {msg.keys()}", "WARN")
+            continue
         role = "User" if msg['role'] == 'user' else "Assistant"
-        conversation_text += f"{role}: {msg['content']}\n"
+        content = str(msg['content']) if msg['content'] else ""
+        conversation_text += f"{role}: {content}\n"
+    
+    if not conversation_text.strip():
+        debug_log("DEBUG: No valid conversation text extracted from messages", "WARN")
+        return None
         
     debug_log(f"DEBUG: Starting Ollama request to {ollama_url} (using /api/chat)", "INFO")
     
     # Prepare messages for chat API
     chat_messages = [
-        {"role": "system", "content": "You are a helpful assistant. Summarize the following conversation into a single, short, descriptive title (max 6 words). Do not use quotes."},
+        {"role": "system", "content": "You are a helpful assistant. Generate a concise title of exactly 4-5 words that summarizes the conversation. Do not use quotes or punctuation. After thinking, you MUST output the title in your response content. Return only the title, nothing else."},
         {"role": "user", "content": f"Conversation:\n{conversation_text}\n\nTitle:"}
     ]
 
@@ -1491,62 +1579,209 @@ def generate_ollama_summary(messages):
                     "num_ctx": context_window,
                     "temperature": temperature,
                     "top_p": top_p,
-                    "num_predict": 100 
+                    "num_predict": 500  # Increased to allow thinking + output for models that use thinking tags
                 }
             },
             timeout=60
         )
         
         debug_log(f"DEBUG: Ollama response status: {response.status_code}", "INFO")
+        response.raise_for_status()  # Raise exception for HTTP errors
         
-        if response.status_code != 200:
-             debug_log(f"DEBUG: Ollama error response: {response.text}", "ERROR")
-
-        if response.status_code == 200:
-            result = response.json()
-            
-            # Handle chat response format
-            if 'message' in result and 'content' in result['message']:
-                title = result['message']['content'].strip().strip('"')
+        result = response.json()
+        
+        # Log the full response structure for debugging
+        debug_log(f"DEBUG: Ollama response structure: {list(result.keys())}", "INFO")
+        debug_log(f"DEBUG: Ollama response content preview: {json.dumps(result)[:1000]}", "INFO")
+        
+        # Handle chat response format
+        title = None
+        if 'message' in result:
+            message = result['message']
+            # Check content field first
+            if 'content' in message and message['content']:
+                title = message['content'].strip().strip('"')
+                debug_log(f"DEBUG: Extracted title from result['message']['content']: '{title}'", "INFO")
+            # If content is empty, check thinking field (some models use this)
+            elif 'thinking' in message and message['thinking']:
+                thinking = message['thinking']
+                # Try to extract title from thinking field
+                # Look for patterns like "title: ..." or quoted text
+                import re
+                # Look for quoted text in thinking
+                quoted_match = re.search(r'["\']([^"\']{5,50})["\']', thinking)
+                if quoted_match:
+                    title = quoted_match.group(1).strip()
+                    debug_log(f"DEBUG: Extracted title from result['message']['thinking'] (quoted): '{title}'", "INFO")
+                else:
+                    # Look for text after "title:" or "Title:"
+                    title_match = re.search(r'(?:title|Title):\s*([^.\n]{5,50})', thinking, re.IGNORECASE)
+                    if title_match:
+                        title = title_match.group(1).strip().strip('"').strip("'")
+                        debug_log(f"DEBUG: Extracted title from result['message']['thinking'] (after title:): '{title}'", "INFO")
+                    else:
+                        # Take the last sentence or phrase from thinking
+                        # Split by common delimiters and take the last meaningful part
+                        parts = re.split(r'[.\n]', thinking)
+                        for part in reversed(parts):
+                            part = part.strip()
+                            if len(part) > 10 and len(part) < 60:
+                                # Check if it looks like a title (not just thinking text)
+                                if not part.lower().startswith(('so', 'maybe', 'let', 'we', 'the', 'that')):
+                                    title = part.strip().strip('"').strip("'")
+                                    debug_log(f"DEBUG: Extracted title from result['message']['thinking'] (last phrase): '{title}'", "INFO")
+                                    break
+        elif 'response' in result:
+            # Fallback to 'response' if it exists
+            title = result.get('response', '').strip().strip('"')
+            debug_log(f"DEBUG: Extracted title from result['response']: '{title}'", "INFO")
+        else:
+            # Try to find content in other possible locations
+            debug_log(f"DEBUG: Unexpected response format. Keys: {list(result.keys())}. Full response: {json.dumps(result)[:1000]}", "WARN")
+            # Try to find message content in nested structures
+            if 'message' in result:
+                debug_log(f"DEBUG: Found 'message' key but structure: {json.dumps(result['message'])[:500]}", "WARN")
+        
+        if not title or len(title) == 0:
+            debug_log(f"DEBUG: Generated title is empty or None. Title value: '{title}'. Full response: {json.dumps(result)[:1000]}", "WARN")
+            return None
+        
+        # Clean and validate title
+        # Remove quotes and extra whitespace
+        title = title.strip().strip('"').strip("'").strip()
+        
+        # Remove any leading/trailing punctuation
+        title = title.strip('.,;:!?')
+        
+        # Validate and truncate to 4-5 words max, max 50 characters
+        words = title.split()
+        word_count = len(words)
+        
+        if word_count > 5:
+            # Truncate to first 5 words
+            title = ' '.join(words[:5])
+            debug_log(f"DEBUG: Title truncated from {word_count} words to 5 words: '{title}'", "INFO")
+        elif word_count < 4:
+            # If less than 4 words, that's okay - just log it
+            debug_log(f"DEBUG: Title has {word_count} words (less than 4, but acceptable): '{title}'", "INFO")
+        
+        # Truncate to max 50 characters if longer
+        if len(title) > 50:
+            # Truncate to 50 chars, but try to break at word boundary
+            truncated = title[:50]
+            last_space = truncated.rfind(' ')
+            if last_space > 40:  # Only break at word if we're not losing too much
+                title = truncated[:last_space]
             else:
-                # Fallback to 'response' if it exists (unlikely for chat API)
-                title = result.get('response', '').strip().strip('"')
-            
-            debug_log(f"DEBUG: Generated title: '{title}'", "INFO")
-            return title
-    except Exception as e:
-        debug_log(f"Error generating summary: {e}", "ERROR")
+                title = truncated
+            debug_log(f"DEBUG: Title truncated from {len(title)} chars to 50: '{title}'", "INFO")
+        
+        debug_log(f"DEBUG: Final generated title: '{title}' ({len(title.split())} words, {len(title)} chars)", "INFO")
+        return title
+        
+    except requests.exceptions.Timeout:
+        debug_log(f"Error generating summary: Ollama request timed out after 60 seconds", "ERROR", True)
         return None
-    return None
+    except requests.exceptions.ConnectionError as e:
+        debug_log(f"Error generating summary: Could not connect to Ollama at {ollama_url}: {e}", "ERROR", True)
+        return None
+    except requests.exceptions.HTTPError as e:
+        debug_log(f"Error generating summary: Ollama HTTP error {e.response.status_code if e.response else 'unknown'}: {e.response.text[:200] if e.response else str(e)}", "ERROR", True)
+        return None
+    except requests.exceptions.RequestException as e:
+        debug_log(f"Error generating summary: Ollama request error: {e}", "ERROR", True)
+        return None
+    except json.JSONDecodeError as e:
+        debug_log(f"Error generating summary: Could not decode Ollama JSON response: {e}. Response text: {response.text[:200] if 'response' in locals() else 'N/A'}", "ERROR", True)
+        return None
+    except Exception as e:
+        debug_log(f"Error generating summary: Unexpected error: {e}", "ERROR", True)
+        return None
 
-@main_bp.route('/api/chat/sessions/<session_id>/summarize', methods=['POST'])
-def summarize_chat_session(session_id):
-    """Trigger auto-summary for a session"""
+def _summarize_chat_session_internal(session_id):
+    """
+    Internal function to summarize a chat session.
+    Returns tuple: (success: bool, title: str or None, is_fallback: bool)
+    """
+    debug_log(f"DEBUG: _summarize_chat_session_internal called for session_id: {session_id}", "INFO")
     try:
         db_path = init_local_music_db()
         with sqlite3.connect(db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
+            # Check current title - if it already has a proper summary, skip
+            cursor.execute("SELECT title FROM chat_sessions WHERE id = ?", (session_id,))
+            result = cursor.fetchone()
+            if not result:
+                debug_log(f"DEBUG: Session {session_id} not found", "WARN")
+                return (False, None, False)
+            
+            current_title = result['title'] or ""
+            
             # Get messages
             cursor.execute("SELECT * FROM chat_messages WHERE session_id = ? ORDER BY id ASC", (session_id,))
             messages = [dict(row) for row in cursor.fetchall()]
             
+            debug_log(f"DEBUG: Found {len(messages)} messages for session {session_id}", "INFO")
+            
             if not messages:
-                return jsonify({'error': 'No messages to summarize'}), 400
+                debug_log(f"DEBUG: No messages found for session {session_id}", "WARN")
+                return (False, None, False)
+            
+            # Check if title already has a proper summary
+            if not title_needs_summarization(session_id, current_title, messages):
+                debug_log(f"DEBUG: Session {session_id} already has proper summary: {current_title}", "INFO")
+                return (True, current_title, False)
                 
-            # Generate summary
+            # Generate summary with retry logic
+            debug_log(f"DEBUG: Calling generate_ollama_summary for session {session_id}", "INFO")
             new_title = generate_ollama_summary(messages)
             
-            if new_title:
+            # Retry once if it returns None
+            if not new_title or len(new_title.strip()) == 0:
+                debug_log(f"DEBUG: First attempt returned None, retrying for session {session_id}", "WARN")
+                new_title = generate_ollama_summary(messages)
+            
+            debug_log(f"DEBUG: generate_ollama_summary returned: {new_title}", "INFO")
+            
+            if new_title and len(new_title.strip()) > 0:
+                debug_log(f"DEBUG: Updating session {session_id} with title: {new_title}", "INFO")
                 cursor.execute("UPDATE chat_sessions SET title = ? WHERE id = ?", (new_title, session_id))
                 conn.commit()
-                return jsonify({'success': True, 'title': new_title})
+                return (True, new_title, False)
             else:
-                return jsonify({'success': False, 'message': 'Failed to generate summary'}), 500
+                debug_log(f"DEBUG: Summary generation returned None/empty, using fallback for session {session_id}", "WARN")
+                # Fallback: create a simple title from first user message
+                if messages:
+                    first_user_msg = next((msg['content'][:50] for msg in messages if msg['role'] == 'user'), None)
+                    if first_user_msg:
+                        fallback_title = first_user_msg.strip() + ('...' if len(first_user_msg) >= 50 else '')
+                        debug_log(f"DEBUG: Using fallback title for session {session_id}: {fallback_title}", "INFO")
+                        cursor.execute("UPDATE chat_sessions SET title = ? WHERE id = ?", (fallback_title, session_id))
+                        conn.commit()
+                        return (True, fallback_title, True)
+                
+                debug_log(f"DEBUG: Failed to generate summary and no fallback available for session {session_id}", "ERROR")
+                return (False, None, False)
                 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        debug_log(f"ERROR: Exception in _summarize_chat_session_internal for session {session_id}: {e}", "ERROR", True)
+        import traceback
+        debug_log(f"ERROR: Traceback: {traceback.format_exc()}", "ERROR", True)
+        return (False, None, False)
+
+@main_bp.route('/api/chat/sessions/<session_id>/summarize', methods=['POST'])
+def summarize_chat_session(session_id):
+    """Trigger auto-summary for a session"""
+    success, title, is_fallback = _summarize_chat_session_internal(session_id)
+    
+    if success and title:
+        return jsonify({'success': True, 'title': title, 'fallback': is_fallback})
+    elif not success:
+        return jsonify({'success': False, 'message': 'Failed to generate summary'}), 500
+    else:
+        return jsonify({'error': 'No messages to summarize'}), 400
 
 @main_bp.route('/settings', methods=['GET', 'POST'])
 def settings():

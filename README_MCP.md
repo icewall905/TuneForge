@@ -26,6 +26,26 @@ The server listens on all network interfaces (`0.0.0.0`), so you can connect usi
   - `limit` (integer, optional): Maximum number of results (default: 20, max: 50).
 - **Note**: For Plex, searching by artist name (e.g., "Oasis") will prioritize tracks by that artist. The search first looks for an exact artist match, then retrieves all tracks from that artist.
 
+### `bulk_search_tracks`
+- **Description**: Search for multiple tracks in a single call across Plex or Navidrome libraries. This allows the agent to query multiple tracks (e.g., 10 queries) efficiently in one MCP call and get track IDs back for all matches, grouped by query.
+- **Arguments**:
+  - `queries` (list[string]): List of search queries (e.g., `["Oasis", "Wonderwall", "The Beatles"]`).
+  - `platform` (string): "plex" or "navidrome" (default: "plex").
+  - `limit` (integer, optional): Total maximum number of results across all queries (default: 50, max: 200).
+- **Returns**: JSON string with results grouped by query:
+  ```json
+  {
+    "results": {
+      "query1": [{"id": "...", "title": "...", "artist": "...", "album": "..."}, ...],
+      "query2": [{"id": "...", "title": "...", "artist": "...", "album": "..."}, ...]
+    },
+    "errors": {
+      "query3": "error message if any"
+    }
+  }
+  ```
+- **Note**: All results are tracks that EXIST in the user's library with valid track IDs that can be immediately used with `add_to_playlist`. Searches are executed concurrently for better performance.
+
 ### `create_playlist`
 - **Description**: Create a new empty playlist (Navidrome only).
 - **Arguments**:
@@ -47,7 +67,7 @@ The server listens on all network interfaces (`0.0.0.0`), so you can connect usi
    - **Transport**: HTTP Streamable (or SSE if supported).
    - **Server URL**: `http://10.0.10.87:8000/mcp`
 3. **Select Tool**:
-   - The dropdown should now show `find_similar_songs`, `search_tracks`, `create_playlist`, and `add_to_playlist`.
+   - The dropdown should now show `find_similar_songs`, `search_tracks`, `bulk_search_tracks`, `create_playlist`, and `add_to_playlist`.
 
 1. Ensure the server is running:
    ```bash
@@ -107,3 +127,15 @@ This will test:
 - Empty playlist creation (Navidrome)
 - Playlist creation with tracks (both platforms)
 - Verification that playlists appear in the services
+
+A test script is also available for bulk search functionality:
+```bash
+cd /opt/tuneforge
+source venv/bin/activate
+python debug_scripts/test_bulk_search_mcp.py
+```
+
+This will test:
+- Bulk search on Plex with multiple queries
+- Bulk search on Navidrome with multiple queries
+- Limit enforcement across all queries
