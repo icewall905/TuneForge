@@ -62,7 +62,7 @@
                 <ul>
                     <li><a href="{{ url_for('main.index') }}" class="{% if request.endpoint == 'main.index' %}active{% endif %}">Ask a Friend</a></li>
                     <li><a href="{{ url_for('main.new_generator') }}" class="{% if request.endpoint == 'main.new_generator' %}active{% endif %}">Sonic Traveller</a></li>
-                    <li><a href="{{ url_for('main.musical_agent') }}" class="{% if request.endpoint == 'main.musical_agent' %}active{% endif %}">Musical Agent</a></li>
+                    <li><a href="{{ url_for('main.musical_agent') }}" class="{% if request.endpoint == 'main.musical_agent' %}active{% endif %}">Music Concierge</a></li>
                     <li><a href="{{ url_for('main.local_music_page') }}" class="{% if request.endpoint == 'main.local_music_page' %}active{% endif %}">Local Music</a></li>
                     <li><a href="{{ url_for('main.audio_analysis_page') }}" class="{% if request.endpoint == 'main.audio_analysis_page' %}active{% endif %}">Audio Analysis</a></li>
                     <li><a href="{{ url_for('main.history') }}" class="{% if request.endpoint == 'main.history' %}active{% endif %}">History</a></li>

@@ -1,8 +1,8 @@
 # TuneForge - Critical Information
 
-## 🎯 **CURRENT STATUS: MUSICAL AGENT INTEGRATED** ✅
+## 🎯 **CURRENT STATUS: MUSIC CONCIERGE INTEGRATED** ✅
 
-The "Musical Agent" chat interface has been added, allowing natural language interaction with an AI agent via n8n webhook integration.
+The "Music Concierge" chat interface has been added, allowing natural language interaction with an AI agent via n8n webhook integration.
 
 ## 🚀 **Core Features**
 
@@ -21,7 +21,7 @@ The "Musical Agent" chat interface has been added, allowing natural language int
 - Export to JSON and M3U formats
 - Performance optimized with database indexes and caching
 
-### **Musical Agent (NEW)**
+### **Music Concierge (NEW)**
 - **Chat Interface**: Modern, slick chat UI for conversational interaction.
 - **n8n Integration**: Directly communicates with n8n webhook (`https://n8n.lan/webhook/...`) to process user requests.
 - **Interactive**: Real-time "typing" feedback and JSON-based response handling.

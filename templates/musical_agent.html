@@ -1,10 +1,10 @@
 {% extends 'layout.html' %}
 
-{% block title %}Musical Agent - TuneForge{% endblock %}
+{% block title %}Music Concierge - TuneForge{% endblock %}
 
 {% block content %}
 <div class="page-header">
-    <h1>🎵 Musical Agent</h1>
+    <h1>🎵 Music Concierge</h1>
     <p>Your AI assistant for playlist management.</p>
 </div>
 
@@ -27,7 +27,7 @@
                     <!-- Messages will appear here -->
                     <div class="message agent-message">
                         <div class="message-content">
-                            Hello! I'm your Musical Agent. How can I help you with your music today?
+                            Hello! I'm your Music Concierge. How can I help you with your music today?
                         </div>
                     </div>
                 </div>
@@ -910,7 +910,7 @@
                 // Render messages
                 if (data.messages.length === 0) {
                     // Show welcome message for empty chat
-                    appendMessage("Hello! I'm your Musical Agent. How can I help you with your music today?", 'agent');
+                    appendMessage("Hello! I'm your Music Concierge. How can I help you with your music today?", 'agent');
                 } else {
                     data.messages.forEach(msg => {
                         appendMessage(msg.content, msg.role === 'user' ? 'user' : 'agent');
