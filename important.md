@@ -21,11 +21,19 @@ The "Music Concierge" chat interface has been added, allowing natural language i
 - Export to JSON and M3U formats
 - Performance optimized with database indexes and caching
 
-### **Music Concierge (NEW)**
+### **Music Concierge**
 - **Chat Interface**: Modern, slick chat UI for conversational interaction.
 - **n8n Integration**: Directly communicates with n8n webhook (`https://n8n.lan/webhook/...`) to process user requests.
 - **Interactive**: Real-time "typing" feedback and JSON-based response handling.
 - **Menu Integration**: Accessible directly from the sidebar under "Sonic Traveller".
+
+### **Mobile PWA (NEW)**
+- **URL**: `/musical-agent/mobile` - Standalone mobile-friendly interface
+- **PWA Support**: "Add to Home Screen" for app-like experience on iOS/Android
+- **Offline Ready**: Service worker caches static assets for offline access
+- **Touch Optimized**: 44px+ tap targets, bottom input bar, swipe-friendly
+- **Collapsible History**: Slide-in panel from left with session management
+- **Dark Theme**: Modern dark UI with purple accents, safe area support for notches
 
 ## 🔧 **API Endpoints**
 
@@ -58,6 +66,9 @@ The "Music Concierge" chat interface has been added, allowing natural language i
 - **Scanner Settings**: Configure file size limits, batch sizes, and performance options in [scanner] section
 
 ## 🐛 **Recent Bug Fixes**
+- ✅ **Fixed MCP tool schema for n8n** - Array items must have BOTH `type` AND `inputType` (e.g., `"items": {"type": "string", "inputType": "text"}`). Error occurs when selecting tools if items schema is incomplete.
+- ✅ **Fixed n8n Integer Type Issue** - n8n MCP client doesn't support `type: "integer"` (only `type: "number"`). Changed all `int` parameters to `float` to generate `type: "number"`. See GitHub issue #21569.
+- ⚠️ **n8n Array in Required Bug** - Tools with array parameters in the `required` array fail. This is an n8n bug when processing required arrays containing array properties. Affects: `bulk_search_tracks`, `add_to_playlist`.
 - ✅ **Fixed SQLite column name issues** in feature fetching functions
 - ✅ **Resolved distance calculation problems** (now working correctly)
 - ✅ **Enhanced UI** with improved threshold slider (0.5-2.0 range)

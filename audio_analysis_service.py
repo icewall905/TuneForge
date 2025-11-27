@@ -358,13 +358,21 @@ class AudioAnalysisService:
                         analyzed_tracks = status_counts.get('analyzed', 0)
                         pending_tracks = status_counts.get('pending', 0)
                         error_tracks = status_counts.get('error', 0)
+                        processing_tracks = status_counts.get('analyzing', 0) + status_counts.get('processing', 0)
+                        skipped_tracks = status_counts.get('skipped', 0) + status_counts.get('ignored', 0)
+                        
+                        # Calculate progress (analyzed + skipped counts as progress)
+                        completed_work = analyzed_tracks + skipped_tracks
+                        progress_percentage = round((completed_work / total_tracks * 100) if total_tracks > 0 else 0, 1)
                         
                         progress = {
                             'total_tracks': total_tracks,
                             'analyzed_tracks': analyzed_tracks,
                             'pending_tracks': pending_tracks,
                             'error_tracks': error_tracks,
-                            'progress_percentage': round((analyzed_tracks / total_tracks * 100) if total_tracks > 0 else 0, 1),
+                            'processing_tracks': processing_tracks,
+                            'skipped_tracks': skipped_tracks,
+                            'progress_percentage': progress_percentage,
                             'status_counts': status_counts
                         }
                         

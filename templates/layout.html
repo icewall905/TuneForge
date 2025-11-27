@@ -881,10 +881,18 @@
                     }
                     
                     if (status.status === 'stopped' || status.status === 'completed') {
-                        this.updateAudioAnalysis({ 
-                            status: 'completed', 
-                            currentStatus: 'Analysis completed!' 
-                        });
+                        // Check if there are still pending tracks
+                        if (status.pending_tracks && status.pending_tracks > 0) {
+                            this.updateAudioAnalysis({ 
+                                status: 'stopped', 
+                                currentStatus: `Analysis stopped (${status.pending_tracks} pending)` 
+                            });
+                        } else {
+                            this.updateAudioAnalysis({ 
+                                status: 'completed', 
+                                currentStatus: 'Analysis completed!' 
+                            });
+                        }
                         clearInterval(pollInterval);
                         setTimeout(() => this.removeAudioAnalysis(), 5000);
                     } else {

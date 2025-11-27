@@ -1,6 +1,10 @@
 from flask import Blueprint, render_template, request, jsonify, Response, current_app, send_file
 import requests
+import urllib3
 import json
+
+# Disable SSL warnings for self-signed certificates (internal services)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import configparser
 import os
 import datetime
@@ -1302,6 +1306,56 @@ def musical_agent():
         'n8n_auth_token': get_config_value('N8N', 'AuthToken', '')
     }
     return render_template('musical_agent.html', **context)
+
+@main_bp.route('/musical-agent/mobile')
+def musical_agent_mobile():
+    """Mobile-friendly PWA endpoint for Musical Agent"""
+    context = {
+        'n8n_webhook_url': get_config_value('N8N', 'WebhookURL', ''),
+        'n8n_auth_token': get_config_value('N8N', 'AuthToken', '')
+    }
+    return render_template('musical_agent_mobile.html', **context)
+
+@main_bp.route('/api/chat/webhook', methods=['POST'])
+def chat_webhook_proxy():
+    """Proxy endpoint for n8n webhook to avoid CORS issues"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        webhook_url = get_config_value('N8N', 'WebhookURL', '')
+        if not webhook_url:
+            return jsonify({'error': 'Webhook URL not configured'}), 500
+        
+        auth_token = get_config_value('N8N', 'AuthToken', '')
+        
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        if auth_token:
+            headers['Authorization'] = f'Bearer {auth_token}'
+        
+        # Forward request to n8n webhook
+        # Disable SSL verification for internal services with self-signed certs
+        response = requests.post(
+            webhook_url,
+            json=data,
+            headers=headers,
+            timeout=500,
+            verify=False
+        )
+        
+        # Return the response from n8n
+        return jsonify(response.json()), response.status_code
+        
+    except requests.exceptions.Timeout:
+        return jsonify({'error': 'Request timed out'}), 504
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Network error: {str(e)}'}), 502
+    except Exception as e:
+        debug_log(f"Webhook proxy error: {e}", "ERROR")
+        return jsonify({'error': str(e)}), 500
 
 # --- Chat History API ---
 
@@ -3633,8 +3687,19 @@ def api_audio_analysis_status():
     """Get current audio analysis status"""
     try:
         if not hasattr(api_start_audio_analysis, 'processor') or not api_start_audio_analysis.processor:
+            # Even if stopped, check if there are pending tracks
+            pending_count = 0
+            try:
+                from audio_analysis_service import AudioAnalysisService
+                service = AudioAnalysisService()
+                progress = service.get_analysis_progress()
+                pending_count = progress.get('pending_tracks', 0)
+            except Exception:
+                pass
+                
             return jsonify({
                 'status': 'stopped',
+                'pending_tracks': pending_count,
                 'progress': {
                     'total_jobs': 0,
                     'completed_jobs': 0,
