@@ -68,7 +68,9 @@ The "Music Concierge" chat interface has been added, allowing natural language i
 ## 🐛 **Recent Bug Fixes**
 - ✅ **Fixed MCP tool schema for n8n** - Array items must have BOTH `type` AND `inputType` (e.g., `"items": {"type": "string", "inputType": "text"}`). Error occurs when selecting tools if items schema is incomplete.
 - ✅ **Fixed n8n Integer Type Issue** - n8n MCP client doesn't support `type: "integer"` (only `type: "number"`). Changed all `int` parameters to `float` to generate `type: "number"`. See GitHub issue #21569.
-- ⚠️ **n8n Array in Required Bug** - Tools with array parameters in the `required` array fail. This is an n8n bug when processing required arrays containing array properties. Affects: `bulk_search_tracks`, `add_to_playlist`.
+- ✅ **Fixed search_playlists empty query** - When query is empty, now uses `/playlists` endpoint to list all playlists instead of `/search` which returns 404. Query parameter defaults to empty string.
+- ✅ **Improved systemd service** - Added `ExecStartPre` to kill old processes before restart, preventing port conflicts. Added proper timeout and kill mode settings.
+- ⚠️ **n8n Array in Required Bug** - Tools with array parameters in the `required` array fail. This is an n8n bug when processing required arrays containing array properties. Affects: `bulk_search_tracks`, `add_to_playlist`. **Workaround**: Use JSON string parameters instead of arrays.
 - ✅ **Fixed SQLite column name issues** in feature fetching functions
 - ✅ **Resolved distance calculation problems** (now working correctly)
 - ✅ **Enhanced UI** with improved threshold slider (0.5-2.0 range)

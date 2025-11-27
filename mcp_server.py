@@ -720,14 +720,14 @@ def delete_playlist(
 
 @mcp.tool()
 def search_playlists(
-    query: Annotated[str, Field(description="The name or partial name of the playlist to search for.", json_schema_extra={"inputType": "text"})],
+    query: Annotated[str, Field(default="", description="The name or partial name of the playlist to search for. Leave empty to list all playlists.", json_schema_extra={"inputType": "text"})] = "",
     limit: Annotated[float, Field(default=10.0, description="Maximum number of results to return (default: 10).", json_schema_extra={"inputType": "number"})] = 10.0
 ) -> str:
     """
-    Search for playlists in Plex.
+    Search for playlists in Plex. If query is empty, returns all playlists.
     
     Args:
-        query: The name or partial name of the playlist to search for.
+        query: The name or partial name of the playlist to search for. Leave empty to list all playlists.
         limit: Maximum number of results to return (default: 10).
         
     Returns:
@@ -741,18 +741,47 @@ def search_playlists(
     
     if not all([url, token]):
         return "Error: Plex not configured."
+    
+    # Normalize query: handle None, empty string, or whitespace-only strings
+    if query is None:
+        query = ""
+    else:
+        query = str(query).strip()
+    
+    # CRITICAL: If query is empty, use /playlists endpoint to list all playlists
+    # Plex /search endpoint returns 404 when query is empty
+    use_playlists_endpoint = (not query) or (query == "") or (len(query.strip()) == 0)
+    
+    logger.info(f"search_playlists called: query={repr(query)}, use_playlists_endpoint={use_playlists_endpoint}, limit={limit}")
         
     try:
         headers = {'X-Plex-Token': token, 'Accept': 'application/json'}
         
-        # Use general search restricted to playlists (type 15)
-        params = {'query': query, 'type': '15', 'limit': limit}
-        response = requests.get(f"{url.rstrip('/')}/search", headers=headers, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        if use_playlists_endpoint:
+            # List all playlists using /playlists endpoint
+            logger.info(f"Using /playlists endpoint to list all playlists")
+            params = {'X-Plex-Token': token}
+            playlist_url = f"{url.rstrip('/')}/playlists"
+            logger.info(f"Request URL: {playlist_url}")
+            response = requests.get(playlist_url, headers=headers, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+        else:
+            # Search for specific playlists using /search endpoint
+            logger.info(f"Using /search endpoint with query='{query}'")
+            params = {'query': query, 'type': '15', 'limit': limit}
+            search_url = f"{url.rstrip('/')}/search"
+            logger.info(f"Request URL: {search_url} with params: {params}")
+            response = requests.get(search_url, headers=headers, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
         
         playlists = []
         metadata = data.get('MediaContainer', {}).get('Metadata', [])
+        
+        # Apply limit if we got all playlists
+        if not query and limit:
+            metadata = metadata[:limit]
         
         for item in metadata:
             playlists.append({
