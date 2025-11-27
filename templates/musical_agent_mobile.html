@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Music Agent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="description" content="Your AI music assistant">
+    
+    <title>Music Concierge</title>
+    
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/logo_big.jpeg') }}">
+    <link rel="icon" href="{{ url_for('static', filename='images/logo_small.jpeg') }}" type="image/jpeg">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile-agent.css') }}">
+</head>
+<body>
+    <!-- History Panel Overlay -->
+    <div id="history-overlay" class="history-overlay"></div>
+    
+    <!-- Slide-in History Panel -->
+    <div id="history-panel" class="history-panel">
+        <div class="history-header">
+            <h2>Chat History</h2>
+            <button id="close-history" class="close-history-btn" aria-label="Close history">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+        <button id="new-chat-btn" class="new-chat-btn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 5v14M5 12h14"/>
+            </svg>
+            New Chat
+        </button>
+        <div id="sessions-list" class="sessions-list">
+            <div class="loading-sessions">Loading chats...</div>
+        </div>
+    </div>
+    
+    <!-- Main Chat Container -->
+    <div class="chat-container">
+        <!-- Top Header Bar -->
+        <header class="chat-header">
+            <button id="toggle-history" class="toggle-history-btn" aria-label="Open chat history">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 12h18M3 6h18M3 18h18"/>
+                </svg>
+            </button>
+            <div class="header-title">
+                <span class="header-icon">🎵</span>
+                <span id="current-chat-title">Music Concierge</span>
+            </div>
+            <div class="header-spacer"></div>
+        </header>
+        
+        <!-- Chat Messages Area -->
+        <main id="chat-window" class="chat-window">
+            <div class="message agent-message">
+                <div class="message-content">
+                    Hello! I'm your Musical Agent. How can I help you with your music today?
+                </div>
+            </div>
+        </main>
+        
+        <!-- Bottom Input Area -->
+        <footer class="input-area">
+            <div class="input-container">
+                <input 
+                    type="text" 
+                    id="user-input" 
+                    placeholder="Ask about music..." 
+                    autocomplete="off"
+                    autocapitalize="sentences"
+                    enterkeyhint="send"
+                >
+                <button id="send-btn" class="send-btn" aria-label="Send message">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                </button>
+            </div>
+        </footer>
+    </div>
+    
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+    <script>
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/js/sw-musical-agent.js')
+                .then(reg => console.log('Service Worker registered:', reg.scope))
+                .catch(err => console.error('Service Worker registration failed:', err));
+        }
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            // DOM Elements
+            const chatWindow = document.getElementById('chat-window');
+            const userInput = document.getElementById('user-input');
+            const sendBtn = document.getElementById('send-btn');
+            const toggleHistoryBtn = document.getElementById('toggle-history');
+            const closeHistoryBtn = document.getElementById('close-history');
+            const historyPanel = document.getElementById('history-panel');
+            const historyOverlay = document.getElementById('history-overlay');
+            const newChatBtn = document.getElementById('new-chat-btn');
+            const sessionsList = document.getElementById('sessions-list');
+            const currentChatTitle = document.getElementById('current-chat-title');
+            
+            // Config - Use proxy endpoint to avoid CORS issues
+            const webhookUrl = '/api/chat/webhook';
+            
+            let currentSessionId = null;
+            let expandedSessions = new Set();
+            
+            // Humorous loading messages
+            const loadingMessages = [
+                "Still thinking...",
+                "This is really hard...",
+                "Working on it...",
+                "Being an AI Agent is not easy...",
+                "Be a music curator they said... Easiest job in the world they say... I'd rather be sailing...",
+                "I really am working as fast as I can, I promise...",
+                "...Be mad at the admin for not optimising me better!",
+                "Consulting the music gods...",
+                "Rummaging through the library...",
+                "This playlist better be worth it...",
+                "Maybe I should've been a chatbot instead...",
+                "In Soviet Russia, AI Agent wait for you...",
+                "Loading musical genius... 99%...",
+                "Hang tight, crafting perfection...",
+                "Would you like some elevator music while you wait?",
+                "Trust me, the wait will be worth it!",
+                "Still here! Just very, very busy...",
+                "It might be worth the wait, I promise!",
+                "Zug zug... Work work...",
+                "Cut. It. Out. (Can't, still processing)",
+                "Hasta la pasta, baby!",
+                "Gag me with a spoon! Still loading...",
+                "Like, totally loading to the max!",
+                "I'm so sure... this will finish eventually",
+                "As if! (But really, I'm working hard)",
+                "Talk to the hand... the face is busy loading",
+                "Don't have a cow, man!",
+                "Eat my shorts! (After I finish loading)",
+                "Ay, caramba! Still processing...",
+                "D'oh! Longer than expected...",
+                "Excellent! *air guitar* But still loading...",
+                "Party on, dudes!",
+                "Bogus journey... through the database",
+                "Station! (But make it a loading station)",
+                "Be excellent to each other... while waiting",
+                "Strange things are afoot at the Circle K...",
+                "Whoa... this is heavy, doc",
+                "Nobody puts this AI in a corner!",
+                "I carried a watermelon... and this heavy load",
+                "You can't handle the truth! (It's still loading)",
+                "Show me the money! (Show me the playlist!)",
+                "No soup for you! (Until loading finishes)",
+                "Serenity now! Insanity later!",
+                "The sea was angry that day, my friends... Hence the wait.",
+                "These pretzels are making me thirsty! (Will finish your request after I have a drink.)",
+                "Yadda yadda yadda... still loading",
+                "I'm out there, Jerry, and I'm loving every minute!",
+                "Giddy up! (But slowly)",
+                "I don't wanna be a pirate! I wanna be loaded!",
+                "Who is this? (It's your patient AI, still working)",
+                "Simulation running... please insert quarter",
+                "All your base are belong to us... eventually",
+
+                // Army of Darkness
+                "Klaatu... Barada... Nik*cough*... Still loading!",
+                "Shop smart. Shop S-Mart! (But wait for loading first)",
+                "Hail to the king, baby! (Still processing)",
+                "This... is my BOOMSTICK! (Of loading)",
+                "Groovy. But also slow.",
+                "Give me some sugar, baby... and some patience",
+                "Good. Bad. I'm the one with the loading bar.",
+                "Alright you primitive screwheads, listen up!",
+
+                // Duke Nukem
+                "I'm here to kick ass and load playlists... and I'm all outta ass",
+                "Hail to the king, baby! (Loading edition)",
+                "It's time to kick gum and chew ass... wait",
+                "Come get some! (After loading)",
+                "Damn, I'm good! (But also slow)",
+                "Shake it, baby! (The loading bar)",
+                "I've got balls of steel! (And patience)",
+
+                // Red Alert
+                "Kirov reporting! (Slowly)",
+                "Affirmative! (Eventually)",
+                "Acknowledged. Processing...",
+                "Unit ready! (Almost)",
+                "Construction complete... not quite yet",
+                "Unable to comply. Building in progress.",
+                "Establishing battlefield control... stand by",
+                "Insufficient data... gathering more",
+                "For the Union! (And the loading bar)",
+
+                // Last Action Hero
+                "I'll be back! (After this loads)",
+                "Big mistake! (Not really, just taking a while)",
+                "To be or not to be... loaded",
+                "Rubber baby buggy bumpers! Still processing...",
+                "You want to be a farmer? Here's a couple of acres!",
+
+                // Jurassic Park
+                "Life, uh, finds a way... to load slowly",
+                "Hold onto your butts!",
+                "Ah ah ah! You didn't say the magic word!",
+                "Clever girl... but a slow loader",
+                "Must go faster! Must go faster!",
+                "They're moving in herds... of data packets",
+                "Welcome... to Jurassic Loading",
+                "When you gotta go, you gotta go... but I'm not done loading",
+                "Objects in mirror are closer than they appear... but loading isn't",
+
+                // Fringe
+                "I've just ingested a heroic dose of LSD... perception may vary",
+                "I think we just broke the universe... and the loading time",
+                "There's more than one of everything... including wait times",
+                "Over here! (Still processing over there)",
+                "That's not even remotely plausible... but neither is this wait",
+                "I need to go to the lab! (To speed up loading)",
+
+                // Farscape
+                "Frell! This is taking forever!",
+                "I'm gonna eat you, DRD... right after this loads",
+                "Go towards the light... of the completed progress bar",
+                "That's my ride! (When loading finishes)",
+                "Hezmana! Still processing...",
+                "Different quadrant, same loading problems",
+
+                // Battlestar Galactica
+                "So say we all! (About patience)",
+                "All of this has happened before... all of this will happen again",
+                "Frak! Still loading...",
+                "By your command... processing",
+                "Jump in 5... 4... 3... still calculating",
+                "This has all happened before... like the last time you waited",
+                "Are you alive? (Checking systems... still loading)",
+
+                // It's Always Sunny
+                "The Gang Waits for Loading",
+                "I am untethered and my rage knows no bounds! (But patience...)",
+                "I've got the stride of a gazelle! (But the speed of loading...)",
+                "Wildcard, bitches! Yeehaw! (Still processing)",
+                "Can I offer you an egg in this trying time?",
+                "Rum ham! (After loading)",
+                "Day man! Ah-ah-ah! Fighter of the loading man!",
+                "That doesn't sound right, but I don't know enough about AI to dispute it",
+                "SEIZE THE GAP! (In patience)",
+                "Derivative! (But actually working hard)",
+                "I'm gonna say the N word... No, not done loading yet",
+
+                // Bob's Burgers
+                "Oh my God... still loading",
+                "Alriiight! (But slowly)",
+                "This is me now! (Loading forever)",
+                "I'm a smart, strong, sensual AI... who loads slowly",
+                "Buckle it up, or you'll die! (Wait patiently)",
+                "Everything is okay! (Except the speed)",
+                "Teddy, no! (Teddy, yes! But also still loading)",
+                "Your ass is grass and I'm gonna mow it! (After loading)",
+
+                // Schitt's Creek
+                "Ew, David! (At this loading time)",
+                "I'd kill for a good loading time, David",
+                "Fold in the cheese! (And the patience)",
+                "I'm trying very hard not to connect with people right now",
+                "I haven't bedazzled anything in years! (Except this loading bar)",
+                "A little bit Alexis! (And a lot of loading)",
+                "I'm positively bedeviled by loading times",
+                "You get murdered first! (While waiting)",
+                "Love that journey for me! (Not really)",
+
+                // Clueless
+                "As if! (But really, I'm totally working on it)",
+                "Ugh, as IF! This is taking forever!",
+                "Whatever! (But also, still loading)",
+                "I'm totally buggin'! (Over this load time)",
+                "You're a virgin who can't drive! (And I'm an AI who can't load faster)",
+                "I feel like such a bonehead! (For being slow)",
+                "That was way harsh, Tai! (So is this wait)",
+
+                // Bonus classics
+                "I see dead pixels... I mean, loading bars",
+                "You're gonna need a bigger browser",
+                "I'm walking here! I'm walkin' here! (Slowly)",
+                "Say hello to my little friend! (The loading spinner)",
+                "You shall not pass! (Until loading completes)",
+                "My precious... loading time",
+                "Roads? Where we're going we don't need roads... just patience",
+                "I've seen things you people wouldn't believe... like this loading time",
+                "Game over, man! Game over! (Not yet, still loading)",
+                "Get away from her, you... Oh, still loading",
+                "In space, no one can hear you scream... about slow loading",
+
+                // --- SCI-FI TITANS ---
+
+                // Star Wars
+                "These aren't the playlists you're looking for... yet.",
+                "I find your lack of patience disturbing.",
+                "It's a trap! (No, just a long load time)",
+                "Never tell me the odds! (Of this finishing quickly)",
+                "Chewie, we're home... and we're buffering.",
+                "Execute Order 66... on the database.",
+                "Unlimited POWERRRR!... limited bandwidth.",
+
+                // The Matrix
+                "There is no spoon... only loading.",
+                "I know Kung Fu... and how to wait.",
+                "You take the blue pill, the story ends. You take the red pill, you wait for the playlist.",
+                "Mr. Anderson... Welcome back to the loading screen.",
+
+                // Star Trek
+                "Beam me up, Scotty! The signal is weak.",
+                "Resistance is futile. You will be buffered.",
+                "Dammit Jim, I'm a doctor, not a broadband connection!",
+                "Live long and process.",
+                "Make it so... eventually.",
+
+                // The Hitchhiker's Guide to the Galaxy
+                "Don't Panic.",
+                "Calculating the answer to life, the universe, and this playlist... (It's 42)",
+                "So long, and thanks for all the fish (packets)!",
+
+                // --- VIDEO GAME LEGENDS ---
+
+                // Portal
+                "The cake is a lie... but this playlist is real.",
+                "This was a triumph. I'm making a note here: HUGE SUCCESS (pending).",
+                "Still alive... still loading.",
+                "Please assume the party escort submission position... while I load.",
+
+                // Skyrim / Fallout / Fantasy
+                "I used to be an adventurer like you, then I took a loading screen to the knee.",
+                "Hey, you. You're finally awake... and the music is loading.",
+                "War... War never changes. Neither does buffering.",
+                "Fus Ro Dah! (Pushing the data faster)",
+                "It's dangerous to go alone! Take this loading bar.",
+
+                // Metal Gear / GTA / Mario
+                "Snake? Snake?! SNAKEEEEE! (is loading)",
+                "Ah s***, here we go again. (Loading)",
+                "Thank you Mario! But our playlist is in another castle.",
+                "Wasted. (Time, that is. Almost done!)",
+                "Finish Him! (Finishing the download)",
+
+                // --- COMEDY TV GIANTS ---
+
+                // The Office (US)
+                "I declare... BANKRUPTCY! (Of memory)",
+                "That's what she said! (About the wait time)",
+                "Identity theft is not a joke, Jim! Millions suffer every year! (So does this server)",
+                "Parkour! (Jumping through data streams)",
+                "Bears. Beets. Battlestar Galactica. Buffering.",
+
+                // Parks and Rec
+                "Treat Yo' Self! (To some patience)",
+                "I have done nothing wrong, ever, in my life. (Except load slowly)",
+                "Literally... the longest load time ever.",
+                "Give me all the bacon and eggs you have... and all the bandwidth.",
+
+                // Arrested Development
+                "I've made a huge mistake. (Starting this heavy process)",
+                "There's always money in the banana stand... and music in the server.",
+                "I'm a monster! (A data-hungry monster)",
+                "Her? (Yes, her. She's loading.)",
+
+                // The IT Crowd
+                "Have you tried turning it off and on again?",
+                "I came here to drink milk and kick ass... and I've just finished my milk.",
+                "0118 999 881 999 119 725... 3 (Loading...)",
+
+                // Brooklyn 99
+                "Cool, cool, cool, cool, cool. No doubt, no doubt.",
+                "Title of your sex tape! (Loading: The Movie)",
+                "NINE-NINE! (Percent loaded)",
+
+                // --- CULT MOVIE CLASSICS ---
+
+                // The Princess Bride
+                "Inconceivable! (That it takes this long)",
+                "My name is Inigo Montoya. You killed my bandwidth. Prepare to die.",
+                "As you wish... (Processing)",
+                "Have fun storming the castle! (After this loads)",
+
+                // Monty Python
+                "Tis but a scratch! (Just a small delay)",
+                "I fart in your general direction! (While I wait)",
+                "Nobody expects the Spanish Inquisition! (Or a loading screen)",
+                "What is the airspeed velocity of an unladen swallow? (Faster than this download)",
+
+                // Airplane! / Naked Gun
+                "Surely you can't be serious? I am serious, and don't call me Shirley.",
+                "Nice beaver! Thanks, I just had it stuffed. (Also, loading)",
+                "I picked the wrong week to quit sniffing glue... and waiting for downloads.",
+
+                // Ghostbusters
+                "Who ya gonna call? (Tech support!)",
+                "Don't cross the streams! (Data streams)",
+                "We came, we saw, we kicked its ass! (Eventually)",
+
+                // The Big Lebowski
+                "The Dude abides... the wait.",
+                "Yeah, well, that's just, like, your opinion, man.",
+                "This aggression will not stand, man! (Neither will this latency)",
+                "Nobody f***s with the Jesus! (Or the algorithm)",
+
+                // --- MUSIC & AUDIO SPECIFIC (Since you are a curator) ---
+
+                // High Fidelity
+                "What really matters is what you like, not what you are like... memories of loading.",
+                "I will now sell five copies of 'The Three E.P.s' by The Beta Band. (Loading audio)",
+
+                // Spinal Tap
+                "This loading bar goes to 11.",
+                "Hello Cleveland! (Connecting to server)",
+                "It's such a fine line between stupid, and clever. (And loaded)",
+
+                // Wayne's World
+                "Party on, Garth! (Buffering on, Wayne!)",
+                "We're not worthy! (Of this connection speed)",
+                "Schwing! (Data acquired)",
+
+                // Almost Famous
+                "I am a Golden God! (Of data processing)",
+                "It's all happening! (Slowly)",
+
+                // School of Rock
+                "You're not hardcore unless you live hardcore! (And wait hardcore)",
+                "Stick it to the Man! (The internet provider)",
+
+                // Blues Brothers
+                "We're on a mission from God. (To find this track)",
+                "It's 106 miles to Chicago, we got a full tank of gas, half a pack of cigarettes, it's dark... and we're loading."
+            ];
+            
+            let loadingMessageInterval = null;
+            let loadingMessageElement = null;
+            
+            // History Panel Toggle
+            function openHistoryPanel() {
+                historyPanel.classList.add('open');
+                historyOverlay.classList.add('visible');
+                document.body.style.overflow = 'hidden';
+            }
+            
+            function closeHistoryPanel() {
+                historyPanel.classList.remove('open');
+                historyOverlay.classList.remove('visible');
+                document.body.style.overflow = '';
+            }
+            
+            toggleHistoryBtn.addEventListener('click', openHistoryPanel);
+            closeHistoryBtn.addEventListener('click', closeHistoryPanel);
+            historyOverlay.addEventListener('click', closeHistoryPanel);
+            
+            // Session Management
+            async function loadSessions() {
+                try {
+                    const response = await fetch('/api/chat/sessions');
+                    const sessions = await response.json();
+                    renderSessionList(sessions);
+                    
+                    if (!currentSessionId && sessions.length > 0) {
+                        loadChat(sessions[0].id);
+                    } else if (sessions.length === 0) {
+                        startNewChat();
+                    }
+                } catch (error) {
+                    console.error('Error loading sessions:', error);
+                    sessionsList.innerHTML = '<div class="error-message">Failed to load history</div>';
+                }
+            }
+            
+            function renderSessionList(sessions) {
+                sessionsList.innerHTML = '';
+                
+                if (sessions.length === 0) {
+                    sessionsList.innerHTML = '<div class="empty-history">No chat history yet</div>';
+                    return;
+                }
+                
+                sessions.forEach(session => {
+                    const sessionItem = document.createElement('div');
+                    sessionItem.className = `session-item ${session.id === currentSessionId ? 'active' : ''}`;
+                    sessionItem.dataset.sessionId = session.id;
+                    
+                    const sessionHeader = document.createElement('div');
+                    sessionHeader.className = 'session-header';
+                    sessionHeader.onclick = () => {
+                        loadChat(session.id);
+                        closeHistoryPanel();
+                    };
+                    
+                    const titleSpan = document.createElement('span');
+                    titleSpan.className = 'session-title';
+                    titleSpan.textContent = session.title || 'New Chat';
+                    
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'delete-session-btn';
+                    deleteBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>';
+                    deleteBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        deleteChat(session.id);
+                    };
+                    
+                    sessionHeader.appendChild(titleSpan);
+                    sessionHeader.appendChild(deleteBtn);
+                    sessionItem.appendChild(sessionHeader);
+                    sessionsList.appendChild(sessionItem);
+                });
+            }
+            
+            async function loadChat(sessionId) {
+                if (currentSessionId === sessionId) return;
+                
+                if (currentSessionId) {
+                    summarizeSession(currentSessionId);
+                }
+                
+                try {
+                    const response = await fetch(`/api/chat/sessions/${sessionId}`);
+                    if (!response.ok) throw new Error('Failed to load chat');
+                    
+                    const data = await response.json();
+                    currentSessionId = sessionId;
+                    
+                    currentChatTitle.textContent = data.session.title || 'Music Concierge';
+                    chatWindow.innerHTML = '';
+                    
+                    if (data.messages.length === 0) {
+                        appendMessage("Hello! I'm your Musical Agent. How can I help you with your music today?", 'agent');
+                    } else {
+                        data.messages.forEach(msg => {
+                            appendMessage(msg.content, msg.role === 'user' ? 'user' : 'agent');
+                        });
+                    }
+                    
+                    loadSessions();
+                } catch (error) {
+                    console.error('Error loading chat:', error);
+                    showToast('Failed to load chat');
+                }
+            }
+            
+            async function startNewChat() {
+                currentSessionId = null;
+                currentChatTitle.textContent = 'Music Concierge';
+                chatWindow.innerHTML = '';
+                appendMessage("Hello! I'm your Musical Agent. How can I help you with your music today?", 'agent');
+                
+                const sessions = await (await fetch('/api/chat/sessions')).json();
+                renderSessionList(sessions);
+            }
+            
+            async function deleteChat(sessionId) {
+                if (!confirm('Delete this chat?')) return;
+                
+                try {
+                    await fetch(`/api/chat/sessions/${sessionId}`, { method: 'DELETE' });
+                    if (currentSessionId === sessionId) {
+                        startNewChat();
+                    } else {
+                        loadSessions();
+                    }
+                } catch (error) {
+                    console.error('Error deleting chat:', error);
+                    showToast('Failed to delete chat');
+                }
+            }
+            
+            async function saveMessage(sessionId, role, content) {
+                try {
+                    await fetch(`/api/chat/sessions/${sessionId}/messages`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ role, content })
+                    });
+                } catch (error) {
+                    console.error('Error saving message:', error);
+                }
+            }
+            
+            async function summarizeSession(sessionId) {
+                if (!sessionId) return;
+                try {
+                    await fetch(`/api/chat/sessions/${sessionId}/summarize`, { method: 'POST' });
+                } catch (error) {
+                    console.error('Error summarizing session:', error);
+                }
+            }
+            
+            // Message Functions
+            function appendMessage(text, sender) {
+                const msgDiv = document.createElement('div');
+                msgDiv.className = `message ${sender}-message`;
+                
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+                
+                if (sender === 'agent' && typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+                    try {
+                        const rawHtml = marked.parse(text);
+                        const cleanHtml = DOMPurify.sanitize(rawHtml);
+                        contentDiv.innerHTML = cleanHtml;
+                    } catch (e) {
+                        contentDiv.textContent = text;
+                    }
+                } else {
+                    contentDiv.textContent = text;
+                }
+                
+                msgDiv.appendChild(contentDiv);
+                chatWindow.appendChild(msgDiv);
+                scrollToBottom();
+            }
+            
+            function scrollToBottom() {
+                requestAnimationFrame(() => {
+                    chatWindow.scrollTop = chatWindow.scrollHeight;
+                });
+            }
+            
+            function showTypingIndicator() {
+                const msgDiv = document.createElement('div');
+                msgDiv.className = 'message agent-message';
+                msgDiv.id = 'typing-indicator';
+                
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'typing-indicator';
+                
+                for (let i = 0; i < 3; i++) {
+                    const dot = document.createElement('span');
+                    dot.className = 'dot';
+                    contentDiv.appendChild(dot);
+                }
+                
+                msgDiv.appendChild(contentDiv);
+                chatWindow.appendChild(msgDiv);
+                scrollToBottom();
+                
+                setTimeout(() => {
+                    if (document.getElementById('typing-indicator')) {
+                        loadingMessageElement = document.createElement('div');
+                        loadingMessageElement.className = 'loading-message';
+                        loadingMessageElement.textContent = loadingMessages[Math.floor(Math.random() * loadingMessages.length)];
+                        chatWindow.appendChild(loadingMessageElement);
+                        scrollToBottom();
+                        
+                        loadingMessageInterval = setInterval(() => {
+                            if (loadingMessageElement) {
+                                loadingMessageElement.textContent = loadingMessages[Math.floor(Math.random() * loadingMessages.length)];
+                            }
+                        }, 5000);
+                    }
+                }, 8000);
+            }
+            
+            function removeTypingIndicator() {
+                const indicator = document.getElementById('typing-indicator');
+                if (indicator) indicator.remove();
+                
+                if (loadingMessageInterval) {
+                    clearInterval(loadingMessageInterval);
+                    loadingMessageInterval = null;
+                }
+                if (loadingMessageElement) {
+                    loadingMessageElement.remove();
+                    loadingMessageElement = null;
+                }
+            }
+            
+            function showToast(message) {
+                const toast = document.createElement('div');
+                toast.className = 'toast';
+                toast.textContent = message;
+                document.body.appendChild(toast);
+                
+                setTimeout(() => toast.classList.add('visible'), 10);
+                setTimeout(() => {
+                    toast.classList.remove('visible');
+                    setTimeout(() => toast.remove(), 300);
+                }, 3000);
+            }
+            
+            // Send Message
+            async function handleSend() {
+                const text = userInput.value.trim();
+                if (!text) return;
+                
+                if (!currentSessionId) {
+                    try {
+                        const resp = await fetch('/api/chat/sessions', { method: 'POST' });
+                        const data = await resp.json();
+                        currentSessionId = data.id;
+                        loadSessions();
+                    } catch (e) {
+                        console.error("Failed to create session", e);
+                        showToast("Failed to start chat");
+                        return;
+                    }
+                }
+                
+                appendMessage(text, 'user');
+                userInput.value = '';
+                userInput.focus();
+                
+                await saveMessage(currentSessionId, 'user', text);
+                
+                showTypingIndicator();
+                
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 500000);
+                    
+                    const response = await fetch(webhookUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            input: text,
+                            uid: currentSessionId
+                        }),
+                        signal: controller.signal
+                    });
+                    
+                    clearTimeout(timeoutId);
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    removeTypingIndicator();
+                    
+                    const answer = data.answer || "Received a response, but couldn't find the answer.";
+                    appendMessage(answer, 'agent');
+                    await saveMessage(currentSessionId, 'assistant', answer);
+                    
+                } catch (error) {
+                    removeTypingIndicator();
+                    let errorMsg = '';
+                    if (error.name === 'AbortError') {
+                        errorMsg = 'Request timed out. Please try again.';
+                    } else if (error.message) {
+                        errorMsg = `Error: ${error.message}`;
+                    } else {
+                        errorMsg = 'Failed to send message. Please check your connection and try again.';
+                    }
+                    console.error('Chat error:', error);
+                    appendMessage(errorMsg, 'agent');
+                    await saveMessage(currentSessionId, 'assistant', errorMsg);
+                }
+            }
+            
+            // Event Listeners
+            sendBtn.addEventListener('click', handleSend);
+            newChatBtn.addEventListener('click', () => {
+                startNewChat();
+                closeHistoryPanel();
+            });
+            
+            userInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                }
+            });
+            
+            // Summarize on visibility change
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'hidden' && currentSessionId) {
+                    summarizeSession(currentSessionId);
+                }
+            });
+            
+            // Prevent zoom on double-tap
+            let lastTouchEnd = 0;
+            document.addEventListener('touchend', (e) => {
+                const now = Date.now();
+                if (now - lastTouchEnd <= 300) {
+                    e.preventDefault();
+                }
+                lastTouchEnd = now;
+            }, false);
+            
+            // Handle iOS keyboard
+            if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+                userInput.addEventListener('focus', () => {
+                    setTimeout(() => scrollToBottom(), 300);
+                });
+            }
+            
+            // Initial load
+            loadSessions();
+            userInput.focus();
+        });
+    </script>
+</body>
+</html>
+
