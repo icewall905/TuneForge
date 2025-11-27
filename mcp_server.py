@@ -175,9 +175,169 @@ def find_similar_songs(
 
 
 
+def _parse_query(query: str) -> Dict[str, Any]:
+    """
+    Parse and normalize search query to handle combined queries, case normalization, and partial matches.
+    Enhanced version with better special character handling and improved combined query parsing.
+    
+    Args:
+        query: The raw search query
+        
+    Returns:
+        Dictionary with parsed components: 'original', 'normalized', 'title', 'artist', 'is_genre', 'variations', 'search_terms'
+    """
+    import re
+    from urllib.parse import quote, unquote
+    
+    original = query.strip()
+    normalized = original.lower().strip()
+    
+    # Common artist name expansions for partial matches
+    artist_expansions = {
+        'beatles': 'The Beatles',
+        'rhcp': 'Red Hot Chili Peppers',
+        'zeppelin': 'Led Zeppelin',
+        'floyd': 'Pink Floyd',
+        'rem': 'R.E.M.',
+        'acdc': 'AC/DC',
+    }
+    
+    # Try to parse combined queries like "Song Title Artist Name"
+    # Try multiple patterns for better parsing
+    words = normalized.split()
+    title = None
+    artist = None
+    search_terms = []  # List of search terms to try
+    
+    # Pattern 1: "Song Title Artist Name" (last 2 words = artist)
+    if len(words) >= 3:
+        potential_artist = ' '.join(words[-2:])
+        potential_title = ' '.join(words[:-2])
+        
+        # Check if potential artist matches known patterns
+        for partial, full in artist_expansions.items():
+            if partial in potential_artist:
+                artist = full
+                title = potential_title
+                search_terms.append((potential_title, full))
+                break
+        
+        # If no expansion found, use heuristic split
+        if not artist:
+            artist = potential_artist
+            title = potential_title
+            search_terms.append((potential_title, potential_artist))
+        
+        # Also try reversed pattern: "Artist Song Title" (first 2 words = artist)
+        potential_artist_rev = ' '.join(words[:2])
+        potential_title_rev = ' '.join(words[2:])
+        for partial, full in artist_expansions.items():
+            if partial in potential_artist_rev:
+                search_terms.append((potential_title_rev, full))
+                break
+        if potential_title_rev:
+            search_terms.append((potential_title_rev, potential_artist_rev))
+            
+    elif len(words) == 2:
+        # Could be "Title Artist" or just two words
+        # Try both interpretations
+        title = words[0]
+        artist = words[1]
+        search_terms.append((words[0], words[1]))
+        # Also try reversed
+        search_terms.append((words[1], words[0]))
+    
+    # Check for genre keywords
+    genre_keywords = ['rock', 'pop', 'jazz', 'classical', 'electronic', 'hip hop', 'rap', 'country', 
+                     'blues', 'folk', 'metal', 'punk', 'reggae', 'r&b', 'soul', 'funk', 'disco',
+                     'techno', 'house', 'trance', 'dubstep', 'indie', 'alternative', 'grunge']
+    is_genre = any(keyword in normalized for keyword in genre_keywords) or len(words) <= 2
+    
+    # Generate query variations for partial matches and special characters
+    variations = [normalized]
+    
+    # Add expansion if available
+    if normalized in artist_expansions:
+        variations.append(artist_expansions[normalized].lower())
+    
+    # Handle special characters - try both with and without encoding
+    # Some Plex queries work better with special chars, some need encoding
+    if any(char in original for char in ['.', '/', '&', "'"]):
+        # Try original with special chars
+        variations.append(original)
+        # Try normalized version
+        variations.append(normalized)
+        # Try with dots/slashes removed or replaced
+        cleaned = normalized.replace('.', '').replace('/', ' ').replace('&', 'and')
+        if cleaned != normalized:
+            variations.append(cleaned)
+    
+    # URL-encode variations for API calls (but keep original for some queries)
+    encoded_variations = []
+    for var in variations:
+        # Try both encoded and unencoded
+        encoded_variations.append(var)  # Unencoded first
+        encoded = quote(var, safe=' /')  # Keep spaces and slashes for readability
+        if encoded != var:
+            encoded_variations.append(encoded)
+    
+    return {
+        'original': original,
+        'normalized': normalized,
+        'title': title,
+        'artist': artist,
+        'is_genre': is_genre,
+        'variations': list(set(variations)),  # Remove duplicates
+        'encoded_variations': list(set(encoded_variations)),
+        'search_terms': search_terms,
+        'words': words
+    }
+
+
+def _search_plex_tracks_with_retry(url: str, headers: Dict, params: Dict, timeout: int = 5, max_retries: int = 2) -> Optional[requests.Response]:
+    """
+    Make a Plex API request with retry logic and exponential backoff.
+    
+    Args:
+        url: The URL to request
+        headers: Request headers
+        params: Request parameters
+        timeout: Request timeout in seconds
+        max_retries: Maximum number of retries
+        
+    Returns:
+        Response object if successful, None otherwise
+    """
+    import time
+    
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=timeout)
+            response.raise_for_status()
+            return response
+        except (requests.Timeout, requests.ConnectionError) as e:
+            if attempt < max_retries:
+                wait_time = (2 ** attempt) * 0.5  # Exponential backoff: 0.5s, 1s, 2s
+                logger.debug(f"Plex API request failed (attempt {attempt + 1}/{max_retries + 1}), retrying in {wait_time}s: {e}")
+                time.sleep(wait_time)
+            else:
+                logger.debug(f"Plex API request failed after {max_retries + 1} attempts: {e}")
+                return None
+        except Exception as e:
+            logger.debug(f"Plex API request error: {e}")
+            return None
+    return None
+
+
 def _search_plex_tracks(query: str, limit: int) -> List[Dict[str, Any]]:
     """
     Helper function to search for tracks in Plex.
+    Enhanced version with:
+    - Better special character handling
+    - Improved combined query parsing
+    - Fallback search strategies
+    - Retry logic for timeouts
+    - Better result prioritization
     
     Args:
         query: The search query
@@ -193,119 +353,222 @@ def _search_plex_tracks(query: str, limit: int) -> List[Dict[str, Any]]:
     
     if not all([url, token, section_id]):
         return []
-        
+    
+    # Parse and normalize query
+    parsed = _parse_query(query)
+    query_lower = parsed['normalized']
+    
     try:
         headers = {'X-Plex-Token': token, 'Accept': 'application/json'}
-        metadata = []
         all_url = f"{url.rstrip('/')}/library/sections/{section_id}/all"
         search_url = f"{url.rstrip('/')}/library/sections/{section_id}/search"
-        query_lower = query.lower().strip()
         
-        # Strategy 1: Try genre filtering if the query looks like a genre
-        genre_keywords = ['rock', 'pop', 'jazz', 'classical', 'electronic', 'hip hop', 'rap', 'country', 
-                        'blues', 'folk', 'metal', 'punk', 'reggae', 'r&b', 'soul', 'funk', 'disco',
-                        'techno', 'house', 'trance', 'dubstep', 'indie', 'alternative', 'grunge']
+        # Track results from different strategies separately for prioritization
+        general_search_results = []  # Results from general search (Plex's prioritized results)
+        artist_search_results = []  # Results from artist search
+        fallback_results = []  # Results from fallback strategies
+        seen_ids = set()
         
-        might_be_genre = any(keyword in query_lower for keyword in genre_keywords) or len(query.split()) <= 2
-        
-        if might_be_genre:
+        # Strategy 1: General text search FIRST (gets Plex's prioritized results)
+        # This is the most important strategy as it returns what Plex thinks are the best matches
+        # Try both encoded and unencoded variations
+        all_variations = parsed.get('encoded_variations', parsed['variations'])
+        for query_variant in all_variations:
             try:
-                genre_params = {'type': '10', 'genre.tag': query, 'X-Plex-Token': token}
-                response = requests.get(all_url, headers=headers, params=genre_params, timeout=10)
-                response.raise_for_status()
-                data = response.json()
-                genre_tracks = data.get('MediaContainer', {}).get('Metadata', [])
-                if genre_tracks:
-                    metadata.extend(genre_tracks)
+                track_params = {'type': '10', 'query': query_variant, 'X-Plex-Token': token}
+                response = _search_plex_tracks_with_retry(search_url, headers, track_params, timeout=5)
+                if response:
+                    data = response.json()
+                    general_metadata = data.get('MediaContainer', {}).get('Metadata', [])
+                    
+                    for track in general_metadata:
+                        track_id = track.get('ratingKey')
+                        if track_id and track_id not in seen_ids:
+                            seen_ids.add(track_id)
+                            general_search_results.append(track)
+                    
+                    # If we got results, prioritize this variant
+                    if general_metadata:
+                        break
             except Exception as e:
-                logger.debug(f"Plex: Genre filter failed for '{query}': {e}")
-                pass
+                logger.debug(f"Plex: General search failed for '{query_variant}': {e}")
+                continue
         
-        # Strategy 2: Try to find the artist first, then get all their tracks
-        if not metadata or len(metadata) < limit:
-            artist_params = {'type': '8', 'query': query, 'X-Plex-Token': token}
-            
+        # Strategy 2: Try parsed title/artist combinations from combined queries
+        if parsed.get('search_terms'):
+            for title_term, artist_term in parsed['search_terms']:
+                # Try searching with title
+                try:
+                    track_params = {'type': '10', 'query': title_term, 'X-Plex-Token': token}
+                    response = _search_plex_tracks_with_retry(search_url, headers, track_params, timeout=5)
+                    if response:
+                        data = response.json()
+                        tracks = data.get('MediaContainer', {}).get('Metadata', [])
+                        for track in tracks:
+                            track_id = track.get('ratingKey')
+                            if track_id and track_id not in seen_ids:
+                                seen_ids.add(track_id)
+                                general_search_results.append(track)
+                except Exception as e:
+                    logger.debug(f"Plex: Parsed title search failed for '{title_term}': {e}")
+                
+                # Try searching with artist
+                try:
+                    track_params = {'type': '10', 'query': artist_term, 'X-Plex-Token': token}
+                    response = _search_plex_tracks_with_retry(search_url, headers, track_params, timeout=5)
+                    if response:
+                        data = response.json()
+                        tracks = data.get('MediaContainer', {}).get('Metadata', [])
+                        for track in tracks:
+                            track_id = track.get('ratingKey')
+                            if track_id and track_id not in seen_ids:
+                                seen_ids.add(track_id)
+                                general_search_results.append(track)
+                except Exception as e:
+                    logger.debug(f"Plex: Parsed artist search failed for '{artist_term}': {e}")
+        
+        # Strategy 3: Try to find the artist, then get all their tracks (supplement general search)
+        # This ensures we get ALL tracks from an artist, not just prioritized ones
+        for query_variant in parsed['variations']:
             try:
-                response = requests.get(search_url, headers=headers, params=artist_params, timeout=10)
-                response.raise_for_status()
+                artist_params = {'type': '8', 'query': query_variant, 'X-Plex-Token': token}
+                response = _search_plex_tracks_with_retry(search_url, headers, artist_params, timeout=5)
+                if not response:
+                    continue
+                    
                 data = response.json()
                 artist_results = data.get('MediaContainer', {}).get('Metadata', [])
                 
+                # Find matching artist (exact or partial match)
                 matching_artist = None
                 for artist in artist_results:
                     artist_title = artist.get('title', '').lower()
-                    if artist_title == query_lower or query_lower in artist_title or artist_title in query_lower:
+                    if (artist_title == query_variant or 
+                        query_variant in artist_title or 
+                        artist_title in query_variant):
                         matching_artist = artist
                         break
                 
                 if matching_artist:
                     artist_id = matching_artist.get('ratingKey')
-                    track_params = {'type': '10', 'artist.id': artist_id, 'X-Plex-Token': token}
-                    
-                    try:
-                        response = requests.get(all_url, headers=headers, params=track_params, timeout=10)
-                        response.raise_for_status()
-                        data = response.json()
-                        artist_tracks = data.get('MediaContainer', {}).get('Metadata', [])
-                        if artist_tracks:
-                            existing_ids = {track.get('ratingKey') for track in metadata}
+                    if artist_id:
+                        track_params = {'type': '10', 'artist.id': artist_id, 'X-Plex-Token': token}
+                        response = _search_plex_tracks_with_retry(all_url, headers, track_params, timeout=5)
+                        if response:
+                            data = response.json()
+                            artist_tracks = data.get('MediaContainer', {}).get('Metadata', [])
+                            
                             for track in artist_tracks:
-                                if track.get('ratingKey') not in existing_ids:
-                                    metadata.append(track)
-                    except Exception as e:
-                        logger.debug(f"Plex: Failed to get tracks for artist: {e}")
-                        pass
+                                track_id = track.get('ratingKey')
+                                if track_id and track_id not in seen_ids:
+                                    seen_ids.add(track_id)
+                                    artist_search_results.append(track)
+                
+                # If we found an artist match, break
+                if matching_artist:
+                    break
             except Exception as e:
-                logger.debug(f"Plex: Artist search failed: {e}")
-                pass
+                logger.debug(f"Plex: Artist search failed for '{query_variant}': {e}")
+                continue
         
-        # Strategy 3: General text search
-        if not metadata or len(metadata) < limit:
-            track_params = {'type': '10', 'query': query, 'X-Plex-Token': token}
-            
+        # Strategy 4: Fallback - Direct artist filter by name
+        if not general_search_results and not artist_search_results:
+            for query_variant in parsed['variations']:
+                try:
+                    # Try direct filter by artist name
+                    params = {'type': '10', 'grandparentTitle': query_variant, 'X-Plex-Token': token}
+                    response = _search_plex_tracks_with_retry(all_url, headers, params, timeout=5)
+                    if response:
+                        data = response.json()
+                        tracks = data.get('MediaContainer', {}).get('Metadata', [])
+                        for track in tracks:
+                            track_id = track.get('ratingKey')
+                            if track_id and track_id not in seen_ids:
+                                seen_ids.add(track_id)
+                                fallback_results.append(track)
+                        if tracks:
+                            break
+                except Exception as e:
+                    logger.debug(f"Plex: Direct artist filter failed for '{query_variant}': {e}")
+                    continue
+        
+        # Strategy 5: Fallback - Direct title filter
+        if not general_search_results and not artist_search_results and not fallback_results:
+            for query_variant in parsed['variations']:
+                try:
+                    params = {'type': '10', 'title': query_variant, 'X-Plex-Token': token}
+                    response = _search_plex_tracks_with_retry(all_url, headers, params, timeout=5)
+                    if response:
+                        data = response.json()
+                        tracks = data.get('MediaContainer', {}).get('Metadata', [])
+                        for track in tracks:
+                            track_id = track.get('ratingKey')
+                            if track_id and track_id not in seen_ids:
+                                seen_ids.add(track_id)
+                                fallback_results.append(track)
+                        if tracks:
+                            break
+                except Exception as e:
+                    logger.debug(f"Plex: Direct title filter failed for '{query_variant}': {e}")
+                    continue
+        
+        # Strategy 6: Try genre filtering if the query looks like a genre
+        if parsed['is_genre']:
             try:
-                response = requests.get(search_url, headers=headers, params=track_params, timeout=10)
-                response.raise_for_status()
-                data = response.json()
-                general_metadata = data.get('MediaContainer', {}).get('Metadata', [])
-                
-                existing_ids = {track.get('ratingKey') for track in metadata}
-                exact_matches = []
-                artist_matches = []
-                title_matches = []
-                other_matches = []
-                
-                for track in general_metadata:
-                    track_id = track.get('ratingKey')
-                    if track_id in existing_ids:
-                        continue
-                    
-                    title = track.get('title', '').lower()
-                    artist = track.get('grandparentTitle', '').lower()
-                    
-                    if query_lower == title or query_lower == artist:
-                        exact_matches.append(track)
-                    elif artist and query_lower in artist:
-                        artist_matches.append(track)
-                    elif title and query_lower in title:
-                        title_matches.append(track)
-                    else:
-                        other_matches.append(track)
-                
-                metadata = metadata + exact_matches + artist_matches + title_matches + other_matches
+                genre_params = {'type': '10', 'genre.tag': parsed['original'], 'X-Plex-Token': token}
+                response = _search_plex_tracks_with_retry(all_url, headers, genre_params, timeout=5)
+                if response:
+                    data = response.json()
+                    genre_tracks = data.get('MediaContainer', {}).get('Metadata', [])
+                    for track in genre_tracks:
+                        track_id = track.get('ratingKey')
+                        if track_id and track_id not in seen_ids:
+                            seen_ids.add(track_id)
+                            fallback_results.append(track)
             except Exception as e:
-                logger.debug(f"Plex: General search failed: {e}")
+                logger.debug(f"Plex: Genre filter failed for '{query}': {e}")
                 pass
         
+        # Merge results: prioritize general search results (Plex's ordering), then supplement
+        all_metadata = general_search_results + artist_search_results + fallback_results
+        
+        # Now categorize and prioritize results by match quality
+        exact_matches = []
+        artist_matches = []
+        title_matches = []
+        other_matches = []
+        
+        for track in all_metadata:
+            title = (track.get('title') or '').lower()
+            artist = (track.get('grandparentTitle') or '').lower()
+            
+            # Exact match (title or artist exactly matches query)
+            if query_lower == title or query_lower == artist:
+                exact_matches.append(track)
+            # Artist match (query is in artist name)
+            elif artist and query_lower in artist:
+                artist_matches.append(track)
+            # Title match (query is in title)
+            elif title and query_lower in title:
+                title_matches.append(track)
+            # Other matches
+            else:
+                other_matches.append(track)
+        
+        # Combine in priority order: exact > artist > title > other
+        # But preserve general_search_results ordering within each category
+        prioritized_metadata = exact_matches + artist_matches + title_matches + other_matches
+        
+        # Convert to result format and limit
         results = []
-        if metadata:
-            for track in metadata[:int(limit)]:
-                results.append({
-                    'id': track.get('ratingKey'),
-                    'title': track.get('title'),
-                    'artist': track.get('grandparentTitle'),
-                    'album': track.get('parentTitle')
-                })
+        for track in prioritized_metadata[:int(limit)]:
+            results.append({
+                'id': track.get('ratingKey'),
+                'title': track.get('title'),
+                'artist': track.get('grandparentTitle'),
+                'album': track.get('parentTitle')
+            })
+        
         return results
         
     except Exception as e:
