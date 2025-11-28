@@ -116,8 +116,9 @@
             
             let currentSessionId = null;
             let expandedSessions = new Set();
+            let progressEventSource = null;  // SSE connection for progress updates
             
-            // Humorous loading messages
+            // Humorous loading messages (used as fallback when no n8n progress)
             const loadingMessages = [
                 "Still thinking...",
                 "This is really hard...",
@@ -647,6 +648,11 @@
                 chatWindow.appendChild(msgDiv);
                 scrollToBottom();
                 
+                // Start SSE progress stream if we have a session ID
+                if (currentSessionId) {
+                    startProgressStream(currentSessionId);
+                }
+                
                 setTimeout(() => {
                     if (document.getElementById('typing-indicator')) {
                         loadingMessageElement = document.createElement('div');
@@ -655,18 +661,86 @@
                         chatWindow.appendChild(loadingMessageElement);
                         scrollToBottom();
                         
+                        // Only cycle through fallback messages if no progress updates received
                         loadingMessageInterval = setInterval(() => {
-                            if (loadingMessageElement) {
+                            if (loadingMessageElement && !loadingMessageElement.dataset.fromN8n) {
                                 loadingMessageElement.textContent = loadingMessages[Math.floor(Math.random() * loadingMessages.length)];
                             }
-                        }, 5000);
+                        }, 8000);
                     }
-                }, 8000);
+                }, 3000);
+            }
+            
+            function startProgressStream(sessionId) {
+                // Close any existing stream
+                if (progressEventSource) {
+                    progressEventSource.close();
+                    progressEventSource = null;
+                }
+
+                try {
+                    progressEventSource = new EventSource(`/api/chat/progress/${sessionId}/stream`);
+
+                    progressEventSource.onmessage = function(event) {
+                        try {
+                            const data = JSON.parse(event.data);
+                            
+                            // Skip connection message
+                            if (data.status === 'connected') return;
+
+                            // Update the loading message with progress from n8n
+                            if (loadingMessageElement && data.message) {
+                                loadingMessageElement.textContent = data.message;
+                                loadingMessageElement.dataset.fromN8n = 'true';
+                                scrollToBottom();
+                            } else if (!loadingMessageElement && data.message && document.getElementById('typing-indicator')) {
+                                // Create loading message element if it doesn't exist yet
+                                loadingMessageElement = document.createElement('div');
+                                loadingMessageElement.className = 'loading-message';
+                                loadingMessageElement.textContent = data.message;
+                                loadingMessageElement.dataset.fromN8n = 'true';
+                                chatWindow.appendChild(loadingMessageElement);
+                                scrollToBottom();
+                            }
+
+                            // Close stream if status is final
+                            if (data.status === 'complete' || data.status === 'success' || data.status === 'error') {
+                                if (progressEventSource) {
+                                    progressEventSource.close();
+                                    progressEventSource = null;
+                                }
+                            }
+                        } catch (e) {
+                            console.error('Error parsing progress event:', e);
+                        }
+                    };
+
+                    progressEventSource.onerror = function(event) {
+                        console.log('Progress stream closed or error');
+                        if (progressEventSource) {
+                            progressEventSource.close();
+                            progressEventSource = null;
+                        }
+                    };
+                } catch (e) {
+                    console.error('Failed to start progress stream:', e);
+                }
             }
             
             function removeTypingIndicator() {
                 const indicator = document.getElementById('typing-indicator');
                 if (indicator) indicator.remove();
+                
+                // Close SSE progress stream
+                if (progressEventSource) {
+                    progressEventSource.close();
+                    progressEventSource = null;
+                }
+
+                // Clear progress on server (fire and forget)
+                if (currentSessionId) {
+                    fetch(`/api/chat/progress/${currentSessionId}`, { method: 'DELETE' }).catch(() => {});
+                }
                 
                 if (loadingMessageInterval) {
                     clearInterval(loadingMessageInterval);

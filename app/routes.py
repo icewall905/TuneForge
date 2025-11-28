@@ -1521,6 +1521,122 @@ def update_chat_session(session_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# --- Chat Progress Updates (for n8n workflow status) ---
+# In-memory store for progress updates (session_id -> progress data)
+# Note: This is cleared on server restart, which is fine for transient progress
+_chat_progress_store = {}
+_chat_progress_lock = threading.Lock()
+
+@main_bp.route('/api/chat/progress/<session_id>', methods=['POST'])
+def update_chat_progress(session_id):
+    """
+    Receive progress updates from n8n workflow.
+    
+    Expected JSON body:
+    {
+        "message": "Searching for tracks...",
+        "status": "progress",  // progress, success, error, complete
+        "step": "discovery",   // optional: discovery, search, matching, creating
+        "details": {}          // optional: any additional data
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        message = data.get('message', 'Processing...')
+        status = data.get('status', 'progress')
+        step = data.get('step', '')
+        details = data.get('details', {})
+        
+        progress_data = {
+            'message': message,
+            'status': status,
+            'step': step,
+            'details': details,
+            'timestamp': time.time()
+        }
+        
+        with _chat_progress_lock:
+            _chat_progress_store[session_id] = progress_data
+        
+        debug_log(f"Chat progress update for {session_id}: {message} (status: {status})", "DEBUG")
+        return jsonify({'success': True})
+    except Exception as e:
+        debug_log(f"Error updating chat progress: {e}", "ERROR")
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/chat/progress/<session_id>', methods=['GET'])
+def get_chat_progress(session_id):
+    """Get current progress for a session (for polling)"""
+    with _chat_progress_lock:
+        progress = _chat_progress_store.get(session_id)
+    
+    if progress:
+        return jsonify(progress)
+    else:
+        return jsonify({'message': 'No progress yet', 'status': 'waiting'})
+
+@main_bp.route('/api/chat/progress/<session_id>/stream')
+def stream_chat_progress(session_id):
+    """
+    Stream progress updates to frontend via Server-Sent Events (SSE).
+    
+    The frontend connects to this endpoint when showing the typing indicator.
+    Progress updates from n8n are pushed to the client in real-time.
+    """
+    def generate():
+        last_timestamp = 0
+        no_update_count = 0
+        max_wait_seconds = 600  # 10 minutes max wait
+        
+        # Send initial connection message
+        yield f"data: {json.dumps({'message': 'Connected', 'status': 'connected', 'timestamp': time.time()})}\n\n"
+        
+        while no_update_count < (max_wait_seconds * 2):  # Check every 0.5s
+            with _chat_progress_lock:
+                current = _chat_progress_store.get(session_id)
+            
+            if current and current.get('timestamp', 0) > last_timestamp:
+                last_timestamp = current['timestamp']
+                no_update_count = 0  # Reset counter on new update
+                yield f"data: {json.dumps(current)}\n\n"
+                
+                # Stop streaming if status is final
+                if current['status'] in ['success', 'error', 'complete']:
+                    # Clean up the progress store after a short delay
+                    def cleanup():
+                        time.sleep(5)
+                        with _chat_progress_lock:
+                            if session_id in _chat_progress_store:
+                                del _chat_progress_store[session_id]
+                    threading.Thread(target=cleanup, daemon=True).start()
+                    break
+            else:
+                no_update_count += 1
+            
+            time.sleep(0.5)  # Check every 500ms
+        
+        # Send timeout message if we hit max wait
+        if no_update_count >= (max_wait_seconds * 2):
+            yield f"data: {json.dumps({'message': 'Progress stream timeout', 'status': 'timeout', 'timestamp': time.time()})}\n\n"
+    
+    response = Response(generate(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['Connection'] = 'keep-alive'
+    response.headers['X-Accel-Buffering'] = 'no'  # Disable nginx buffering
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return response
+
+@main_bp.route('/api/chat/progress/<session_id>', methods=['DELETE'])
+def clear_chat_progress(session_id):
+    """Clear progress for a session (called when chat completes)"""
+    with _chat_progress_lock:
+        if session_id in _chat_progress_store:
+            del _chat_progress_store[session_id]
+    return jsonify({'success': True})
+
 def title_needs_summarization(session_id, title, messages):
     """
     Check if a chat session title needs AI-generated summarization.
