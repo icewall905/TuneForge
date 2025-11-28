@@ -3648,12 +3648,110 @@ def get_auto_recovery():
             
             # Initialize auto-recovery with restart callback
             def restart_analysis_callback():
-                """Callback to restart audio analysis"""
+                """Callback to restart audio analysis - resets stuck tracks and restarts processing"""
                 try:
-                    # This will be called by the auto-recovery system
-                    # We'll implement the actual restart logic here
                     debug_log("Auto-recovery: Attempting to restart audio analysis", "INFO")
-                    return True  # For now, assume success
+                    
+                    # First, reset stuck tracks that have been in 'analyzing' status too long
+                    from audio_analysis_service import AudioAnalysisService
+                    service = AudioAnalysisService()
+                    db_path = service.db_path
+                    
+                    import sqlite3
+                    with sqlite3.connect(db_path) as conn:
+                        # Reset tracks stuck in 'analyzing' for more than 10 minutes
+                        cursor = conn.execute("""
+                            SELECT COUNT(*) 
+                            FROM tracks 
+                            WHERE analysis_status = 'analyzing' 
+                            AND (analysis_started_at IS NULL 
+                                 OR analysis_started_at < datetime('now', '-10 minutes'))
+                        """)
+                        stuck_count = cursor.fetchone()[0]
+                        
+                        if stuck_count > 0:
+                            debug_log(f"Auto-recovery: Resetting {stuck_count} stuck tracks from 'analyzing' to 'pending'", "INFO")
+                            
+                            # Reset stuck tracks back to pending (but preserve attempt count for files with many failures)
+                            conn.execute("""
+                                UPDATE tracks 
+                                SET analysis_status = 'pending',
+                                    analysis_started_at = NULL,
+                                    analysis_completed_at = NULL
+                                WHERE analysis_status = 'analyzing' 
+                                AND (analysis_started_at IS NULL 
+                                     OR analysis_started_at < datetime('now', '-10 minutes'))
+                                AND analysis_attempts < 3
+                            """)
+                            
+                            # Mark files with 3+ attempts as ignored to prevent infinite loops
+                            ignored_count = conn.execute("""
+                                UPDATE tracks 
+                                SET analysis_status = 'ignored',
+                                    analysis_error = 'Auto-recovery: Too many analysis attempts, permanently skipped',
+                                    analysis_started_at = NULL,
+                                    analysis_completed_at = NULL
+                                WHERE analysis_status = 'analyzing' 
+                                AND (analysis_started_at IS NULL 
+                                     OR analysis_started_at < datetime('now', '-10 minutes'))
+                                AND analysis_attempts >= 3
+                            """).rowcount
+                            
+                            conn.commit()
+                            
+                            if ignored_count > 0:
+                                debug_log(f"Auto-recovery: Marked {ignored_count} files with 3+ attempts as permanently ignored", "INFO")
+                            
+                            debug_log(f"Auto-recovery: Reset {stuck_count - ignored_count} stuck tracks to pending", "INFO")
+                    
+                    # Stop current processor if running
+                    if hasattr(api_start_audio_analysis, 'processor') and api_start_audio_analysis.processor:
+                        try:
+                            current_status = api_start_audio_analysis.processor.get_status()
+                            if current_status and current_status.get('status') == 'running':
+                                debug_log("Auto-recovery: Stopping current processor", "INFO")
+                                api_start_audio_analysis.processor.stop_processing()
+                        except Exception as e:
+                            debug_log(f"Auto-recovery: Error stopping processor: {e}", "WARNING")
+                        finally:
+                            api_start_audio_analysis.processor = None
+                    
+                    # Restart analysis
+                    try:
+                        from advanced_batch_processor import AdvancedBatchProcessor
+                        max_workers = int(get_config_value('AUDIO_ANALYSIS', 'MaxWorkers', '1'))
+                        batch_size = int(get_config_value('AUDIO_ANALYSIS', 'BatchSize', '100'))
+                        
+                        processor = AdvancedBatchProcessor(
+                            max_workers=max_workers,
+                            batch_size=batch_size
+                        )
+                        
+                        jobs_added = processor.initialize_queue()
+                        if jobs_added == 0:
+                            debug_log("Auto-recovery: No pending tracks found after reset", "INFO")
+                            return True  # Not an error, just no work to do
+                        
+                        debug_log(f"Auto-recovery: Initialized queue with {jobs_added} jobs", "INFO")
+                        
+                        # Start processing in background
+                        def start_in_background():
+                            processor.start_processing()
+                        
+                        import threading
+                        thread = threading.Thread(target=start_in_background, daemon=True)
+                        thread.start()
+                        
+                        # Store processor reference
+                        api_start_audio_analysis.processor = processor
+                        
+                        debug_log("Auto-recovery: Analysis restarted successfully", "INFO")
+                        return True
+                        
+                    except Exception as e:
+                        debug_log(f"Auto-recovery: Failed to restart processor: {e}", "ERROR")
+                        return False
+                    
                 except Exception as e:
                     debug_log(f"Auto-recovery restart failed: {e}", "ERROR")
                     return False

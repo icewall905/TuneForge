@@ -634,11 +634,14 @@ class AudioAnalysisMonitor:
                 
                 # Check for recent error patterns
                 cursor = conn.execute("""
-                    SELECT error_message, COUNT(*) as count
+                    SELECT analysis_error, COUNT(*) as count
                     FROM tracks 
                     WHERE analysis_status = 'error' 
-                    AND last_updated > datetime('now', '-1 hour')
-                    GROUP BY error_message
+                    AND analysis_error IS NOT NULL
+                    AND analysis_error != ''
+                    AND (analysis_completed_at > datetime('now', '-1 hour') 
+                         OR analysis_started_at > datetime('now', '-1 hour'))
+                    GROUP BY analysis_error
                     ORDER BY count DESC
                     LIMIT 3
                 """)

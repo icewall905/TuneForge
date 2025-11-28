@@ -496,6 +496,10 @@ class AdvancedBatchProcessor:
                 'last_checkpoint': self.stats.completed_jobs
             }
             
+            # Ensure temp directory exists
+            checkpoint_path = Path(self.checkpoint_file)
+            checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+            
             # Save to file (could be enhanced to use database)
             import json
             with open(self.checkpoint_file, 'w') as f:

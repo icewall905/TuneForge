@@ -193,6 +193,22 @@ class AudioAnalysisAutoRecovery:
                 logger.warning(f"Manual intervention required after {self.consecutive_failures} failures")
                 return False
             
+            # Check for stuck tracks (tracks in 'analyzing' status for too long)
+            import sqlite3
+            with sqlite3.connect(self.monitor.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT COUNT(*) 
+                    FROM tracks 
+                    WHERE analysis_status = 'analyzing' 
+                    AND (analysis_started_at IS NULL 
+                         OR analysis_started_at < datetime('now', '-10 minutes'))
+                """)
+                stuck_count = cursor.fetchone()[0]
+                
+                if stuck_count > 0:
+                    logger.info(f"Found {stuck_count} stuck tracks in 'analyzing' status - recovery needed")
+                    return True
+            
             # Check if analysis is stalled
             if not self.monitor._is_analysis_stalled():
                 return False
