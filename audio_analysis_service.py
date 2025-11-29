@@ -10,6 +10,7 @@ processing the analysis queue.
 import os
 import sqlite3
 import logging
+import time
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
@@ -45,44 +46,46 @@ class AudioAnalysisService:
             except ImportError:
                 # Fallback to relative path if main app not available
                 db_path = os.path.join(os.path.dirname(__file__), 'db', 'local_music.db')
-
-        # Ensure base DB and tracks table exist before altering columns
-        try:
-            from app.routes import init_local_music_db
-            init_local_music_db()
-        except Exception:
-            # If import fails outside app context, fallback to creating minimal tracks table
-            try:
-                os.makedirs(os.path.join(os.path.dirname(__file__), 'db'), exist_ok=True)
-                with sqlite3.connect(db_path) as conn:
-                    conn.execute("""
-                        CREATE TABLE IF NOT EXISTS tracks (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            file_path TEXT UNIQUE NOT NULL,
-                            title TEXT,
-                            artist TEXT,
-                            album TEXT,
-                            genre TEXT,
-                            year INTEGER,
-                            track_number INTEGER,
-                            duration REAL,
-                            file_size INTEGER,
-                            last_modified REAL,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        )
-                    """)
-                    conn.commit()
-            except Exception as _:
-                pass
         
         self.db_path = db_path
-        self._ensure_database_structure()
+        self._structure_verified = False
+        # Don't call _ensure_database_structure() here - do it lazily on first use
+        # This prevents blocking during initialization when database is locked
         logger.info(f"AudioAnalysisService initialized with database: {db_path}")
+    
+    def _is_database_available(self, timeout: float = 0.5) -> bool:
+        """Quick check if database is available (non-blocking)"""
+        try:
+            with sqlite3.connect(self.db_path, timeout=timeout) as conn:
+                conn.execute("SELECT 1")
+                return True
+        except (sqlite3.OperationalError, sqlite3.DatabaseError):
+            return False
+    
+    def _lazy_ensure_structure(self):
+        """Lazily ensure database structure on first use, skip if database busy"""
+        if self._structure_verified:
+            return True
+        
+        # Quick check if database is available
+        if not self._is_database_available(timeout=0.5):
+            logger.warning("Database busy, skipping structure verification")
+            return False
+        
+        try:
+            self._ensure_database_structure()
+            self._structure_verified = True
+            return True
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower():
+                logger.warning(f"Database locked during structure verification: {e}")
+                return False
+            raise
     
     def _ensure_database_structure(self):
         """Ensure all required tables exist with proper structure."""
         try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+            with sqlite3.connect(self.db_path, timeout=2.0) as conn:
                 conn.execute("PRAGMA foreign_keys = ON")
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA synchronous=NORMAL")
@@ -189,7 +192,7 @@ class AudioAnalysisService:
             True if successful, False otherwise
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+            with sqlite3.connect(self.db_path, timeout=2.0) as conn:
                 conn.execute("PRAGMA foreign_keys = ON")
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA synchronous=NORMAL")
@@ -265,7 +268,7 @@ class AudioAnalysisService:
             True if successful, False otherwise
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+            with sqlite3.connect(self.db_path, timeout=2.0) as conn:
                 if status == 'error':
                     conn.execute("""
                         UPDATE tracks SET 
@@ -302,7 +305,7 @@ class AudioAnalysisService:
             List of track dictionaries with file paths
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+            with sqlite3.connect(self.db_path, timeout=2.0) as conn:
                 cursor = conn.execute("""
                     SELECT t.id, t.file_path, t.analysis_status, t.analysis_error
                     FROM tracks t
@@ -339,59 +342,76 @@ class AudioAnalysisService:
         Get overall analysis progress statistics.
         
         Returns:
-            Dictionary with analysis statistics
+            Dictionary with analysis statistics (or default values if database busy)
         """
+        # Default empty result for when database is unavailable
+        default_progress = {
+            'total_tracks': 0,
+            'analyzed_tracks': 0,
+            'pending_tracks': 0,
+            'error_tracks': 0,
+            'processing_tracks': 0,
+            'skipped_tracks': 0,
+            'progress_percentage': 0,
+            'status_counts': {},
+            'database_busy': True
+        }
+        
+        # Quick check if database is available (fail-fast)
+        if not self._is_database_available(timeout=0.5):
+            logger.warning("Database busy, returning default progress")
+            return default_progress
+        
+        # Lazy structure verification
+        self._lazy_ensure_structure()
+        
         try:
-            # Simple retry mechanism for DB locks
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    with sqlite3.connect(self.db_path, timeout=5.0) as conn:
-                        conn.execute("PRAGMA journal_mode=WAL")
-                        conn.execute("PRAGMA synchronous=NORMAL")
-                        cursor = conn.execute("""
-                            SELECT 
-                                analysis_status,
-                                COUNT(*) as count
-                            FROM tracks 
-                            GROUP BY analysis_status
-                        """)
-                        
-                        status_counts = dict(cursor.fetchall())
-                        
-                        # Calculate totals
-                        total_tracks = sum(status_counts.values())
-                        analyzed_tracks = status_counts.get('analyzed', 0)
-                        pending_tracks = status_counts.get('pending', 0)
-                        error_tracks = status_counts.get('error', 0)
-                        processing_tracks = status_counts.get('analyzing', 0) + status_counts.get('processing', 0)
-                        skipped_tracks = status_counts.get('skipped', 0) + status_counts.get('ignored', 0)
-                        
-                        # Calculate progress (analyzed + skipped counts as progress)
-                        completed_work = analyzed_tracks + skipped_tracks
-                        progress_percentage = round((completed_work / total_tracks * 100) if total_tracks > 0 else 0, 1)
-                        
-                        progress = {
-                            'total_tracks': total_tracks,
-                            'analyzed_tracks': analyzed_tracks,
-                            'pending_tracks': pending_tracks,
-                            'error_tracks': error_tracks,
-                            'processing_tracks': processing_tracks,
-                            'skipped_tracks': skipped_tracks,
-                            'progress_percentage': progress_percentage,
-                            'status_counts': status_counts
-                        }
-                        
-                        return progress
-                except sqlite3.OperationalError as e:
-                    if "locked" in str(e) and attempt < max_retries - 1:
-                        time.sleep(0.5)  # Wait a bit before retrying
-                        continue
-                    raise  # Re-raise if not locked or max retries reached
+            with sqlite3.connect(self.db_path, timeout=2.0) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                cursor = conn.execute("""
+                    SELECT 
+                        analysis_status,
+                        COUNT(*) as count
+                    FROM tracks 
+                    GROUP BY analysis_status
+                """)
                 
+                status_counts = dict(cursor.fetchall())
+                
+                # Calculate totals
+                total_tracks = sum(status_counts.values())
+                analyzed_tracks = status_counts.get('analyzed', 0)
+                pending_tracks = status_counts.get('pending', 0)
+                error_tracks = status_counts.get('error', 0)
+                processing_tracks = status_counts.get('analyzing', 0) + status_counts.get('processing', 0)
+                skipped_tracks = status_counts.get('skipped', 0) + status_counts.get('ignored', 0)
+                
+                # Calculate progress (analyzed + skipped counts as progress)
+                completed_work = analyzed_tracks + skipped_tracks
+                progress_percentage = round((completed_work / total_tracks * 100) if total_tracks > 0 else 0, 1)
+                
+                return {
+                    'total_tracks': total_tracks,
+                    'analyzed_tracks': analyzed_tracks,
+                    'pending_tracks': pending_tracks,
+                    'error_tracks': error_tracks,
+                    'processing_tracks': processing_tracks,
+                    'skipped_tracks': skipped_tracks,
+                    'progress_percentage': progress_percentage,
+                    'status_counts': status_counts,
+                    'database_busy': False
+                }
+                
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower():
+                logger.warning(f"Database locked during get_analysis_progress: {e}")
+                return default_progress
+            logger.error(f"Error getting analysis progress: {e}")
+            return default_progress
         except Exception as e:
             logger.error(f"Error getting analysis progress: {e}")
-            raise  # Re-raise to let caller handle it (e.g. return 500 or error JSON)
+            return default_progress
     
     def get_track_features(self, track_id: int) -> Optional[Dict[str, Any]]:
         """
@@ -404,7 +424,7 @@ class AudioAnalysisService:
             Dictionary of features or None if not found
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+            with sqlite3.connect(self.db_path, timeout=2.0) as conn:
                 cursor = conn.execute("""
                     SELECT * FROM audio_features WHERE track_id = ?
                 """, (track_id,))
@@ -432,7 +452,7 @@ class AudioAnalysisService:
             Track dictionary or None if not found
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+            with sqlite3.connect(self.db_path, timeout=2.0) as conn:
                 cursor = conn.execute("""
                     SELECT * FROM tracks WHERE id = ?
                 """, (track_id,))
@@ -459,7 +479,7 @@ class AudioAnalysisService:
             Track ID or None if not found
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+            with sqlite3.connect(self.db_path, timeout=2.0) as conn:
                 cursor = conn.execute("""
                     SELECT id FROM tracks WHERE file_path = ?
                 """, (file_path,))
@@ -485,7 +505,7 @@ class AudioAnalysisService:
             Number of records removed
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+            with sqlite3.connect(self.db_path, timeout=2.0) as conn:
                 # Remove old audio features
                 cursor = conn.execute("""
                     DELETE FROM audio_features 
@@ -523,7 +543,7 @@ class AudioAnalysisService:
             List of pending track information
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+            with sqlite3.connect(self.db_path, timeout=2.0) as conn:
                 query = """
                     SELECT 
                         id, file_path, title, artist, album, 
@@ -567,7 +587,7 @@ class AudioAnalysisService:
             List of stuck file information
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+            with sqlite3.connect(self.db_path, timeout=2.0) as conn:
                 # Get files that have been in 'processing' status for too long
                 cursor = conn.execute("""
                     SELECT 
@@ -622,7 +642,7 @@ class AudioAnalysisService:
             True if successful, False otherwise
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
+            with sqlite3.connect(self.db_path, timeout=2.0) as conn:
                 # Update the track status
                 cursor = conn.execute("""
                     UPDATE tracks 

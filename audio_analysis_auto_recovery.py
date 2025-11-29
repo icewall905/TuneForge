@@ -76,7 +76,8 @@ class AudioAnalysisAutoRecovery:
             restart_callback: Callback function to restart analysis
         """
         self.config = config or AutoRecoveryConfig()
-        self.monitor = monitor or AudioAnalysisMonitor()
+        # Use passed monitor or create one lazily
+        self._monitor = monitor
         self.restart_callback = restart_callback
         
         # Recovery state
@@ -95,6 +96,13 @@ class AudioAnalysisAutoRecovery:
         
         logger.info(f"AudioAnalysisAutoRecovery initialized with config: enabled={self.config.enabled}")
         logger.info(f"Check interval: {self.config.check_interval}s, Max failures: {self.config.max_consecutive_failures}")
+    
+    @property
+    def monitor(self) -> AudioAnalysisMonitor:
+        """Lazily get or create the monitor instance"""
+        if self._monitor is None:
+            self._monitor = AudioAnalysisMonitor()
+        return self._monitor
     
     def start_monitoring(self) -> bool:
         """

@@ -34,6 +34,49 @@ def create_app():
             
             # Start auto-startup in a background thread to avoid blocking app startup
             def auto_startup_worker():
+                # --- File Lock Mechanism for Gunicorn Workers ---
+                # Ensure only ONE worker executes the startup tasks
+                lock_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'startup.lock')
+                
+                # Check if lock exists and is valid (not stale)
+                if os.path.exists(lock_file):
+                    try:
+                        with open(lock_file, 'r') as f:
+                            pid, timestamp = f.read().split(',')
+                        
+                        # Check if process is still running
+                        try:
+                            os.kill(int(pid), 0)
+                            # Process exists, so lock is valid. We are a secondary worker.
+                            print(f"[Startup] Another worker (PID {pid}) is handling startup tasks. Skipping.")
+                            return
+                        except OSError:
+                            # Process doesn't exist, lock is stale. We can take over.
+                            print(f"[Startup] Found stale lock from PID {pid}. Taking over.")
+                    except Exception:
+                        # Lock file corrupted or unreadable, try to take over
+                        print("[Startup] Found invalid lock file. Taking over.")
+                
+                # Create/Update lock file with our PID
+                try:
+                    with open(lock_file, 'w') as f:
+                        f.write(f"{os.getpid()},{time.time()}")
+                except Exception as e:
+                    print(f"[Startup] Failed to create lock file: {e}. Proceeding anyway.")
+
+                # Ensure lock file is removed on exit (best effort)
+                import atexit
+                def remove_lock():
+                    try:
+                        if os.path.exists(lock_file):
+                            with open(lock_file, 'r') as f:
+                                pid, _ = f.read().split(',')
+                            if int(pid) == os.getpid():
+                                os.remove(lock_file)
+                    except Exception:
+                        pass
+                atexit.register(remove_lock)
+
                 time.sleep(startup_delay)  # Wait for app to fully initialize
                 
                 # 1. Configured Auto-Startup
@@ -47,52 +90,36 @@ def create_app():
                             if result:
                                 print("[Startup] Library scan started successfully")
                                 
-                                # Wait for library scan to complete before starting audio analysis
+                                # Don't wait for scan - start audio analysis in background thread
+                                # This allows the service to remain responsive during scans
                                 if enable_auto_analysis:
-                                    print("[Startup] Waiting for library scan to complete...")
-                                    from .routes import wait_for_scan_completion
+                                    print("[Startup] Starting audio analysis in background (not waiting for scan)...")
                                     
-                                    # Wait up to 2 minutes for scan to complete (reduced from 10)
-                                    # If scan takes longer, proceed anyway to avoid blocking service
-                                    scan_completed = wait_for_scan_completion(timeout_minutes=2)
-                                    if scan_completed:
-                                        print("[Startup] Library scan completed, starting audio analysis...")
+                                    def start_analysis_after_delay():
+                                        """Start audio analysis after a delay, checking for scan completion"""
+                                        import time
+                                        from .routes import is_database_busy, start_audio_analysis
                                         
-                                        # Check if database is ready before proceeding
-                                        from .routes import check_database_ready
-                                        db_ready_attempts = 0
-                                        max_db_attempts = 6  # Try for up to 30 seconds
+                                        # Wait a bit for scan to make progress
+                                        time.sleep(60)  # Wait 1 minute
                                         
-                                        while not check_database_ready() and db_ready_attempts < max_db_attempts:
-                                            print(f"[Startup] Database not ready, waiting 5 seconds... (attempt {db_ready_attempts + 1}/{max_db_attempts})")
-                                            time.sleep(5)
-                                            db_ready_attempts += 1
-                                        
-                                        if not check_database_ready():
-                                            print("[Startup] Database still not ready after 30 seconds, skipping audio analysis")
-                                            return
-                                        
-                                        print("[Startup] Database ready, starting audio analysis...")
-                                        
-                                        # Log database track counts for debugging
-                                        from .routes import get_database_track_counts
-                                        track_counts = get_database_track_counts()
-                                        if 'error' not in track_counts:
-                                            print(f"[Startup] Database track counts: {track_counts['total_tracks']} total, {track_counts['status_counts']}")
-                                        else:
-                                            print(f"[Startup] Error getting track counts: {track_counts['error']}")
-                                        
-                                        from .routes import start_audio_analysis
-                                        try:
-                                            result = start_audio_analysis()
-                                            if result:
-                                                print("[Startup] Audio analysis started successfully")
+                                        # Try to start analysis, but don't block if scan is still running
+                                        max_attempts = 10
+                                        for attempt in range(max_attempts):
+                                            if not is_database_busy():
+                                                print("[Startup] Database available, starting audio analysis...")
+                                                start_audio_analysis()
+                                                break
                                             else:
-                                                print("[Startup] Audio analysis failed to start")
-                                        except Exception as analysis_error:
-                                            print(f"[Startup] Audio analysis error: {analysis_error}")
-                                    else:
-                                        print("[Startup] Library scan did not complete within timeout, skipping audio analysis")
+                                                print(f"[Startup] Database busy with scan, waiting... (attempt {attempt+1}/{max_attempts})")
+                                                time.sleep(30)  # Wait 30 seconds between attempts
+                                    
+                                    # Start analysis in background thread - non-blocking
+                                    analysis_thread = threading.Thread(target=start_analysis_after_delay, daemon=True)
+                                    analysis_thread.start()
+                                    
+                                    # Continue startup without blocking
+                                    print("[Startup] Audio analysis will start automatically when database is available")
                                 else:
                                     print("[Startup] Audio analysis disabled, skipping")
                             else:
@@ -132,11 +159,14 @@ def create_app():
                     if auto_recovery and auto_recovery.get_status().get('monitoring_active'):
                         return
 
-                    from .routes import check_database_ready
+                    from .routes import check_database_ready, get_audio_analysis_service
                     if check_database_ready():
-                        from audio_analysis_service import AudioAnalysisService
-                        service = AudioAnalysisService()
-                        progress = service.get_analysis_progress()
+                        try:
+                            service = get_audio_analysis_service()
+                            progress = service.get_analysis_progress()
+                        except Exception as svc_err:
+                            print(f"[Startup] Could not get analysis service: {svc_err}")
+                            return
                         
                         if progress['pending_tracks'] > 0 or progress['status_counts'].get('analyzing', 0) > 0:
                             print(f"[Startup] Found {progress['pending_tracks']} pending and {progress['status_counts'].get('analyzing', 0)} analyzing tracks.")

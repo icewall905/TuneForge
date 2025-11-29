@@ -2903,11 +2903,13 @@ def scan_music_folder_with_progress(folder_path, scan_id):
 def _process_batch(batch_data, db_path):
     """Process a batch of files to reduce database locks with optimized queries"""
     try:
-        with sqlite3.connect(db_path, timeout=30.0) as conn:
+        # Use shorter timeout and ensure connection is closed quickly
+        with sqlite3.connect(db_path, timeout=10.0) as conn:
             # Enable WAL mode for better concurrency
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
             conn.execute("PRAGMA cache_size=10000")
+            conn.execute("PRAGMA busy_timeout=10000")  # 10 second busy timeout
             
             cursor = conn.cursor()
             
@@ -2961,7 +2963,9 @@ def _process_batch(batch_data, db_path):
                     debug_log(f"Error processing file {file_path} in batch: {str(e)}", "ERROR")
                     raise
             
+            # Commit immediately and close connection
             conn.commit()
+            # Connection automatically closed by context manager
             
     except Exception as e:
         debug_log(f"Error in batch processing: {str(e)}", "ERROR")
@@ -3359,11 +3363,23 @@ def search_tracks_in_local_library(ollama_suggested_tracks, final_unique_matched
 def get_local_track_stats():
     """Get statistics about the local music database"""
     db_path = os.path.join(DB_DIR, 'local_music.db')
+    default_stats = {'total_tracks': 0, 'total_size': 0, 'genres': [], 'artists': 0, 'genre_counts': {}, 'database_busy': False}
+    
     if not os.path.exists(db_path):
-        return {'total_tracks': 0, 'total_size': 0, 'genres': [], 'artists': 0, 'genre_counts': {}}
+        return default_stats
+    
+    # Quick check if database is available (fail-fast)
+    try:
+        with sqlite3.connect(db_path, timeout=0.5) as conn:
+            conn.execute("SELECT 1")
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        debug_log("Database busy, returning default stats", "WARNING")
+        return {**default_stats, 'database_busy': True}
     
     try:
-        with sqlite3.connect(db_path, timeout=30.0) as conn:
+        with sqlite3.connect(db_path, timeout=2.0) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
             cursor = conn.cursor()
             
             # Total tracks
@@ -3394,15 +3410,28 @@ def get_local_track_stats():
                 'total_size': total_size,
                 'genres': genres,
                 'artists': unique_artists,
-                'genre_counts': genre_counts
+                'genre_counts': genre_counts,
+                'database_busy': False
             }
+    except sqlite3.OperationalError as e:
+        if "locked" in str(e).lower():
+            debug_log(f"Database locked while getting stats: {e}", "WARNING")
+            return {**default_stats, 'database_busy': True}
+        debug_log(f"Error getting local track stats: {str(e)}", "ERROR")
+        return default_stats
     except Exception as e:
         debug_log(f"Error getting local track stats: {str(e)}", "ERROR")
-        return {'total_tracks': 0, 'total_size': 0, 'genres': [], 'artists': 0, 'genre_counts': {}}
+        return default_stats
 
 @main_bp.route('/local-music')
 def local_music_page():
     """Local music management page"""
+    # Check if scan is running and return gracefully if database is busy
+    if is_database_busy():
+        return render_template('local_music.html', 
+                             stats={'total_tracks': 0, 'total_size': 0, 'genres': [], 'artists': 0, 'genre_counts': {}, 'scan_in_progress': True},
+                             scan_message='Library scan in progress, statistics temporarily unavailable')
+    
     stats = get_local_track_stats()
     return render_template('local_music.html', stats=stats)
 
@@ -3637,13 +3666,28 @@ _auto_recovery_instance = None
 _audio_analysis_service_instance = None
 _audio_analysis_monitor_instance = None
 
+def _quick_db_check(timeout: float = 0.5) -> bool:
+    """Quick check if database is available (non-blocking)"""
+    db_path = os.path.join(DB_DIR, 'local_music.db')
+    try:
+        with sqlite3.connect(db_path, timeout=timeout) as conn:
+            conn.execute("SELECT 1")
+            return True
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        return False
+
 def get_audio_analysis_service():
-    """Get or create the AudioAnalysisService singleton instance"""
+    """Get or create the AudioAnalysisService singleton instance.
+    
+    Returns the singleton instance. The service methods will return 
+    default/empty values if database is busy, so this is always safe to call.
+    """
     global _audio_analysis_service_instance
     
     if _audio_analysis_service_instance is None:
         try:
             from audio_analysis_service import AudioAnalysisService
+            # Service init is now lazy - no database calls, so this is fast
             _audio_analysis_service_instance = AudioAnalysisService()
         except Exception as e:
             debug_log(f"Error creating AudioAnalysisService singleton: {e}", "ERROR")
@@ -3652,12 +3696,17 @@ def get_audio_analysis_service():
     return _audio_analysis_service_instance
 
 def get_audio_analysis_monitor():
-    """Get or create the AudioAnalysisMonitor singleton instance"""
+    """Get or create the AudioAnalysisMonitor singleton instance.
+    
+    Returns the singleton instance. The monitor methods will return 
+    default/empty values if database is busy, so this is always safe to call.
+    """
     global _audio_analysis_monitor_instance
     
     if _audio_analysis_monitor_instance is None:
         try:
             from audio_analysis_monitor import AudioAnalysisMonitor
+            # Monitor init is now lazy - no database calls, so this is fast
             _audio_analysis_monitor_instance = AudioAnalysisMonitor()
         except Exception as e:
             debug_log(f"Error creating AudioAnalysisMonitor singleton: {e}", "ERROR")
