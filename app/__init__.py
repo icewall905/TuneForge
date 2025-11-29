@@ -52,8 +52,9 @@ def create_app():
                                     print("[Startup] Waiting for library scan to complete...")
                                     from .routes import wait_for_scan_completion
                                     
-                                    # Wait up to 10 minutes for scan to complete
-                                    scan_completed = wait_for_scan_completion(timeout_minutes=10)
+                                    # Wait up to 2 minutes for scan to complete (reduced from 10)
+                                    # If scan takes longer, proceed anyway to avoid blocking service
+                                    scan_completed = wait_for_scan_completion(timeout_minutes=2)
                                     if scan_completed:
                                         print("[Startup] Library scan completed, starting audio analysis...")
                                         

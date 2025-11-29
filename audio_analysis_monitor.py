@@ -88,8 +88,10 @@ class AudioAnalysisMonitor:
     def _ensure_monitoring_tables(self):
         """Ensure monitoring tables exist with proper structure."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 conn.execute("PRAGMA foreign_keys = ON")
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
                 
                 # Create analysis_progress_history table
                 conn.execute("""
@@ -182,7 +184,7 @@ class AudioAnalysisMonitor:
             Processing rate in tracks per minute, or None if insufficient data
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 # Get the last 2 snapshots to calculate rate
                 cursor = conn.execute("""
                     SELECT analyzed_tracks, timestamp 
@@ -247,7 +249,7 @@ class AudioAnalysisMonitor:
     def _store_progress_snapshot(self, snapshot: ProgressSnapshot):
         """Store progress snapshot in database."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 conn.execute("""
                     INSERT INTO analysis_progress_history (
                         timestamp, total_tracks, analyzed_tracks, pending_tracks,
@@ -323,7 +325,7 @@ class AudioAnalysisMonitor:
             True if analysis is stalled, False otherwise
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 # Get the most recent snapshot
                 cursor = conn.execute("""
                     SELECT analyzed_tracks, timestamp 
@@ -423,7 +425,7 @@ class AudioAnalysisMonitor:
                     # Consider it real stagnation only if there is work pending and something analyzing
                     if len(set(recent_progress)) == 1:
                         try:
-                            with sqlite3.connect(self.db_path) as conn:
+                            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                                 sc = dict(conn.execute("SELECT analysis_status, COUNT(*) FROM tracks GROUP BY analysis_status").fetchall())
                                 if sc.get('pending', 0) > 0 and sc.get('analyzing', 0) > 0:
                                     anomalies.append("Progress has been stagnant for the last 2 hours")
@@ -448,7 +450,7 @@ class AudioAnalysisMonitor:
             Average processing rate or None if insufficient data.
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 cursor = conn.execute(
                     """
                     SELECT processing_rate
@@ -475,7 +477,7 @@ class AudioAnalysisMonitor:
             Dictionary with stall analysis information
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 # Get recent progress history
                 cursor = conn.execute("""
                     SELECT timestamp, analyzed_tracks, pending_tracks, progress_percentage, processing_rate
@@ -592,7 +594,7 @@ class AudioAnalysisMonitor:
     def _identify_stall_factors(self) -> List[str]:
         """Identify specific factors contributing to stalls."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 factors = []
                 
                 # Check for files with multiple failures
@@ -666,7 +668,7 @@ class AudioAnalysisMonitor:
             Dictionary with problematic files information and recommendations
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 report = {
                     'summary': {},
                     'problematic_files': [],
@@ -871,7 +873,7 @@ class AudioAnalysisMonitor:
     def _get_recent_progress_history(self, hours: int = 24) -> List[Dict[str, Any]]:
         """Get recent progress history for the specified number of hours."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 cursor = conn.execute("""
                     SELECT timestamp, analyzed_tracks, pending_tracks, progress_percentage, health_status
                     FROM analysis_progress_history 
@@ -898,7 +900,7 @@ class AudioAnalysisMonitor:
     def _count_consecutive_stalls(self) -> int:
         """Count consecutive stalls in recent history."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 cursor = conn.execute("""
                     SELECT health_status 
                     FROM analysis_progress_history 
@@ -967,7 +969,7 @@ class AudioAnalysisMonitor:
             days = self.config.progress_history_retention_days
         
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 cursor = conn.execute("""
                     DELETE FROM analysis_progress_history 
                     WHERE timestamp < datetime('now', '-{} days')

@@ -3622,8 +3622,7 @@ def audio_analysis_page():
     """Audio analysis management page"""
     try:
         # Get analysis progress from database
-        from audio_analysis_service import AudioAnalysisService
-        service = AudioAnalysisService()
+        service = get_audio_analysis_service()
         progress = service.get_analysis_progress()
         
         return render_template('audio_analysis.html', progress=progress)
@@ -3633,6 +3632,38 @@ def audio_analysis_page():
 
 # Global auto-recovery instance
 _auto_recovery_instance = None
+
+# Global service instances (singletons to avoid expensive re-initialization)
+_audio_analysis_service_instance = None
+_audio_analysis_monitor_instance = None
+
+def get_audio_analysis_service():
+    """Get or create the AudioAnalysisService singleton instance"""
+    global _audio_analysis_service_instance
+    
+    if _audio_analysis_service_instance is None:
+        try:
+            from audio_analysis_service import AudioAnalysisService
+            _audio_analysis_service_instance = AudioAnalysisService()
+        except Exception as e:
+            debug_log(f"Error creating AudioAnalysisService singleton: {e}", "ERROR")
+            raise
+    
+    return _audio_analysis_service_instance
+
+def get_audio_analysis_monitor():
+    """Get or create the AudioAnalysisMonitor singleton instance"""
+    global _audio_analysis_monitor_instance
+    
+    if _audio_analysis_monitor_instance is None:
+        try:
+            from audio_analysis_monitor import AudioAnalysisMonitor
+            _audio_analysis_monitor_instance = AudioAnalysisMonitor()
+        except Exception as e:
+            debug_log(f"Error creating AudioAnalysisMonitor singleton: {e}", "ERROR")
+            raise
+    
+    return _audio_analysis_monitor_instance
 
 def get_auto_recovery():
     """Get or create the auto-recovery instance"""
@@ -3644,7 +3675,7 @@ def get_auto_recovery():
             from audio_analysis_monitor import AudioAnalysisMonitor
             
             # Initialize monitor
-            monitor = AudioAnalysisMonitor()
+            monitor = get_audio_analysis_monitor()
             
             # Initialize auto-recovery with restart callback
             def restart_analysis_callback():
@@ -3653,8 +3684,7 @@ def get_auto_recovery():
                     debug_log("Auto-recovery: Attempting to restart audio analysis", "INFO")
                     
                     # First, reset stuck tracks that have been in 'analyzing' status too long
-                    from audio_analysis_service import AudioAnalysisService
-                    service = AudioAnalysisService()
+                    service = get_audio_analysis_service()
                     db_path = service.db_path
                     
                     import sqlite3
@@ -3904,8 +3934,7 @@ def api_audio_analysis_status():
             # Even if stopped, check if there are pending tracks
             pending_count = 0
             try:
-                from audio_analysis_service import AudioAnalysisService
-                service = AudioAnalysisService()
+                service = get_audio_analysis_service()
                 progress = service.get_analysis_progress()
                 pending_count = progress.get('pending_tracks', 0)
             except Exception:
@@ -3936,12 +3965,48 @@ def api_audio_analysis_status():
 def api_audio_analysis_progress():
     """Get audio analysis progress from database"""
     try:
-        from audio_analysis_service import AudioAnalysisService
-        service = AudioAnalysisService()
+        # Check if database is busy with scan
+        if is_database_busy():
+            return jsonify({
+                'success': True, 
+                'progress': {
+                    'total_tracks': 0,
+                    'analyzed_tracks': 0,
+                    'pending_tracks': 0,
+                    'error_tracks': 0,
+                    'processing_tracks': 0,
+                    'skipped_tracks': 0,
+                    'progress_percentage': 0,
+                    'status_counts': {},
+                    'scan_in_progress': True
+                },
+                'message': 'Library scan in progress, progress data temporarily unavailable'
+            })
+        
+        service = get_audio_analysis_service()
         progress = service.get_analysis_progress()
         
         return jsonify({'success': True, 'progress': progress})
         
+    except sqlite3.OperationalError as e:
+        if "locked" in str(e):
+            debug_log(f"Database locked, scan may be in progress: {e}", "WARNING")
+            return jsonify({
+                'success': True,
+                'progress': {
+                    'total_tracks': 0,
+                    'analyzed_tracks': 0,
+                    'pending_tracks': 0,
+                    'error_tracks': 0,
+                    'processing_tracks': 0,
+                    'skipped_tracks': 0,
+                    'progress_percentage': 0,
+                    'status_counts': {},
+                    'scan_in_progress': True
+                },
+                'message': 'Database temporarily locked by library scan'
+            })
+        raise
     except Exception as e:
         debug_log(f"Error getting audio analysis progress: {e}", "ERROR")
         return jsonify({'success': False, 'error': str(e)})
@@ -3953,8 +4018,7 @@ def api_audio_analysis_cleanup():
         data = request.get_json() or {}
         days_old = data.get('days_old', 30)
         
-        from audio_analysis_service import AudioAnalysisService
-        service = AudioAnalysisService()
+        service = get_audio_analysis_service()
         removed_count = service.cleanup_old_analysis_data(days_old)
         
         return jsonify({
@@ -3988,13 +4052,11 @@ def api_audio_analysis_health():
                     'stall_indicators': []
                 },
                 'auto_recovery_available': True,
-                'recommendations': ['Database is busy with library scan. Health check temporarily unavailable.']
+                    'recommendations': ['Database is busy with library scan. Health check temporarily unavailable.']
             })
         
-        from audio_analysis_monitor import AudioAnalysisMonitor
-        
         # Initialize monitor
-        monitor = AudioAnalysisMonitor()
+        monitor = get_audio_analysis_monitor()
         
         # Determine if analysis is running; if not, short-circuit with 'stopped' status
         is_running = False
@@ -5728,8 +5790,7 @@ def api_save_history_to_plex():
 def api_get_problematic_files():
     """Get detailed report of problematic files causing stalls."""
     try:
-        from audio_analysis_monitor import AudioAnalysisMonitor
-        monitor = AudioAnalysisMonitor()
+        monitor = get_audio_analysis_monitor()
         
         report = monitor.get_problematic_files_report()
         return jsonify(report)
@@ -5750,8 +5811,7 @@ def api_force_skip_file():
         reason = data.get('reason', 'Manually skipped to prevent stall')
         
         # Get the audio analysis service
-        from audio_analysis_service import AudioAnalysisService
-        service = AudioAnalysisService()
+        service = get_audio_analysis_service()
         
         # Find the track by file path
         track_id = service.get_track_id_by_file_path(file_path)
@@ -5781,8 +5841,7 @@ def api_force_reset_file():
         reason = data.get('reason', 'Manually reset from stuck state')
         
         # Get the audio analysis service
-        from audio_analysis_service import AudioAnalysisService
-        service = AudioAnalysisService()
+        service = get_audio_analysis_service()
         
         # Find the track by file path
         track_id = service.get_track_id_by_file_path(file_path)
@@ -5961,6 +6020,32 @@ def wait_for_scan_completion(timeout_minutes: int = 10) -> bool:
         
         debug_log(f"Auto-startup: Waiting for scan completion (timeout: {timeout_minutes} minutes)", "INFO")
         
+        # Clear any stale scans that might be stuck
+        if hasattr(api_scan_music_folder, 'scan_progress'):
+            current_time = time.time()
+            for scan_id, progress in list(api_scan_music_folder.scan_progress.items()):
+                # Mark scans older than 10 minutes as completed to prevent infinite waiting
+                if 'start_time' in progress:
+                    scan_age = current_time - progress['start_time']
+                    if scan_age > 600:  # 10 minutes
+                        debug_log(f"Auto-startup: Marking stale scan {scan_id} as completed (age: {scan_age:.0f}s)", "WARNING")
+                        progress['status'] = 'completed'
+                        progress['result'] = {'success': False, 'error': 'Stale scan cleared'}
+        
+        # Quick check - if no active scans, return immediately
+        if not hasattr(api_scan_music_folder, 'scan_progress'):
+            debug_log("Auto-startup: No scan progress tracking, assuming no active scans", "INFO")
+            return True
+        
+        active_scans = [scan_id for scan_id, progress in api_scan_music_folder.scan_progress.items() 
+                       if progress.get('status') in ['starting', 'running', 'scanning']]
+        
+        if not active_scans:
+            debug_log("Auto-startup: No active scans found, proceeding immediately", "INFO")
+            return True
+        
+        debug_log(f"Auto-startup: Found {len(active_scans)} active scans, waiting...", "INFO")
+        
         while time.time() - start_time < timeout_seconds:
             # Check if any scan is still running
             if hasattr(api_scan_music_folder, 'scan_progress'):
@@ -6113,7 +6198,7 @@ def start_audio_analysis():
         
         # Initialize the audio analysis service
         try:
-            service = AudioAnalysisService()
+            service = get_audio_analysis_service()
             debug_log("Auto-startup: Audio analysis service initialized", "INFO")
         except Exception as e:
             debug_log(f"Auto-startup: Failed to initialize audio analysis service: {e}", "ERROR")

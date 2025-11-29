@@ -82,8 +82,10 @@ class AudioAnalysisService:
     def _ensure_database_structure(self):
         """Ensure all required tables exist with proper structure."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 conn.execute("PRAGMA foreign_keys = ON")
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
                 
                 # Check if audio_features table exists
                 cursor = conn.execute("PRAGMA table_info(audio_features)")
@@ -187,8 +189,10 @@ class AudioAnalysisService:
             True if successful, False otherwise
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 conn.execute("PRAGMA foreign_keys = ON")
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
                 
                 # Check if features already exist for this track
                 cursor = conn.execute("SELECT id FROM audio_features WHERE track_id = ?", (track_id,))
@@ -261,7 +265,7 @@ class AudioAnalysisService:
             True if successful, False otherwise
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 if status == 'error':
                     conn.execute("""
                         UPDATE tracks SET 
@@ -298,7 +302,7 @@ class AudioAnalysisService:
             List of track dictionaries with file paths
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 cursor = conn.execute("""
                     SELECT t.id, t.file_path, t.analysis_status, t.analysis_error
                     FROM tracks t
@@ -343,6 +347,8 @@ class AudioAnalysisService:
             for attempt in range(max_retries):
                 try:
                     with sqlite3.connect(self.db_path, timeout=5.0) as conn:
+                        conn.execute("PRAGMA journal_mode=WAL")
+                        conn.execute("PRAGMA synchronous=NORMAL")
                         cursor = conn.execute("""
                             SELECT 
                                 analysis_status,
@@ -398,7 +404,7 @@ class AudioAnalysisService:
             Dictionary of features or None if not found
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 cursor = conn.execute("""
                     SELECT * FROM audio_features WHERE track_id = ?
                 """, (track_id,))
@@ -426,7 +432,7 @@ class AudioAnalysisService:
             Track dictionary or None if not found
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 cursor = conn.execute("""
                     SELECT * FROM tracks WHERE id = ?
                 """, (track_id,))
@@ -453,7 +459,7 @@ class AudioAnalysisService:
             Track ID or None if not found
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 cursor = conn.execute("""
                     SELECT id FROM tracks WHERE file_path = ?
                 """, (file_path,))
@@ -479,7 +485,7 @@ class AudioAnalysisService:
             Number of records removed
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 # Remove old audio features
                 cursor = conn.execute("""
                     DELETE FROM audio_features 
@@ -517,7 +523,7 @@ class AudioAnalysisService:
             List of pending track information
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 query = """
                     SELECT 
                         id, file_path, title, artist, album, 
@@ -561,7 +567,7 @@ class AudioAnalysisService:
             List of stuck file information
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 # Get files that have been in 'processing' status for too long
                 cursor = conn.execute("""
                     SELECT 
@@ -616,7 +622,7 @@ class AudioAnalysisService:
             True if successful, False otherwise
         """
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with sqlite3.connect(self.db_path, timeout=10.0) as conn:
                 # Update the track status
                 cursor = conn.execute("""
                     UPDATE tracks 
